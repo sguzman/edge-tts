@@ -92,8 +92,7 @@
       const reachedHardLimit = currentLength >= Math.ceil(targetMax * hardLimitFactor);
 
       // Keep several sentences inside one utterance. Edge's Online (Natural)
-      // voices can incur a fresh network/startup delay at every utterance boundary,
-      // so sentence-sized utterances create audible gaps even when already queued.
+      // voices can incur a fresh startup delay at each utterance boundary.
       if (reachedSentenceBoundary || reachedHardLimit || !next) {
         flush();
       }
@@ -109,8 +108,12 @@
       this.onError = onError;
       this.onStart = onStart;
       this.synth = root.speechSynthesis;
-      this.currentUtterances = [];
+      this.currentUtterance = null;
+      this.currentChunks = [];
+      this.currentChunkIndex = -1;
+      this.currentOptions = null;
       this.generation = 0;
+      this.requestedAt = 0;
     }
 
     getVoices() {
@@ -162,20 +165,31 @@
 
     cancel() {
       this.generation += 1;
-      this.currentUtterances = [];
+      this.currentUtterance = null;
+      this.currentChunks = [];
+      this.currentChunkIndex = -1;
+      this.currentOptions = null;
       this.synth?.cancel();
     }
 
     pause() {
-      this.synth?.pause();
+      if (this.synth?.speaking && !this.synth.paused) {
+        this.synth.pause();
+      }
     }
 
     resume() {
-      this.synth?.resume();
+      if (this.synth?.paused) {
+        this.synth.resume();
+      }
     }
 
     isPaused() {
       return Boolean(this.synth?.paused);
+    }
+
+    isSpeaking() {
+      return Boolean(this.synth?.speaking);
     }
 
     speak(block, startSegmentIndex, options) {
@@ -192,59 +206,85 @@
 
       this.cancel();
       const generation = this.generation;
-      const requestedAt = root.performance?.now?.() ?? Date.now();
+      this.currentChunks = chunks;
+      this.currentChunkIndex = 0;
+      this.currentOptions = options;
+      this.requestedAt = root.performance?.now?.() ?? Date.now();
+      this.speakCurrentChunk(generation);
+    }
 
-      const utterances = chunks.map((payload, chunkIndex) => {
-        const utterance = new root.SpeechSynthesisUtterance(payload.text);
-        utterance.rate = options.rate;
-        if (options.voice) {
-          utterance.voice = options.voice;
-          utterance.lang = options.voice.lang;
+    speakCurrentChunk(generation) {
+      if (generation !== this.generation) return;
+
+      const payload = this.currentChunks[this.currentChunkIndex];
+      if (!payload) {
+        this.currentUtterance = null;
+        this.currentChunks = [];
+        this.currentChunkIndex = -1;
+        this.currentOptions = null;
+        this.onEnd?.();
+        return;
+      }
+
+      const chunkIndex = this.currentChunkIndex;
+      const utterance = new root.SpeechSynthesisUtterance(payload.text);
+      utterance.rate = this.currentOptions.rate;
+      if (this.currentOptions.voice) {
+        utterance.voice = this.currentOptions.voice;
+        utterance.lang = this.currentOptions.voice.lang;
+      }
+
+      utterance.addEventListener("start", () => {
+        if (generation !== this.generation) return;
+        if (chunkIndex === 0) {
+          const startedAt = root.performance?.now?.() ?? Date.now();
+          this.onStart?.(payload.segments[0], Math.max(0, startedAt - this.requestedAt));
         }
-
-        utterance.addEventListener("start", () => {
-          if (generation !== this.generation) return;
-          if (chunkIndex === 0) {
-            const startedAt = root.performance?.now?.() ?? Date.now();
-            this.onStart?.(payload.segments[0], Math.max(0, startedAt - requestedAt));
-          }
-        });
-
-        utterance.addEventListener("boundary", (event) => {
-          if (generation !== this.generation) return;
-          const localIndex = root.EdgeTtsExtension.TextModel.segmentIndexForCharIndex(
-            payload.starts,
-            event.charIndex
-          );
-          const segment = payload.segments[localIndex];
-          if (segment) {
-            this.onBoundary?.(segment, event);
-          }
-        });
-
-        utterance.addEventListener("end", () => {
-          if (generation !== this.generation) return;
-          if (chunkIndex === utterances.length - 1) {
-            this.currentUtterances = [];
-            this.onEnd?.();
-          }
-        });
-
-        utterance.addEventListener("error", (event) => {
-          if (generation !== this.generation) return;
-          if (event.error !== "canceled" && event.error !== "interrupted") {
-            this.cancel();
-            this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
-          }
-        });
-
-        return utterance;
       });
 
-      this.currentUtterances = utterances;
-      root.setTimeout(() => {
+      utterance.addEventListener("boundary", (event) => {
         if (generation !== this.generation) return;
-        for (const utterance of utterances) {
+        const localIndex = root.EdgeTtsExtension.TextModel.segmentIndexForCharIndex(
+          payload.starts,
+          event.charIndex
+        );
+        const segment = payload.segments[localIndex];
+        if (segment) {
+          this.onBoundary?.(segment, event);
+        }
+      });
+
+      utterance.addEventListener("end", () => {
+        if (generation !== this.generation) return;
+        this.currentUtterance = null;
+        this.currentChunkIndex += 1;
+
+        if (this.currentChunkIndex >= this.currentChunks.length) {
+          this.currentChunks = [];
+          this.currentChunkIndex = -1;
+          this.currentOptions = null;
+          this.onEnd?.();
+          return;
+        }
+
+        // Submit the next chunk only after the current one has really ended.
+        // Keeping a single utterance in speechSynthesis avoids Edge getting
+        // wedged when pause/resume interacts with a queued online-voice stack.
+        root.setTimeout(() => this.speakCurrentChunk(generation), 0);
+      });
+
+      utterance.addEventListener("error", (event) => {
+        if (generation !== this.generation) return;
+        this.currentUtterance = null;
+        if (event.error !== "canceled" && event.error !== "interrupted") {
+          this.cancel();
+          this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
+        }
+      });
+
+      this.currentUtterance = utterance;
+      root.setTimeout(() => {
+        if (generation === this.generation && this.currentUtterance === utterance) {
           this.synth.speak(utterance);
         }
       }, 0);
