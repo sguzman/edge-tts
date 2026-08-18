@@ -1,13 +1,23 @@
 (function attachReader(root) {
   const extension = root.EdgeTtsExtension;
   const { buildReadableModel, findSegmentInNode, firstBlockNearViewport } = extension.TextModel;
-  const { Highlighter } = extension.Highlighter;
+  const {
+    DEFAULT_SENTENCE_COLOR,
+    DEFAULT_WORD_COLOR,
+    Highlighter,
+    normalizeColor
+  } = extension.Highlighter;
   const { SpeechEngine, isNaturalVoice } = extension.SpeechEngine;
   const { Toolbar } = extension.Toolbar;
 
   const DEFAULT_SETTINGS = {
     rate: 1,
-    voiceName: ""
+    voiceName: "",
+    wordColor: DEFAULT_WORD_COLOR,
+    sentenceColor: DEFAULT_SENTENCE_COLOR,
+    autoScroll: true,
+    minimized: false,
+    toolbarPosition: null
   };
 
   class ReaderApp {
@@ -21,17 +31,24 @@
       this.settings = { ...DEFAULT_SETTINGS };
       this.voices = [];
       this.selectedVoice = null;
+      this.lastSpeakRequestedAt = 0;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
         onEnd: () => this.handleBlockEnd(),
-        onError: (error) => this.handleError(error)
+        onError: (error) => this.handleError(error),
+        onStart: (_segment, latencyMs) => this.handleSpeechStart(latencyMs)
       });
       this.toolbar = new Toolbar({
         onPlayPause: () => this.playPause(),
         onStop: () => this.stop(),
         onVoice: (name) => this.changeVoice(name),
-        onRate: (rate) => this.changeRate(rate)
+        onRate: (rate) => this.changeRate(rate),
+        onWordColor: (color) => this.changeWordColor(color),
+        onSentenceColor: (color) => this.changeSentenceColor(color),
+        onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
+        onMinimized: (minimized) => this.changeMinimized(minimized),
+        onPosition: (position) => this.changeToolbarPosition(position)
       });
 
       this.boundClick = (event) => this.handlePageClick(event);
@@ -52,18 +69,26 @@
     }
 
     async open() {
+      const openStartedAt = performance.now();
       this.enabled = true;
       this.stopped = false;
       this.paused = false;
       this.toolbar.mount();
-      this.toolbar.setStatus("Finding voices…");
+      this.toolbar.setStatus("Starting…");
       document.addEventListener("click", this.boundClick, true);
       document.addEventListener("keydown", this.boundKeydown, true);
 
-      await this.loadSettings();
-      await this.speech.waitForVoices();
-      this.refreshVoices();
+      const settingsPromise = this.loadSettings();
       this.rebuildModel();
+      await settingsPromise;
+      this.applySettings();
+
+      this.refreshVoices();
+      if (!this.voices.some(isNaturalVoice)) {
+        this.toolbar.setStatus("Loading Natural voice…");
+        await this.speech.waitForVoices(350, (voices) => voices.some(isNaturalVoice));
+        this.refreshVoices();
+      }
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
       if (!startBlock) {
@@ -74,6 +99,9 @@
 
       this.currentBlockIndex = startBlock.index;
       this.currentSegmentIndex = 0;
+      console.debug(
+        `Edge Natural TTS startup prepared in ${Math.round(performance.now() - openStartedAt)}ms`
+      );
       this.speakCurrentPosition();
     }
 
@@ -122,7 +150,23 @@
     }
 
     rebuildModel() {
+      const startedAt = performance.now();
       this.model = buildReadableModel(document);
+      console.debug(
+        `Edge Natural TTS modeled ${this.model.blocks.length} blocks in ${Math.round(
+          performance.now() - startedAt
+        )}ms`
+      );
+    }
+
+    applySettings() {
+      this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
+      this.highlighter.setAutoScroll(this.settings.autoScroll);
+      this.toolbar.setRate(this.settings.rate);
+      this.toolbar.setHighlightColors(this.settings.wordColor, this.settings.sentenceColor);
+      this.toolbar.setAutoScroll(this.settings.autoScroll);
+      this.toolbar.setMinimized(this.settings.minimized);
+      this.toolbar.setPosition(this.settings.toolbarPosition);
     }
 
     refreshVoices() {
@@ -153,16 +197,25 @@
       this.stopped = false;
       this.paused = false;
       this.toolbar.setPaused(false);
+      this.toolbar.setStatus("Starting speech…");
+      this.lastSpeakRequestedAt = performance.now();
       this.speech.speak(block, this.currentSegmentIndex, {
         rate: this.settings.rate,
         voice: this.selectedVoice
       });
     }
 
+    handleSpeechStart(latencyMs) {
+      if (this.stopped) return;
+      this.toolbar.setStatus("Reading");
+      console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
+    }
+
     handleBoundary(segment) {
       this.currentBlockIndex = segment.blockIndex;
       this.currentSegmentIndex = segment.segmentIndex;
-      this.highlighter.highlight(segment);
+      const block = this.model?.blocks[segment.blockIndex];
+      this.highlighter.highlight(block, segment);
     }
 
     handleBlockEnd() {
@@ -272,12 +325,51 @@
       }
     }
 
+    async changeWordColor(color) {
+      this.settings.wordColor = normalizeColor(color, DEFAULT_WORD_COLOR);
+      this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
+      await this.saveSettings();
+    }
+
+    async changeSentenceColor(color) {
+      this.settings.sentenceColor = normalizeColor(color, DEFAULT_SENTENCE_COLOR);
+      this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
+      await this.saveSettings();
+    }
+
+    async changeAutoScroll(enabled) {
+      this.settings.autoScroll = Boolean(enabled);
+      this.highlighter.setAutoScroll(this.settings.autoScroll);
+      await this.saveSettings();
+    }
+
+    async changeMinimized(minimized) {
+      this.settings.minimized = Boolean(minimized);
+      await this.saveSettings();
+    }
+
+    async changeToolbarPosition(position) {
+      this.settings.toolbarPosition = position;
+      await this.saveSettings();
+    }
+
     async loadSettings() {
       try {
         const stored = await chrome.storage.local.get(DEFAULT_SETTINGS);
+        const toolbarPosition = stored.toolbarPosition;
         this.settings = {
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
-          voiceName: stored.voiceName || ""
+          voiceName: stored.voiceName || "",
+          wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
+          sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
+          autoScroll: stored.autoScroll !== false,
+          minimized: stored.minimized === true,
+          toolbarPosition:
+            toolbarPosition &&
+            Number.isFinite(Number(toolbarPosition.x)) &&
+            Number.isFinite(Number(toolbarPosition.y))
+              ? { x: Number(toolbarPosition.x), y: Number(toolbarPosition.y) }
+              : null
         };
       } catch (error) {
         console.warn("Could not load Edge Natural TTS settings.", error);
