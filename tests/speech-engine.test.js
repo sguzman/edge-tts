@@ -24,36 +24,60 @@ test("createUtterancePayload remaps segment starts after a seek", () => {
   assert.equal(payload.segments.length, 2);
 });
 
-test("first queued chunk stops at the current sentence for low seek latency", () => {
+test("short neighboring sentences stay in one utterance for continuous playback", () => {
   const block = {
     segments: [
       { text: "Start", sentenceIndex: 0 },
       { text: "here.", sentenceIndex: 0 },
       { text: "Next", sentenceIndex: 1 },
       { text: "sentence", sentenceIndex: 1 },
-      { text: "continues.", sentenceIndex: 1 }
+      { text: "continues.", sentenceIndex: 1 },
+      { text: "Third", sentenceIndex: 2 },
+      { text: "one.", sentenceIndex: 2 }
     ]
   };
 
   const chunks = createUtteranceChunks(block, 0);
-  assert.equal(chunks[0].text, "Start here.");
-  assert.equal(chunks[1].text, "Next sentence continues.");
+  assert.equal(chunks.length, 1);
+  assert.equal(chunks[0].text, "Start here. Next sentence continues. Third one.");
 });
 
-test("long sentences are capped instead of creating an oversized first request", () => {
-  const segments = Array.from({ length: 80 }, (_, index) => ({
+test("long content chunks near the target while preferring sentence boundaries", () => {
+  const segments = [];
+  for (let sentenceIndex = 0; sentenceIndex < 12; sentenceIndex += 1) {
+    for (let wordIndex = 0; wordIndex < 12; wordIndex += 1) {
+      segments.push({
+        text: wordIndex === 11 ? `word${sentenceIndex}-${wordIndex}.` : `word${sentenceIndex}-${wordIndex}`,
+        sentenceIndex
+      });
+    }
+  }
+
+  const chunks = createUtteranceChunks({ segments }, 0, {
+    firstChunkMaxChars: 180,
+    maxChars: 300,
+    hardLimitFactor: 1.5
+  });
+
+  assert.ok(chunks.length > 1);
+  assert.ok(chunks[0].text.length >= 180);
+  assert.match(chunks[0].text, /\.$/);
+});
+
+test("one extremely long sentence is hard-capped", () => {
+  const segments = Array.from({ length: 100 }, (_, index) => ({
     text: `word${index}`,
     sentenceIndex: 0
   }));
   const chunks = createUtteranceChunks({ segments }, 0, {
     firstChunkMaxChars: 80,
     maxChars: 160,
-    minChars: 80
+    hardLimitFactor: 1.25
   });
 
   assert.ok(chunks.length > 1);
-  assert.ok(chunks[0].text.length >= 80);
-  assert.ok(chunks[0].text.length < 100);
+  assert.ok(chunks[0].text.length >= 100);
+  assert.ok(chunks[0].text.length < 120);
 });
 
 test("natural voices sort ahead of local voices for the same language", () => {
