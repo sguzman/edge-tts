@@ -32,6 +32,8 @@
       this.voices = [];
       this.selectedVoice = null;
       this.lastSpeakRequestedAt = 0;
+      this.boundarySerial = 0;
+      this.resumeWatchdog = null;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -114,6 +116,7 @@
     }
 
     stop() {
+      this.clearResumeWatchdog();
       this.stopped = true;
       this.paused = false;
       this.speech.cancel();
@@ -140,13 +143,40 @@
       }
 
       if (this.paused) {
+        const serialBeforeResume = this.boundarySerial;
         this.speech.resume();
         this.paused = false;
+        this.toolbar.setPaused(false);
+        this.toolbar.setStatus("Resuming…");
+        this.startResumeWatchdog(serialBeforeResume);
       } else {
+        this.clearResumeWatchdog();
         this.speech.pause();
         this.paused = true;
+        this.toolbar.setPaused(true);
       }
-      this.toolbar.setPaused(this.paused);
+    }
+
+    startResumeWatchdog(serialBeforeResume) {
+      this.clearResumeWatchdog();
+      this.resumeWatchdog = window.setTimeout(() => {
+        this.resumeWatchdog = null;
+        if (this.stopped || this.paused || this.boundarySerial !== serialBeforeResume) {
+          return;
+        }
+
+        console.warn(
+          "Edge Natural TTS resume made no progress; restarting from the current word."
+        );
+        this.speakCurrentPosition();
+      }, 1200);
+    }
+
+    clearResumeWatchdog() {
+      if (this.resumeWatchdog !== null) {
+        window.clearTimeout(this.resumeWatchdog);
+        this.resumeWatchdog = null;
+      }
     }
 
     rebuildModel() {
@@ -188,6 +218,7 @@
     }
 
     speakCurrentPosition() {
+      this.clearResumeWatchdog();
       const block = this.model?.blocks[this.currentBlockIndex];
       if (!block) {
         this.finishDocument();
@@ -207,15 +238,21 @@
 
     handleSpeechStart(latencyMs) {
       if (this.stopped) return;
+      this.clearResumeWatchdog();
       this.toolbar.setStatus("Reading");
       console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
     }
 
     handleBoundary(segment) {
+      this.boundarySerial += 1;
+      this.clearResumeWatchdog();
       this.currentBlockIndex = segment.blockIndex;
       this.currentSegmentIndex = segment.segmentIndex;
       const block = this.model?.blocks[segment.blockIndex];
       this.highlighter.highlight(block, segment);
+      if (!this.paused && !this.stopped) {
+        this.toolbar.setStatus("Reading");
+      }
     }
 
     handleBlockEnd() {
@@ -232,6 +269,7 @@
     }
 
     finishDocument() {
+      this.clearResumeWatchdog();
       this.stopped = true;
       this.speech.cancel();
       this.highlighter.clear();
@@ -240,6 +278,7 @@
     }
 
     handleError(error) {
+      this.clearResumeWatchdog();
       console.error("Edge Natural TTS", error);
       this.stopped = true;
       this.highlighter.clear();
