@@ -61,7 +61,7 @@
   function createUtteranceChunks(
     block,
     startSegmentIndex,
-    { firstChunkMaxChars = 220, maxChars = 420, minChars = 180 } = {}
+    { firstChunkMaxChars = 900, maxChars = 1800, hardLimitFactor = 1.35 } = {}
   ) {
     const remaining = block.segments.slice(startSegmentIndex);
     if (remaining.length === 0) return [];
@@ -87,13 +87,14 @@
         !next ||
         segment.sentenceIndex !== next.sentenceIndex ||
         /[.!?]["'”’\)\]]*$/.test(segment.text);
-      const isFirstChunk = chunks.length === 0;
-      const targetMax = isFirstChunk ? firstChunkMaxChars : maxChars;
-      const reachedMax = currentLength >= targetMax;
-      const reachedLaterSentenceBoundary = !isFirstChunk && sentenceEnds && currentLength >= minChars;
-      const firstSentenceBoundary = isFirstChunk && sentenceEnds;
+      const targetMax = chunks.length === 0 ? firstChunkMaxChars : maxChars;
+      const reachedSentenceBoundary = currentLength >= targetMax && sentenceEnds;
+      const reachedHardLimit = currentLength >= Math.ceil(targetMax * hardLimitFactor);
 
-      if (reachedMax || firstSentenceBoundary || reachedLaterSentenceBoundary || !next) {
+      // Keep several sentences inside one utterance. Edge's Online (Natural)
+      // voices can incur a fresh network/startup delay at every utterance boundary,
+      // so sentence-sized utterances create audible gaps even when already queued.
+      if (reachedSentenceBoundary || reachedHardLimit || !next) {
         flush();
       }
     }
