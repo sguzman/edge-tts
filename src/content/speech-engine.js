@@ -39,8 +39,7 @@
     );
   }
 
-  function createUtterancePayload(block, startSegmentIndex) {
-    const segments = block.segments.slice(startSegmentIndex);
+  function createPayloadFromSegments(segments) {
     const starts = [];
     let text = "";
 
@@ -55,13 +54,61 @@
     return { text, starts, segments };
   }
 
+  function createUtterancePayload(block, startSegmentIndex) {
+    return createPayloadFromSegments(block.segments.slice(startSegmentIndex));
+  }
+
+  function createUtteranceChunks(
+    block,
+    startSegmentIndex,
+    { firstChunkMaxChars = 220, maxChars = 420, minChars = 180 } = {}
+  ) {
+    const remaining = block.segments.slice(startSegmentIndex);
+    if (remaining.length === 0) return [];
+
+    const chunks = [];
+    let current = [];
+    let currentLength = 0;
+
+    function flush() {
+      if (current.length === 0) return;
+      chunks.push(createPayloadFromSegments(current));
+      current = [];
+      currentLength = 0;
+    }
+
+    for (let index = 0; index < remaining.length; index += 1) {
+      const segment = remaining[index];
+      const next = remaining[index + 1];
+      currentLength += (current.length > 0 ? 1 : 0) + segment.text.length;
+      current.push(segment);
+
+      const sentenceEnds =
+        !next ||
+        segment.sentenceIndex !== next.sentenceIndex ||
+        /[.!?]["'”’\)\]]*$/.test(segment.text);
+      const isFirstChunk = chunks.length === 0;
+      const targetMax = isFirstChunk ? firstChunkMaxChars : maxChars;
+      const reachedMax = currentLength >= targetMax;
+      const reachedLaterSentenceBoundary = !isFirstChunk && sentenceEnds && currentLength >= minChars;
+      const firstSentenceBoundary = isFirstChunk && sentenceEnds;
+
+      if (reachedMax || firstSentenceBoundary || reachedLaterSentenceBoundary || !next) {
+        flush();
+      }
+    }
+
+    return chunks;
+  }
+
   class SpeechEngine {
-    constructor({ onBoundary, onEnd, onError }) {
+    constructor({ onBoundary, onEnd, onError, onStart }) {
       this.onBoundary = onBoundary;
       this.onEnd = onEnd;
       this.onError = onError;
+      this.onStart = onStart;
       this.synth = root.speechSynthesis;
-      this.currentUtterance = null;
+      this.currentUtterances = [];
       this.generation = 0;
     }
 
@@ -79,9 +126,9 @@
       return () => this.synth.removeEventListener("voiceschanged", listener);
     }
 
-    async waitForVoices(timeoutMs = 1500) {
+    async waitForVoices(timeoutMs = 350, predicate = (voices) => voices.length > 0) {
       const existing = this.getVoices();
-      if (existing.length > 0 || !this.synth) {
+      if (!this.synth || predicate(existing)) {
         return existing;
       }
 
@@ -89,13 +136,21 @@
         let settled = false;
         const finish = () => {
           if (settled) return;
+          const voices = this.getVoices();
+          if (!predicate(voices)) return;
+          settled = true;
+          this.synth.removeEventListener("voiceschanged", finish);
+          root.clearTimeout(timeoutId);
+          resolve(voices);
+        };
+        const timeoutFinish = () => {
+          if (settled) return;
           settled = true;
           this.synth.removeEventListener("voiceschanged", finish);
           resolve(this.getVoices());
         };
-
-        this.synth.addEventListener("voiceschanged", finish, { once: true });
-        root.setTimeout(finish, timeoutMs);
+        const timeoutId = root.setTimeout(timeoutFinish, timeoutMs);
+        this.synth.addEventListener("voiceschanged", finish);
       });
     }
 
@@ -106,7 +161,7 @@
 
     cancel() {
       this.generation += 1;
-      this.currentUtterance = null;
+      this.currentUtterances = [];
       this.synth?.cancel();
     }
 
@@ -128,50 +183,67 @@
         return;
       }
 
-      const payload = createUtterancePayload(block, startSegmentIndex);
-      if (!payload.text) {
+      const chunks = createUtteranceChunks(block, startSegmentIndex);
+      if (chunks.length === 0) {
         this.onEnd?.();
         return;
       }
 
       this.cancel();
       const generation = this.generation;
-      const utterance = new root.SpeechSynthesisUtterance(payload.text);
-      utterance.rate = options.rate;
-      if (options.voice) {
-        utterance.voice = options.voice;
-        utterance.lang = options.voice.lang;
-      }
+      const requestedAt = root.performance?.now?.() ?? Date.now();
 
-      utterance.addEventListener("boundary", (event) => {
-        if (generation !== this.generation) return;
-        const localIndex = root.EdgeTtsExtension.TextModel.segmentIndexForCharIndex(
-          payload.starts,
-          event.charIndex
-        );
-        const segment = payload.segments[localIndex];
-        if (segment) {
-          this.onBoundary?.(segment, event);
+      const utterances = chunks.map((payload, chunkIndex) => {
+        const utterance = new root.SpeechSynthesisUtterance(payload.text);
+        utterance.rate = options.rate;
+        if (options.voice) {
+          utterance.voice = options.voice;
+          utterance.lang = options.voice.lang;
         }
+
+        utterance.addEventListener("start", () => {
+          if (generation !== this.generation) return;
+          if (chunkIndex === 0) {
+            const startedAt = root.performance?.now?.() ?? Date.now();
+            this.onStart?.(payload.segments[0], Math.max(0, startedAt - requestedAt));
+          }
+        });
+
+        utterance.addEventListener("boundary", (event) => {
+          if (generation !== this.generation) return;
+          const localIndex = root.EdgeTtsExtension.TextModel.segmentIndexForCharIndex(
+            payload.starts,
+            event.charIndex
+          );
+          const segment = payload.segments[localIndex];
+          if (segment) {
+            this.onBoundary?.(segment, event);
+          }
+        });
+
+        utterance.addEventListener("end", () => {
+          if (generation !== this.generation) return;
+          if (chunkIndex === utterances.length - 1) {
+            this.currentUtterances = [];
+            this.onEnd?.();
+          }
+        });
+
+        utterance.addEventListener("error", (event) => {
+          if (generation !== this.generation) return;
+          if (event.error !== "canceled" && event.error !== "interrupted") {
+            this.cancel();
+            this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
+          }
+        });
+
+        return utterance;
       });
 
-      utterance.addEventListener("end", () => {
-        if (generation !== this.generation) return;
-        this.currentUtterance = null;
-        this.onEnd?.();
-      });
-
-      utterance.addEventListener("error", (event) => {
-        if (generation !== this.generation) return;
-        this.currentUtterance = null;
-        if (event.error !== "canceled" && event.error !== "interrupted") {
-          this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
-        }
-      });
-
-      this.currentUtterance = utterance;
+      this.currentUtterances = utterances;
       root.setTimeout(() => {
-        if (generation === this.generation) {
+        if (generation !== this.generation) return;
+        for (const utterance of utterances) {
           this.synth.speak(utterance);
         }
       }, 0);
@@ -180,6 +252,7 @@
 
   return {
     SpeechEngine,
+    createUtteranceChunks,
     createUtterancePayload,
     isNaturalVoice,
     preferredLanguage,
