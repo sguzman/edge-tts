@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Edge Natural TTS",
-  "version": "0.1.0",
-  "description": "Read any webpage with Microsoft Edge online natural voices and synchronized word highlighting.",
+  "version": "0.2.0",
+  "description": "Read any webpage with Microsoft Edge online natural voices and synchronized word and sentence highlighting.",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "action": {
