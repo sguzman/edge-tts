@@ -50,6 +50,7 @@
       this.autoScroll = true;
       this.wordColor = DEFAULT_WORD_COLOR;
       this.sentenceColor = DEFAULT_SENTENCE_COLOR;
+      this.currentSentenceKey = null;
       this.ensureStyle();
     }
 
@@ -100,10 +101,16 @@
         }
       }
       this.lastRange = null;
+      this.currentSentenceKey = null;
     }
 
     highlight(block, segment) {
-      this.clear();
+      if (this.usingCustomHighlight) {
+        root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
+      } else if (this.lastRange) {
+        const selection = root.getSelection();
+        selection?.removeAllRanges();
+      }
 
       const wordRange = document.createRange();
       wordRange.setStart(segment.node, segment.nodeStart);
@@ -111,11 +118,16 @@
       this.lastRange = wordRange;
 
       if (this.usingCustomHighlight) {
-        const sentence = block?.sentences?.[segment.sentenceIndex];
-        if (sentence?.segments?.length) {
-          const sentenceHighlight = new root.Highlight(...rangesForSegments(sentence.segments));
-          sentenceHighlight.priority = 1;
-          root.CSS.highlights.set(SENTENCE_HIGHLIGHT_NAME, sentenceHighlight);
+        const sentenceKey = `${segment.blockIndex}:${segment.sentenceIndex}`;
+        if (sentenceKey !== this.currentSentenceKey) {
+          root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
+          const sentence = block?.sentences?.[segment.sentenceIndex];
+          if (sentence?.segments?.length) {
+            const sentenceHighlight = new root.Highlight(...rangesForSegments(sentence.segments));
+            sentenceHighlight.priority = 1;
+            root.CSS.highlights.set(SENTENCE_HIGHLIGHT_NAME, sentenceHighlight);
+          }
+          this.currentSentenceKey = sentenceKey;
         }
 
         const wordHighlight = new root.Highlight(wordRange);
