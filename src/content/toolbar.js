@@ -73,7 +73,8 @@
           <div class="edge-tts-row">
             <label class="edge-tts-checkbox-label">
               <input data-edge-tts-auto-scroll type="checkbox" checked>
-              Auto-scroll while reading
+              <span class="edge-tts-checkbox-control" aria-hidden="true"></span>
+              <span>Auto-scroll while reading</span>
             </label>
           </div>
           <div class="edge-tts-hint">Drag the header to move · Click page text to jump · Esc closes</div>
