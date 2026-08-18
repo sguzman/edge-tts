@@ -61,41 +61,144 @@
     return tokens;
   }
 
-  function isElementVisible(element) {
+  function trimSentenceRange(text, start, end) {
+    while (start < end && /\s/.test(text[start])) start += 1;
+    while (end > start && /\s/.test(text[end - 1])) end -= 1;
+    return start < end ? { start, end } : null;
+  }
+
+  function sentenceRanges(text, language) {
+    const ranges = [];
+    const Segmenter = globalThis.Intl?.Segmenter;
+
+    if (typeof Segmenter === "function") {
+      try {
+        const segmenter = new Segmenter(language || undefined, { granularity: "sentence" });
+        for (const sentence of segmenter.segment(text)) {
+          const range = trimSentenceRange(
+            text,
+            sentence.index,
+            sentence.index + sentence.segment.length
+          );
+          if (range) ranges.push(range);
+        }
+      } catch (_error) {
+        // Fall through to punctuation segmentation below.
+      }
+    }
+
+    if (ranges.length > 0) {
+      return ranges;
+    }
+
+    const expression = /[^.!?]+(?:[.!?]+(?:["'”’\)\]]+)?(?=\s|$)|$)/g;
+    let match;
+    while ((match = expression.exec(text)) !== null) {
+      const range = trimSentenceRange(text, match.index, match.index + match[0].length);
+      if (range) ranges.push(range);
+      if (match[0].length === 0) expression.lastIndex += 1;
+    }
+
+    if (ranges.length === 0 && /\S/.test(text)) {
+      const range = trimSentenceRange(text, 0, text.length);
+      if (range) ranges.push(range);
+    }
+
+    return ranges;
+  }
+
+  function annotateSentences(block, language) {
+    const ranges = sentenceRanges(block.text, language);
+    const sentences = [];
+    let segmentCursor = 0;
+
+    ranges.forEach((range, sentenceIndex) => {
+      const sentenceSegments = [];
+
+      while (
+        segmentCursor < block.segments.length &&
+        block.segments[segmentCursor].end <= range.start
+      ) {
+        segmentCursor += 1;
+      }
+
+      let cursor = segmentCursor;
+      while (cursor < block.segments.length && block.segments[cursor].start < range.end) {
+        const segment = block.segments[cursor];
+        segment.sentenceIndex = sentenceIndex;
+        sentenceSegments.push(segment);
+        cursor += 1;
+      }
+
+      if (sentenceSegments.length > 0) {
+        sentences.push({
+          index: sentenceIndex,
+          start: range.start,
+          end: range.end,
+          segments: sentenceSegments
+        });
+        segmentCursor = cursor;
+      }
+    });
+
+    if (sentences.length === 0 && block.segments.length > 0) {
+      for (const segment of block.segments) {
+        segment.sentenceIndex = 0;
+      }
+      sentences.push({
+        index: 0,
+        start: 0,
+        end: block.text.length,
+        segments: [...block.segments]
+      });
+    }
+
+    return sentences;
+  }
+
+  function isElementVisible(element, visibilityCache) {
     if (!(element instanceof Element)) {
       return false;
     }
 
+    if (visibilityCache?.has(element)) {
+      return visibilityCache.get(element);
+    }
+
+    let visible = true;
     if (element.closest(EXCLUDED_SELECTOR)) {
-      return false;
+      visible = false;
+    } else {
+      const style = getComputedStyle(element);
+      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
+        visible = false;
+      } else {
+        const rect = element.getBoundingClientRect();
+        visible = rect.width > 0 && rect.height > 0;
+      }
     }
 
-    const style = getComputedStyle(element);
-    if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
-      return false;
-    }
-
-    const rect = element.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    visibilityCache?.set(element, visible);
+    return visible;
   }
 
-  function isTextNodeReadable(node) {
+  function isTextNodeReadable(node, visibilityCache) {
     if (!(node instanceof Text) || !node.nodeValue || !/\S/.test(node.nodeValue)) {
       return false;
     }
 
     const parent = node.parentElement;
-    return Boolean(parent && isElementVisible(parent));
+    return Boolean(parent && isElementVisible(parent, visibilityCache));
   }
 
-  function extractBlock(element, blockIndex) {
+  function extractBlock(element, blockIndex, visibilityCache, language) {
     const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
     const segments = [];
     let output = "";
     let current;
 
     while ((current = walker.nextNode())) {
-      if (!isTextNodeReadable(current)) {
+      if (!isTextNodeReadable(current, visibilityCache)) {
         continue;
       }
 
@@ -116,7 +219,8 @@
           end,
           node: current,
           nodeStart: token.start,
-          nodeEnd: token.end
+          nodeEnd: token.end,
+          sentenceIndex: 0
         });
       }
     }
@@ -125,17 +229,22 @@
       return null;
     }
 
-    return {
+    const block = {
       index: blockIndex,
       element,
       text: output,
-      segments
+      segments,
+      sentences: []
     };
+    block.sentences = annotateSentences(block, language);
+    return block;
   }
 
-  function pickReadingRoot(doc) {
+  function pickReadingRoot(doc, visibilityCache) {
     const semanticRoots = Array.from(doc.querySelectorAll("article,main,[role='main']"));
-    const visibleRoots = semanticRoots.filter((element) => isElementVisible(element));
+    const visibleRoots = semanticRoots.filter((element) =>
+      isElementVisible(element, visibilityCache)
+    );
 
     if (visibleRoots.length === 0) {
       return doc.body;
@@ -148,8 +257,8 @@
     });
   }
 
-  function shouldKeepCandidate(element) {
-    if (!isElementVisible(element)) {
+  function shouldKeepCandidate(element, visibilityCache) {
+    if (!isElementVisible(element, visibilityCache)) {
       return false;
     }
 
@@ -161,16 +270,18 @@
   }
 
   function buildReadableModel(doc = document) {
-    const readingRoot = pickReadingRoot(doc);
-    const candidates = Array.from(readingRoot.querySelectorAll(BLOCK_SELECTOR)).filter(
-      shouldKeepCandidate
+    const visibilityCache = new WeakMap();
+    const language = doc.documentElement?.lang || globalThis.navigator?.language;
+    const readingRoot = pickReadingRoot(doc, visibilityCache);
+    const candidates = Array.from(readingRoot.querySelectorAll(BLOCK_SELECTOR)).filter((element) =>
+      shouldKeepCandidate(element, visibilityCache)
     );
 
     const blocks = [];
     const nodeToBlock = new WeakMap();
 
     for (const candidate of candidates) {
-      const block = extractBlock(candidate, blocks.length);
+      const block = extractBlock(candidate, blocks.length, visibilityCache, language);
       if (!block || block.text.length < 2) {
         continue;
       }
@@ -184,7 +295,7 @@
     }
 
     if (blocks.length === 0 && readingRoot === doc.body) {
-      const fallback = extractBlock(doc.body, 0);
+      const fallback = extractBlock(doc.body, 0, visibilityCache, language);
       if (fallback) {
         for (const segment of fallback.segments) {
           nodeToBlock.set(segment.node, fallback);
@@ -266,10 +377,12 @@
   }
 
   return {
+    annotateSentences,
     buildReadableModel,
     findSegmentInNode,
     firstBlockNearViewport,
     segmentIndexForCharIndex,
+    sentenceRanges,
     tokenizeText
   };
 });
