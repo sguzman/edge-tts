@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   segmentIndexForCharIndex,
+  sentenceRanges,
   tokenizeText
 } = require("../src/content/text-model.js");
 
@@ -10,6 +11,15 @@ test("tokenizeText preserves token offsets", () => {
     { text: "Hello,", start: 2, end: 8 },
     { text: "world!", start: 11, end: 17 }
   ]);
+});
+
+test("sentenceRanges finds adjacent sentence spans", () => {
+  const text = "Hello world. This is sentence two! And three?";
+  const ranges = sentenceRanges(text, "en-US");
+  assert.equal(ranges.length, 3);
+  assert.equal(text.slice(ranges[0].start, ranges[0].end), "Hello world.");
+  assert.equal(text.slice(ranges[1].start, ranges[1].end), "This is sentence two!");
+  assert.equal(text.slice(ranges[2].start, ranges[2].end), "And three?");
 });
 
 test("segmentIndexForCharIndex returns the nearest segment at or before the boundary", () => {
