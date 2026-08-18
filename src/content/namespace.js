@@ -1,0 +1,1 @@
+globalThis.EdgeTtsExtension = globalThis.EdgeTtsExtension || {};
