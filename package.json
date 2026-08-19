@@ -1,10 +1,10 @@
 {
   "name": "edge-natural-tts",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "private": true,
   "description": "Microsoft Edge extension for natural text-to-speech with synchronized highlighting.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/background.js && node --check src/content/namespace.js && node --check src/content/text-model.js && node --check src/content/highlighter.js && node --check src/content/speech-engine.js && node --check src/content/toolbar.js && node --check src/content/reader.js && node --check src/content/content-script.js"
+    "check": "node --check src/background.js && node --check src/content/namespace.js && node --check src/content/editable-guard.js && node --check src/content/text-model.js && node --check src/content/highlighter.js && node --check src/content/speech-engine.js && node --check src/content/toolbar.js && node --check src/content/reader.js && node --check src/content/content-script.js"
   }
 }
