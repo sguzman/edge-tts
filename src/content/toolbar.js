@@ -39,6 +39,7 @@
       this.wordColorInput = null;
       this.sentenceColorInput = null;
       this.autoScrollInput = null;
+      this.clickToSeekInput = null;
       this.minimizeButton = null;
       this.minimized = false;
       this.dragState = null;
@@ -100,12 +101,19 @@
           </div>
           <div class="edge-tts-row">
             <label class="edge-tts-checkbox-label">
+              <input data-edge-tts-click-to-seek type="checkbox" checked>
+              <span class="edge-tts-checkbox-control" aria-hidden="true"></span>
+              <span>Click page text to jump TTS</span>
+            </label>
+          </div>
+          <div class="edge-tts-row">
+            <label class="edge-tts-checkbox-label">
               <input data-edge-tts-auto-scroll type="checkbox" checked>
               <span class="edge-tts-checkbox-control" aria-hidden="true"></span>
               <span>Auto-scroll while reading</span>
             </label>
           </div>
-          <div class="edge-tts-hint">Drag the header to move · Click page text to jump · Esc closes</div>
+          <div class="edge-tts-hint">Turn off click-to-seek to use the page normally · Drag header to move · Esc closes</div>
         </div>
       `;
 
@@ -121,6 +129,7 @@
       this.status = element.querySelector("[data-edge-tts-status]");
       this.wordColorInput = element.querySelector("[data-edge-tts-word-color]");
       this.sentenceColorInput = element.querySelector("[data-edge-tts-sentence-color]");
+      this.clickToSeekInput = element.querySelector("[data-edge-tts-click-to-seek]");
       this.autoScrollInput = element.querySelector("[data-edge-tts-auto-scroll]");
       this.minimizeButton = element.querySelector("[data-edge-tts-action='minimize']");
       this.dragHandle = element.querySelector("[data-edge-tts-drag-handle]");
@@ -146,6 +155,9 @@
       });
       this.sentenceColorInput.addEventListener("input", () => {
         this.handlers.onSentenceColor(this.sentenceColorInput.value);
+      });
+      this.clickToSeekInput.addEventListener("change", () => {
+        this.handlers.onClickToSeek(this.clickToSeekInput.checked);
       });
       this.autoScrollInput.addEventListener("change", () => {
         this.handlers.onAutoScroll(this.autoScrollInput.checked);
@@ -251,6 +263,10 @@
 
     setAutoScroll(enabled) {
       if (this.autoScrollInput) this.autoScrollInput.checked = Boolean(enabled);
+    }
+
+    setClickToSeek(enabled) {
+      if (this.clickToSeekInput) this.clickToSeekInput.checked = Boolean(enabled);
     }
 
     setMinimized(minimized) {
