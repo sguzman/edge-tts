@@ -5,6 +5,23 @@
     return Math.min(Math.max(value, minimum), maximum);
   }
 
+  function filterVoices(voices, query) {
+    const terms = String(query || "")
+      .trim()
+      .toLocaleLowerCase()
+      .split(/\s+/)
+      .filter(Boolean);
+
+    if (terms.length === 0) {
+      return [...voices];
+    }
+
+    return voices.filter((voice) => {
+      const searchable = `${voice.name || ""} ${voice.lang || ""}`.toLocaleLowerCase();
+      return terms.every((term) => searchable.includes(term));
+    });
+  }
+
   class Toolbar {
     constructor(handlers) {
       this.handlers = handlers;
@@ -12,6 +29,10 @@
       this.playButton = null;
       this.stopButton = null;
       this.voiceSelect = null;
+      this.voiceFilterInput = null;
+      this.clearVoiceFilterButton = null;
+      this.voices = [];
+      this.selectedVoiceName = "";
       this.rateInput = null;
       this.rateValue = null;
       this.status = null;
@@ -47,6 +68,13 @@
           <button type="button" data-edge-tts-action="stop" title="Stop reading">Stop</button>
         </div>
         <div data-edge-tts-expanded>
+          <div class="edge-tts-row edge-tts-voice-filter-row">
+            <label>
+              Filter
+              <input data-edge-tts-voice-filter type="text" placeholder="Search voices…" autocomplete="off" spellcheck="false" aria-label="Filter voices">
+            </label>
+            <button type="button" class="edge-tts-clear-filter-button" data-edge-tts-action="clear-voice-filter" title="Clear voice filter" aria-label="Clear voice filter" disabled>×</button>
+          </div>
           <div class="edge-tts-row">
             <label>
               Voice
@@ -86,6 +114,8 @@
       this.playButton = element.querySelector("[data-edge-tts-action='play']");
       this.stopButton = element.querySelector("[data-edge-tts-action='stop']");
       this.voiceSelect = element.querySelector("[data-edge-tts-voice]");
+      this.voiceFilterInput = element.querySelector("[data-edge-tts-voice-filter]");
+      this.clearVoiceFilterButton = element.querySelector("[data-edge-tts-action='clear-voice-filter']");
       this.rateInput = element.querySelector("[data-edge-tts-rate]");
       this.rateValue = element.querySelector("[data-edge-tts-rate-value]");
       this.status = element.querySelector("[data-edge-tts-status]");
@@ -97,7 +127,13 @@
 
       this.playButton.addEventListener("click", () => this.handlers.onPlayPause());
       this.stopButton.addEventListener("click", () => this.handlers.onStop());
-      this.voiceSelect.addEventListener("change", () => this.handlers.onVoice(this.voiceSelect.value));
+      this.voiceSelect.addEventListener("change", () => {
+        if (this.voiceSelect.value) {
+          this.handlers.onVoice(this.voiceSelect.value);
+        }
+      });
+      this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
+      this.clearVoiceFilterButton.addEventListener("click", () => this.clearVoiceFilter());
       this.rateInput.addEventListener("input", () => {
         const rate = Number(this.rateInput.value);
         this.rateValue.value = `${rate.toFixed(1)}×`;
@@ -156,16 +192,56 @@
     }
 
     setVoices(voices, selectedName) {
+      this.voices = [...voices];
+      this.selectedVoiceName = selectedName || "";
+      this.renderVoiceOptions();
+    }
+
+    renderVoiceOptions() {
       if (!this.voiceSelect) return;
+
+      const query = this.voiceFilterInput?.value || "";
+      const filteredVoices = filterVoices(this.voices, query);
+      const selectedIsVisible = filteredVoices.some(
+        (voice) => voice.name === this.selectedVoiceName
+      );
+
       this.voiceSelect.replaceChildren();
 
-      for (const voice of voices) {
+      if (filteredVoices.length === 0) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No matching voices";
+        option.disabled = true;
+        option.selected = true;
+        this.voiceSelect.appendChild(option);
+      } else if (!selectedIsVisible) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = `${filteredVoices.length} matching voice${filteredVoices.length === 1 ? "" : "s"} — choose one`;
+        option.disabled = true;
+        option.selected = true;
+        this.voiceSelect.appendChild(option);
+      }
+
+      for (const voice of filteredVoices) {
         const option = document.createElement("option");
         option.value = voice.name;
         option.textContent = `${voice.name} — ${voice.lang}`;
-        option.selected = voice.name === selectedName;
+        option.selected = voice.name === this.selectedVoiceName;
         this.voiceSelect.appendChild(option);
       }
+
+      if (this.clearVoiceFilterButton) {
+        this.clearVoiceFilterButton.disabled = query.length === 0;
+      }
+    }
+
+    clearVoiceFilter() {
+      if (!this.voiceFilterInput) return;
+      this.voiceFilterInput.value = "";
+      this.renderVoiceOptions();
+      this.voiceFilterInput.focus();
     }
 
     setHighlightColors(wordColor, sentenceColor) {
@@ -257,5 +333,5 @@
     }
   }
 
-  extension.Toolbar = { Toolbar };
+  extension.Toolbar = { Toolbar, filterVoices };
 })(globalThis);
