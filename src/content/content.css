@@ -103,8 +103,13 @@
   cursor: pointer;
 }
 
-#edge-tts-toolbar button:hover {
+#edge-tts-toolbar button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.15);
+}
+
+#edge-tts-toolbar button:disabled {
+  opacity: 0.38;
+  cursor: default;
 }
 
 #edge-tts-toolbar .edge-tts-icon-button {
@@ -123,13 +128,39 @@
   width: 100%;
 }
 
-#edge-tts-toolbar select {
+#edge-tts-toolbar select,
+#edge-tts-toolbar input[type="text"] {
   min-width: 0;
   flex: 1;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 7px;
   padding: 4px 6px;
   background: #27272a;
+  color: #fafafa;
+}
+
+#edge-tts-toolbar input[type="text"]::placeholder {
+  color: #a1a1aa;
+}
+
+#edge-tts-toolbar input[type="text"]:focus,
+#edge-tts-toolbar select:focus {
+  outline: 2px solid #93c5fd;
+  outline-offset: 1px;
+}
+
+#edge-tts-toolbar .edge-tts-voice-filter-row label {
+  min-width: 0;
+  flex: 1;
+}
+
+#edge-tts-toolbar .edge-tts-clear-filter-button {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  padding: 0;
+  font-size: 20px;
+  line-height: 1;
 }
 
 #edge-tts-toolbar .edge-tts-rate-label input {
