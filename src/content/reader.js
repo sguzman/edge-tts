@@ -16,6 +16,7 @@
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
     autoScroll: true,
+    clickToSeek: true,
     minimized: false,
     toolbarPosition: null
   };
@@ -34,6 +35,7 @@
       this.lastSpeakRequestedAt = 0;
       this.boundarySerial = 0;
       this.resumeWatchdog = null;
+      this.pageClickListening = false;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -49,6 +51,7 @@
         onWordColor: (color) => this.changeWordColor(color),
         onSentenceColor: (color) => this.changeSentenceColor(color),
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
+        onClickToSeek: (enabled) => this.changeClickToSeek(enabled),
         onMinimized: (minimized) => this.changeMinimized(minimized),
         onPosition: (position) => this.changeToolbarPosition(position)
       });
@@ -77,7 +80,6 @@
       this.paused = false;
       this.toolbar.mount();
       this.toolbar.setStatus("Starting…");
-      document.addEventListener("click", this.boundClick, true);
       document.addEventListener("keydown", this.boundKeydown, true);
 
       const settingsPromise = this.loadSettings();
@@ -110,9 +112,23 @@
     close() {
       this.stop();
       this.enabled = false;
-      document.removeEventListener("click", this.boundClick, true);
+      this.syncPageClickListener();
       document.removeEventListener("keydown", this.boundKeydown, true);
       this.toolbar.hide();
+    }
+
+    syncPageClickListener() {
+      const shouldListen = Boolean(this.enabled && this.settings.clickToSeek);
+      if (shouldListen === this.pageClickListening) {
+        return;
+      }
+
+      if (shouldListen) {
+        document.addEventListener("click", this.boundClick, true);
+      } else {
+        document.removeEventListener("click", this.boundClick, true);
+      }
+      this.pageClickListening = shouldListen;
     }
 
     stop() {
@@ -195,8 +211,10 @@
       this.toolbar.setRate(this.settings.rate);
       this.toolbar.setHighlightColors(this.settings.wordColor, this.settings.sentenceColor);
       this.toolbar.setAutoScroll(this.settings.autoScroll);
+      this.toolbar.setClickToSeek(this.settings.clickToSeek);
       this.toolbar.setMinimized(this.settings.minimized);
       this.toolbar.setPosition(this.settings.toolbarPosition);
+      this.syncPageClickListener();
     }
 
     refreshVoices() {
@@ -287,7 +305,11 @@
     }
 
     handlePageClick(event) {
-      if (!this.enabled || event.target?.closest?.("[data-edge-tts-ui]")) {
+      if (
+        !this.enabled ||
+        !this.settings.clickToSeek ||
+        event.target?.closest?.("[data-edge-tts-ui]")
+      ) {
         return;
       }
 
@@ -382,6 +404,12 @@
       await this.saveSettings();
     }
 
+    async changeClickToSeek(enabled) {
+      this.settings.clickToSeek = Boolean(enabled);
+      this.syncPageClickListener();
+      await this.saveSettings();
+    }
+
     async changeMinimized(minimized) {
       this.settings.minimized = Boolean(minimized);
       await this.saveSettings();
@@ -402,6 +430,7 @@
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
           autoScroll: stored.autoScroll !== false,
+          clickToSeek: stored.clickToSeek !== false,
           minimized: stored.minimized === true,
           toolbarPosition:
             toolbarPosition &&
