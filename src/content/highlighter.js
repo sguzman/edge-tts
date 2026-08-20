@@ -51,10 +51,15 @@
       this.wordColor = DEFAULT_WORD_COLOR;
       this.sentenceColor = DEFAULT_SENTENCE_COLOR;
       this.currentSentenceKey = null;
-      this.ensureStyle();
+      this.styleElement = null;
+      this.lastScrollCheckAt = 0;
     }
 
     ensureStyle() {
+      if (this.styleElement?.isConnected) {
+        return;
+      }
+
       let style = document.getElementById(STYLE_ID);
       if (!style) {
         style = document.createElement("style");
@@ -102,9 +107,12 @@
       }
       this.lastRange = null;
       this.currentSentenceKey = null;
+      this.lastScrollCheckAt = 0;
     }
 
     highlight(block, segment) {
+      this.ensureStyle();
+
       if (this.usingCustomHighlight) {
         root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
       } else if (this.lastRange) {
@@ -144,6 +152,14 @@
 
     keepRangeInView(range, element) {
       if (!this.autoScroll) return;
+
+      // Range geometry forces layout. TTS can emit many word boundaries per
+      // second, so throttle this work rather than forcing layout every word.
+      const now = root.performance?.now?.() ?? Date.now();
+      if (now - this.lastScrollCheckAt < 250) {
+        return;
+      }
+      this.lastScrollCheckAt = now;
 
       const rect = range.getBoundingClientRect();
       const upperBoundary = root.innerHeight * 0.18;
