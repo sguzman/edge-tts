@@ -14,7 +14,7 @@
   z-index: 2147483647;
   top: 16px;
   right: 16px;
-  width: 360px;
+  width: 380px;
   box-sizing: border-box;
   padding: 12px;
   border: 1px solid rgba(255, 255, 255, 0.18);
@@ -129,7 +129,8 @@
 }
 
 #edge-tts-toolbar select,
-#edge-tts-toolbar input[type="text"] {
+#edge-tts-toolbar input[type="text"],
+#edge-tts-toolbar input[type="password"] {
   min-width: 0;
   flex: 1;
   border: 1px solid rgba(255, 255, 255, 0.2);
@@ -139,11 +140,13 @@
   color: #fafafa;
 }
 
-#edge-tts-toolbar input[type="text"]::placeholder {
+#edge-tts-toolbar input[type="text"]::placeholder,
+#edge-tts-toolbar input[type="password"]::placeholder {
   color: #a1a1aa;
 }
 
 #edge-tts-toolbar input[type="text"]:focus,
+#edge-tts-toolbar input[type="password"]:focus,
 #edge-tts-toolbar select:focus {
   outline: 2px solid #93c5fd;
   outline-offset: 1px;
@@ -161,6 +164,52 @@
   padding: 0;
   font-size: 20px;
   line-height: 1;
+}
+
+#edge-tts-toolbar .edge-tts-azure-config {
+  margin: 0 0 9px;
+  padding: 7px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+#edge-tts-toolbar .edge-tts-azure-config summary {
+  cursor: pointer;
+  user-select: none;
+  font-weight: 600;
+}
+
+#edge-tts-toolbar .edge-tts-azure-body {
+  padding-top: 9px;
+}
+
+#edge-tts-toolbar .edge-tts-azure-body .edge-tts-row:last-of-type {
+  margin-bottom: 6px;
+}
+
+#edge-tts-toolbar .edge-tts-azure-key-row label {
+  min-width: 0;
+  flex: 1;
+}
+
+#edge-tts-toolbar .edge-tts-azure-key-row button {
+  flex: 0 0 auto;
+}
+
+#edge-tts-toolbar .edge-tts-azure-actions-row {
+  justify-content: flex-end;
+}
+
+#edge-tts-toolbar .edge-tts-azure-status {
+  color: #d4d4d8;
+  overflow-wrap: anywhere;
+}
+
+#edge-tts-toolbar .edge-tts-azure-note {
+  margin-top: 3px;
+  color: #a1a1aa;
+  font-size: 11px;
 }
 
 #edge-tts-toolbar .edge-tts-rate-label input {
