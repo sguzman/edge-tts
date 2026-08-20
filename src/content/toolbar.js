@@ -17,7 +17,17 @@
     }
 
     return voices.filter((voice) => {
-      const searchable = `${voice.name || ""} ${voice.lang || ""}`.toLocaleLowerCase();
+      const searchable = [
+        voice.name,
+        voice.lang,
+        voice.provider,
+        voice.source,
+        voice.shortName,
+        ...(Array.isArray(voice.styles) ? voice.styles : [])
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLocaleLowerCase();
       return terms.every((term) => searchable.includes(term));
     });
   }
@@ -32,7 +42,7 @@
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
       this.voices = [];
-      this.selectedVoiceName = "";
+      this.selectedVoiceId = "";
       this.rateInput = null;
       this.rateValue = null;
       this.status = null;
@@ -40,6 +50,11 @@
       this.sentenceColorInput = null;
       this.autoScrollInput = null;
       this.clickToSeekInput = null;
+      this.azureRegionInput = null;
+      this.azureKeyInput = null;
+      this.azureConnectButton = null;
+      this.azureClearButton = null;
+      this.azureStatus = null;
       this.minimizeButton = null;
       this.minimized = false;
       this.dragState = null;
@@ -57,10 +72,10 @@
       const element = document.createElement("section");
       element.id = "edge-tts-toolbar";
       element.dataset.edgeTtsUi = "true";
-      element.setAttribute("aria-label", "Edge Natural TTS controls");
+      element.setAttribute("aria-label", "Microsoft TTS controls");
       element.innerHTML = `
         <div class="edge-tts-header" data-edge-tts-drag-handle>
-          <strong>Edge TTS</strong>
+          <strong>TTS Reader</strong>
           <span data-edge-tts-status>Starting…</span>
           <button type="button" class="edge-tts-icon-button" data-edge-tts-action="minimize" title="Minimize controls" aria-label="Minimize controls">−</button>
         </div>
@@ -82,6 +97,29 @@
               <select data-edge-tts-voice aria-label="Voice"></select>
             </label>
           </div>
+          <details class="edge-tts-azure-config">
+            <summary>Azure voices</summary>
+            <div class="edge-tts-azure-body">
+              <div class="edge-tts-row">
+                <label>
+                  Region
+                  <input data-edge-tts-azure-region type="text" placeholder="eastus" autocomplete="off" spellcheck="false" aria-label="Azure Speech region">
+                </label>
+              </div>
+              <div class="edge-tts-row edge-tts-azure-key-row">
+                <label>
+                  Key
+                  <input data-edge-tts-azure-key type="password" placeholder="Speech key" autocomplete="off" spellcheck="false" aria-label="Azure Speech subscription key">
+                </label>
+                <button type="button" data-edge-tts-action="azure-connect">Load</button>
+              </div>
+              <div class="edge-tts-row edge-tts-azure-actions-row">
+                <button type="button" data-edge-tts-action="azure-clear">Forget saved key</button>
+              </div>
+              <div class="edge-tts-azure-status" data-edge-tts-azure-status></div>
+              <div class="edge-tts-azure-note">The key is stored in extension-local storage only.</div>
+            </div>
+          </details>
           <div class="edge-tts-row">
             <label class="edge-tts-rate-label">
               Speed
@@ -131,6 +169,11 @@
       this.sentenceColorInput = element.querySelector("[data-edge-tts-sentence-color]");
       this.clickToSeekInput = element.querySelector("[data-edge-tts-click-to-seek]");
       this.autoScrollInput = element.querySelector("[data-edge-tts-auto-scroll]");
+      this.azureRegionInput = element.querySelector("[data-edge-tts-azure-region]");
+      this.azureKeyInput = element.querySelector("[data-edge-tts-azure-key]");
+      this.azureConnectButton = element.querySelector("[data-edge-tts-action='azure-connect']");
+      this.azureClearButton = element.querySelector("[data-edge-tts-action='azure-clear']");
+      this.azureStatus = element.querySelector("[data-edge-tts-azure-status]");
       this.minimizeButton = element.querySelector("[data-edge-tts-action='minimize']");
       this.dragHandle = element.querySelector("[data-edge-tts-drag-handle]");
 
@@ -143,6 +186,17 @@
       });
       this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
       this.clearVoiceFilterButton.addEventListener("click", () => this.clearVoiceFilter());
+      this.azureConnectButton.addEventListener("click", () => {
+        this.handlers.onAzureConnect({
+          region: this.azureRegionInput.value,
+          key: this.azureKeyInput.value
+        });
+        this.azureKeyInput.value = "";
+      });
+      this.azureClearButton.addEventListener("click", () => {
+        this.azureKeyInput.value = "";
+        this.handlers.onAzureClear();
+      });
       this.rateInput.addEventListener("input", () => {
         const rate = Number(this.rateInput.value);
         this.rateValue.value = `${rate.toFixed(1)}×`;
@@ -203,9 +257,9 @@
       this.rateValue.value = `${Number(rate).toFixed(1)}×`;
     }
 
-    setVoices(voices, selectedName) {
+    setVoices(voices, selectedId) {
       this.voices = [...voices];
-      this.selectedVoiceName = selectedName || "";
+      this.selectedVoiceId = selectedId || "";
       this.renderVoiceOptions();
     }
 
@@ -215,7 +269,7 @@
       const query = this.voiceFilterInput?.value || "";
       const filteredVoices = filterVoices(this.voices, query);
       const selectedIsVisible = filteredVoices.some(
-        (voice) => voice.name === this.selectedVoiceName
+        (voice) => (voice.id || voice.name) === this.selectedVoiceId
       );
 
       this.voiceSelect.replaceChildren();
@@ -238,9 +292,11 @@
 
       for (const voice of filteredVoices) {
         const option = document.createElement("option");
-        option.value = voice.name;
-        option.textContent = `${voice.name} — ${voice.lang}`;
-        option.selected = voice.name === this.selectedVoiceName;
+        const id = voice.id || voice.name;
+        const provider = voice.provider || "Browser";
+        option.value = id;
+        option.textContent = `[${provider}] ${voice.name} — ${voice.lang || "unknown"}`;
+        option.selected = id === this.selectedVoiceId;
         this.voiceSelect.appendChild(option);
       }
 
@@ -254,6 +310,26 @@
       this.voiceFilterInput.value = "";
       this.renderVoiceOptions();
       this.voiceFilterInput.focus();
+    }
+
+    setAzureConfig({ available, region, hasKey, status }) {
+      if (this.azureRegionInput) this.azureRegionInput.value = region || "";
+      if (this.azureKeyInput) {
+        this.azureKeyInput.value = "";
+        this.azureKeyInput.placeholder = hasKey ? "Saved key — blank reuses it" : "Speech key";
+        this.azureKeyInput.disabled = !available;
+      }
+      if (this.azureRegionInput) this.azureRegionInput.disabled = !available;
+      if (this.azureConnectButton) this.azureConnectButton.disabled = !available;
+      if (this.azureClearButton) this.azureClearButton.disabled = !hasKey;
+      this.setAzureStatus(status || "");
+    }
+
+    setAzureStatus(text) {
+      if (this.azureStatus) {
+        this.azureStatus.textContent = text;
+        this.azureStatus.title = text;
+      }
     }
 
     setHighlightColors(wordColor, sentenceColor) {
@@ -293,7 +369,7 @@
     }
 
     handlePointerDown(event) {
-      if (event.button !== 0 || event.target.closest("button,input,select,label")) {
+      if (event.button !== 0 || event.target.closest("button,input,select,label,summary,details")) {
         return;
       }
 
@@ -349,5 +425,9 @@
     }
   }
 
-  extension.Toolbar = { Toolbar, filterVoices };
+  const api = { Toolbar, filterVoices };
+  if (typeof module === "object" && module.exports) {
+    module.exports = api;
+  }
+  extension.Toolbar = api;
 })(globalThis);
