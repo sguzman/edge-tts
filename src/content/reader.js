@@ -465,7 +465,7 @@
 
     async loadSettings() {
       try {
-        const stored = await chrome.storage.local.get(DEFAULT_SETTINGS);
+        const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
         const toolbarPosition = stored.toolbarPosition;
         const requiresSafetyMigration = Number(stored.settingsVersion || 0) < 2;
         this.settings = {
