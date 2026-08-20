@@ -1,71 +1,96 @@
-# Edge Natural TTS
+# Microsoft TTS Reader
 
-A Microsoft Edge extension that turns normal webpages into a synchronized read-aloud experience using Edge's online Natural voices.
+A synchronized read-aloud WebExtension for Microsoft Edge and Firefox.
 
-## Current MVP
+The reader now has two TTS backends:
 
-- Click the extension action to start reading near the current viewport.
-- Uses the browser's `SpeechSynthesis` voices and prefers voices whose names contain `Natural` or `Online`.
-- Highlights the currently spoken word using the CSS Custom Highlight API.
-- While the reader is active, click readable page text to jump to that exact word and continue from there.
-- Automatically advances through readable blocks on the page.
-- Pause/resume, stop, voice selection, and playback speed controls live in a small page toolbar.
-- Voice and speed preferences persist through `chrome.storage.local`.
-- Press `Esc` to close the reader.
+- **Browser / local speech** through the standard Web Speech `speechSynthesis` API. Edge exposes its Online/Natural voices here; Firefox exposes the local/system voices available to it.
+- **Microsoft Azure Speech** through the official browser Speech SDK in the Firefox build, giving Firefox access to Microsoft's large Azure neural voice catalog while preserving word-synchronized highlighting.
 
-## Install in Edge
+## Features
 
-1. Clone or download this repository.
-2. Open `edge://extensions`.
-3. Enable **Developer mode**.
-4. Click **Load unpacked**.
-5. Select this repository folder.
-6. Open a normal webpage and click the extension icon.
+- Starts reading near the current viewport.
+- Synchronized word and sentence highlighting.
+- Click-to-seek can be disabled completely so the extension does not intercept page clicks.
+- Pause/resume, stop, speed, colors, auto-scroll, draggable/minimizable toolbar.
+- Live voice search across name, locale, provider, Azure short name, and styles.
+- Editable fields and rich-text editors are hard-excluded from click-to-seek and page extraction.
+- Settings persist in extension-local storage.
 
-For `file://` pages, Edge also requires **Allow access to file URLs** on the extension details page.
+## Edge
 
-## Why this works without an Azure key
+The repository root remains directly loadable as an unpacked Edge extension:
 
-Microsoft Edge can expose online Text-to-Speech voice fonts to web applications that use the Web Speech `SpeechSynthesis` API. Edge's policy documentation describes those online voices as higher-quality voice fonts backed by Azure Cognitive Services. The extension uses that browser-provided surface rather than shipping an Azure subscription key.
+1. Open `edge://extensions`.
+2. Enable **Developer mode**.
+3. Click **Load unpacked** and select this repository.
+4. Reload the extension after pulling changes, then refresh the webpage.
 
-The reader listens for `SpeechSynthesisUtterance` boundary events. Each event provides a character index into the utterance, which is mapped back to the original DOM text node so the spoken word can be highlighted in sync.
+The root build uses browser-provided voices. In Edge that includes Online/Natural voices when Edge makes them available.
 
-## Important limitations
+## Firefox — local + Azure voices
 
-- Edge can disable online TTS through enterprise policy, so Natural/Online voices may not appear on managed installations.
-- Browser-restricted pages such as `edge://` pages and extension-store pages do not allow ordinary content-script injection.
-- Very unusual pages that render text in canvas/WebGL rather than DOM text are not readable by this approach.
-- The first version reads the top-level document only; cross-origin iframe orchestration is intentionally deferred.
-- Exact boundary behavior is voice/browser dependent. The intended target is Microsoft Edge's online Natural voices.
+Install the pinned Microsoft Speech SDK and build the Firefox package:
+
+```powershell
+npm install
+npm run build:firefox
+```
+
+Then:
+
+1. Open `about:debugging#/runtime/this-firefox`.
+2. Click **Load Temporary Add-on…**.
+3. Select `dist/firefox/manifest.json`.
+4. Open a webpage and click the extension action.
+
+Firefox local voices appear immediately. To add Azure voices, expand **Azure voices** in the toolbar, enter your Azure Speech region and subscription key, and click **Load**.
+
+See [`docs/FIREFOX.md`](docs/FIREFOX.md) for the Firefox/Azure workflow.
+
+## Cross-browser manifest
+
+Manifest V3 uses both background declarations:
+
+```json
+"background": {
+  "scripts": ["src/background.js"],
+  "service_worker": "src/background.js"
+}
+```
+
+Current Chromium uses the service worker, while Firefox uses the background script fallback.
 
 ## Development
 
-No build step and no runtime dependencies are required.
-
-```bash
+```powershell
 npm test
 npm run check
+npm run build:firefox
 ```
 
-The extension source is loaded directly from the repository.
+The Azure browser SDK dependency is pinned to `microsoft-cognitiveservices-speech-sdk@1.51.0`. The generated `dist/` directory and `node_modules/` are intentionally ignored.
 
 ## Layout
 
 ```text
 manifest.json
+scripts/
+  build-firefox.mjs
 src/
   background.js
   content/
     namespace.js
+    editable-guard.js
     text-model.js
     highlighter.js
     speech-engine.js
+    azure-speech-engine.js
     toolbar.js
     reader.js
     content-script.js
     content.css
 tests/
 docs/
+  FIREFOX.md
 ```
-
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for the component boundaries and next implementation steps.
