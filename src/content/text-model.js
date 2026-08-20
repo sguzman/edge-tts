@@ -416,17 +416,31 @@
       return null;
     }
 
-    const visible = blocks.find((block) => {
-      const rect = block.element.getBoundingClientRect();
-      return rect.bottom > 0 && rect.top < window.innerHeight;
-    });
+    // Blocks are in DOM order. Binary-search the first block whose bottom is
+    // below the top of the viewport instead of forcing layout for every block
+    // in a long document/chat.
+    let low = 0;
+    let high = blocks.length - 1;
+    let candidateIndex = blocks.length - 1;
 
-    if (visible) {
-      return visible;
+    while (low <= high) {
+      const middle = Math.floor((low + high) / 2);
+      const rect = blocks[middle].element.getBoundingClientRect();
+      if (rect.bottom > 0) {
+        candidateIndex = middle;
+        high = middle - 1;
+      } else {
+        low = middle + 1;
+      }
     }
 
-    const below = blocks.find((block) => block.element.getBoundingClientRect().bottom > 0);
-    return below || blocks[0];
+    const candidate = blocks[candidateIndex];
+    const rect = candidate.element.getBoundingClientRect();
+    if (rect.top < window.innerHeight) {
+      return candidate;
+    }
+
+    return candidate || blocks[0];
   }
 
   function segmentIndexForCharIndex(starts, charIndex) {
