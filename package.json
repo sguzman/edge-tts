@@ -1,14 +1,10 @@
 {
-  "name": "microsoft-tts-reader",
-  "version": "0.3.0",
+  "name": "edge-natural-tts",
+  "version": "0.3.1",
   "private": true,
-  "description": "Cross-browser synchronized TTS reader for browser/local and Microsoft Azure voices.",
+  "description": "Microsoft Edge extension for natural text-to-speech with synchronized highlighting.",
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/background.js && node --check src/content/namespace.js && node --check src/content/editable-guard.js && node --check src/content/text-model.js && node --check src/content/highlighter.js && node --check src/content/speech-engine.js && node --check src/content/azure-speech-engine.js && node --check src/content/toolbar.js && node --check src/content/reader.js && node --check src/content/content-script.js && node --check scripts/build-firefox.mjs",
-    "build:firefox": "node scripts/build-firefox.mjs"
-  },
-  "dependencies": {
-    "microsoft-cognitiveservices-speech-sdk": "1.51.0"
+    "check": "node --check src/background.js && node --check src/content/namespace.js && node --check src/content/text-model.js && node --check src/content/highlighter.js && node --check src/content/speech-engine.js && node --check src/content/toolbar.js && node --check src/content/reader.js && node --check src/content/content-script.js"
   }
 }
