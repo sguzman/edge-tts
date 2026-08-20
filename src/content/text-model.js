@@ -27,14 +27,27 @@
     "th"
   ].join(",");
 
+  const EDITABLE_SELECTOR = [
+    "textarea",
+    "input",
+    "select",
+    "[contenteditable]:not([contenteditable='false'])",
+    "[role='textbox']",
+    "[role='searchbox']",
+    "[role='combobox']",
+    ".ProseMirror",
+    ".monaco-editor",
+    ".CodeMirror",
+    ".cm-editor",
+    "[data-lexical-editor='true']",
+    "[data-slate-editor='true']"
+  ].join(",");
+
   const EXCLUDED_SELECTOR = [
     "script",
     "style",
     "noscript",
     "template",
-    "textarea",
-    "input",
-    "select",
     "option",
     "button",
     "nav",
@@ -42,8 +55,26 @@
     "footer",
     "[hidden]",
     "[aria-hidden='true']",
-    "[data-edge-tts-ui]"
+    "[data-edge-tts-ui]",
+    EDITABLE_SELECTOR
   ].join(",");
+
+  const CHATGPT_MESSAGE_SELECTOR = [
+    "[data-message-author-role='user']",
+    "[data-message-author-role='assistant']"
+  ].join(",");
+
+  function siteProfileForHostname(hostname) {
+    const normalized = String(hostname || "").toLowerCase();
+    if (
+      normalized === "chatgpt.com" ||
+      normalized.endsWith(".chatgpt.com") ||
+      normalized === "chat.openai.com"
+    ) {
+      return "chatgpt";
+    }
+    return "generic";
+  }
 
   function tokenizeText(text) {
     const tokens = [];
@@ -156,7 +187,7 @@
     return sentences;
   }
 
-  function isElementVisible(element, visibilityCache) {
+  function isElementReadable(element, visibilityCache) {
     if (!(element instanceof Element)) {
       return false;
     }
@@ -165,21 +196,21 @@
       return visibilityCache.get(element);
     }
 
-    let visible = true;
+    let readable = true;
     if (element.closest(EXCLUDED_SELECTOR)) {
-      visible = false;
+      readable = false;
     } else {
+      // Avoid getBoundingClientRect() while building the model. Repeated layout
+      // reads are expensive on large application DOMs such as ChatGPT.
       const style = getComputedStyle(element);
-      if (style.display === "none" || style.visibility === "hidden" || style.opacity === "0") {
-        visible = false;
-      } else {
-        const rect = element.getBoundingClientRect();
-        visible = rect.width > 0 && rect.height > 0;
-      }
+      readable =
+        style.display !== "none" &&
+        style.visibility !== "hidden" &&
+        style.contentVisibility !== "hidden";
     }
 
-    visibilityCache?.set(element, visible);
-    return visible;
+    visibilityCache?.set(element, readable);
+    return readable;
   }
 
   function isTextNodeReadable(node, visibilityCache) {
@@ -188,7 +219,7 @@
     }
 
     const parent = node.parentElement;
-    return Boolean(parent && isElementVisible(parent, visibilityCache));
+    return Boolean(parent && isElementReadable(parent, visibilityCache));
   }
 
   function extractBlock(element, blockIndex, visibilityCache, language) {
@@ -229,12 +260,14 @@
       return null;
     }
 
+    const messageRoot = element.closest?.(CHATGPT_MESSAGE_SELECTOR);
     const block = {
       index: blockIndex,
       element,
       text: output,
       segments,
-      sentences: []
+      sentences: [],
+      authorRole: messageRoot?.getAttribute("data-message-author-role") || ""
     };
     block.sentences = annotateSentences(block, language);
     return block;
@@ -243,22 +276,23 @@
   function pickReadingRoot(doc, visibilityCache) {
     const semanticRoots = Array.from(doc.querySelectorAll("article,main,[role='main']"));
     const visibleRoots = semanticRoots.filter((element) =>
-      isElementVisible(element, visibilityCache)
+      isElementReadable(element, visibilityCache)
     );
 
     if (visibleRoots.length === 0) {
       return doc.body;
     }
 
+    // textContent avoids innerText's layout-dependent traversal.
     return visibleRoots.reduce((best, candidate) => {
-      const bestLength = best.innerText?.trim().length || 0;
-      const candidateLength = candidate.innerText?.trim().length || 0;
+      const bestLength = best.textContent?.trim().length || 0;
+      const candidateLength = candidate.textContent?.trim().length || 0;
       return candidateLength > bestLength ? candidate : best;
     });
   }
 
   function shouldKeepCandidate(element, visibilityCache) {
-    if (!isElementVisible(element, visibilityCache)) {
+    if (!isElementReadable(element, visibilityCache)) {
       return false;
     }
 
@@ -269,13 +303,50 @@
     return true;
   }
 
+  function collectChatGptCandidates(doc, visibilityCache) {
+    const roots = Array.from(doc.querySelectorAll(CHATGPT_MESSAGE_SELECTOR)).filter(
+      (element) =>
+        !element.parentElement?.closest(CHATGPT_MESSAGE_SELECTOR) &&
+        isElementReadable(element, visibilityCache)
+    );
+
+    if (roots.length === 0) {
+      return [];
+    }
+
+    const candidates = [];
+    for (const root of roots) {
+      const nested = Array.from(root.querySelectorAll(BLOCK_SELECTOR)).filter((element) =>
+        shouldKeepCandidate(element, visibilityCache)
+      );
+
+      if (nested.length > 0) {
+        candidates.push(...nested);
+      } else if (shouldKeepCandidate(root, visibilityCache)) {
+        // User messages are often plain divs rather than paragraphs.
+        candidates.push(root);
+      }
+    }
+    return candidates;
+  }
+
   function buildReadableModel(doc = document) {
     const visibilityCache = new WeakMap();
     const language = doc.documentElement?.lang || globalThis.navigator?.language;
-    const readingRoot = pickReadingRoot(doc, visibilityCache);
-    const candidates = Array.from(readingRoot.querySelectorAll(BLOCK_SELECTOR)).filter((element) =>
-      shouldKeepCandidate(element, visibilityCache)
-    );
+    const profile = siteProfileForHostname(doc.location?.hostname);
+    let readingRoot = null;
+    let candidates = [];
+
+    if (profile === "chatgpt") {
+      candidates = collectChatGptCandidates(doc, visibilityCache);
+    }
+
+    if (candidates.length === 0) {
+      readingRoot = pickReadingRoot(doc, visibilityCache);
+      candidates = Array.from(readingRoot.querySelectorAll(BLOCK_SELECTOR)).filter((element) =>
+        shouldKeepCandidate(element, visibilityCache)
+      );
+    }
 
     const blocks = [];
     const nodeToBlock = new WeakMap();
@@ -304,7 +375,11 @@
       }
     }
 
-    return { blocks, nodeToBlock };
+    return {
+      blocks,
+      nodeToBlock,
+      profile: profile === "chatgpt" && blocks.length > 0 ? "chatgpt" : "generic"
+    };
   }
 
   function findSegmentInNode(block, node, offset) {
@@ -383,6 +458,7 @@
     firstBlockNearViewport,
     segmentIndexForCharIndex,
     sentenceRanges,
+    siteProfileForHostname,
     tokenizeText
   };
 });
