@@ -6,6 +6,6 @@ chrome.action.onClicked.addListener(async (tab) => {
   try {
     await chrome.tabs.sendMessage(tab.id, { type: "EDGE_TTS_TOGGLE" });
   } catch (error) {
-    console.warn("Microsoft TTS Reader could not run on this page.", error);
+    console.warn("Edge Natural TTS could not run on this page.", error);
   }
 });
