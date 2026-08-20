@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   segmentIndexForCharIndex,
   sentenceRanges,
+  siteProfileForHostname,
   tokenizeText
 } = require("../src/content/text-model.js");
 
@@ -28,4 +29,11 @@ test("segmentIndexForCharIndex returns the nearest segment at or before the boun
   assert.equal(segmentIndexForCharIndex(starts, 7), 1);
   assert.equal(segmentIndexForCharIndex(starts, 19), 2);
   assert.equal(segmentIndexForCharIndex(starts, 999), 3);
+});
+
+test("ChatGPT hosts use the message-only reading profile", () => {
+  assert.equal(siteProfileForHostname("chatgpt.com"), "chatgpt");
+  assert.equal(siteProfileForHostname("www.chatgpt.com"), "chatgpt");
+  assert.equal(siteProfileForHostname("chat.openai.com"), "chatgpt");
+  assert.equal(siteProfileForHostname("example.com"), "generic");
 });
