@@ -1,22 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "Microsoft TTS Reader",
-  "version": "0.3.0",
-  "description": "Cross-browser read-aloud with local browser voices and optional Microsoft Azure neural voices.",
+  "name": "Edge Natural TTS",
+  "version": "0.3.1",
+  "description": "Read webpages with Microsoft Edge online natural voices and synchronized highlighting.",
   "permissions": ["storage"],
   "host_permissions": ["<all_urls>"],
   "action": {
-    "default_title": "Start or stop Microsoft TTS Reader"
+    "default_title": "Start or stop Edge Natural TTS"
   },
   "background": {
-    "scripts": ["src/background.js"],
     "service_worker": "src/background.js"
-  },
-  "browser_specific_settings": {
-    "gecko": {
-      "id": "microsoft-tts-reader@sguzman",
-      "strict_min_version": "121.0"
-    }
   },
   "content_scripts": [
     {
@@ -24,11 +17,9 @@
       "run_at": "document_idle",
       "js": [
         "src/content/namespace.js",
-        "src/content/editable-guard.js",
         "src/content/text-model.js",
         "src/content/highlighter.js",
         "src/content/speech-engine.js",
-        "src/content/azure-speech-engine.js",
         "src/content/toolbar.js",
         "src/content/reader.js",
         "src/content/content-script.js"
