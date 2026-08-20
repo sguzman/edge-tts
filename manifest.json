@@ -1,30 +1,13 @@
 {
   "manifest_version": 3,
   "name": "Edge Natural TTS",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Read webpages with Microsoft Edge online natural voices and synchronized highlighting.",
-  "permissions": ["storage"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": ["storage", "scripting", "activeTab"],
   "action": {
     "default_title": "Start or stop Edge Natural TTS"
   },
   "background": {
     "service_worker": "src/background.js"
-  },
-  "content_scripts": [
-    {
-      "matches": ["<all_urls>"],
-      "run_at": "document_idle",
-      "js": [
-        "src/content/namespace.js",
-        "src/content/text-model.js",
-        "src/content/highlighter.js",
-        "src/content/speech-engine.js",
-        "src/content/toolbar.js",
-        "src/content/reader.js",
-        "src/content/content-script.js"
-      ],
-      "css": ["src/content/content.css"]
-    }
-  ]
+  }
 }
