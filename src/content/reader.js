@@ -8,18 +8,39 @@
     normalizeColor
   } = extension.Highlighter;
   const { SpeechEngine, isNaturalVoice } = extension.SpeechEngine;
+  const { AzureSpeechEngine } = extension.AzureSpeechEngine;
   const { Toolbar } = extension.Toolbar;
 
   const DEFAULT_SETTINGS = {
     rate: 1,
+    voiceId: "",
     voiceName: "",
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
     autoScroll: true,
     clickToSeek: true,
     minimized: false,
-    toolbarPosition: null
+    toolbarPosition: null,
+    azureRegion: "",
+    azureKey: ""
   };
+
+  function browserVoiceId(voice) {
+    const identity = voice.voiceURI || voice.name || "voice";
+    return `browser:${identity}:${voice.lang || ""}`;
+  }
+
+  function describeBrowserVoice(voice) {
+    const online = isNaturalVoice(voice);
+    return {
+      id: browserVoiceId(voice),
+      name: voice.name || "Unnamed voice",
+      lang: voice.lang || "",
+      source: online ? "edge-online" : "local",
+      provider: online ? "Edge Online" : "Local",
+      nativeVoice: voice
+    };
+  }
 
   class ReaderApp {
     constructor() {
@@ -30,6 +51,8 @@
       this.stopped = true;
       this.paused = false;
       this.settings = { ...DEFAULT_SETTINGS };
+      this.browserVoices = [];
+      this.azureVoices = [];
       this.voices = [];
       this.selectedVoice = null;
       this.lastSpeakRequestedAt = 0;
@@ -37,21 +60,28 @@
       this.resumeWatchdog = null;
       this.pageClickListening = false;
       this.highlighter = new Highlighter();
-      this.speech = new SpeechEngine({
+
+      const callbacks = {
         onBoundary: (segment) => this.handleBoundary(segment),
         onEnd: () => this.handleBlockEnd(),
         onError: (error) => this.handleError(error),
         onStart: (_segment, latencyMs) => this.handleSpeechStart(latencyMs)
-      });
+      };
+      this.speech = new SpeechEngine(callbacks);
+      this.azure = new AzureSpeechEngine(callbacks);
+      this.activeEngine = this.speech;
+
       this.toolbar = new Toolbar({
         onPlayPause: () => this.playPause(),
         onStop: () => this.stop(),
-        onVoice: (name) => this.changeVoice(name),
+        onVoice: (id) => this.changeVoice(id),
         onRate: (rate) => this.changeRate(rate),
         onWordColor: (color) => this.changeWordColor(color),
         onSentenceColor: (color) => this.changeSentenceColor(color),
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
         onClickToSeek: (enabled) => this.changeClickToSeek(enabled),
+        onAzureConnect: (configuration) => this.changeAzureConfig(configuration),
+        onAzureClear: () => this.clearAzureConfig(),
         onMinimized: (minimized) => this.changeMinimized(minimized),
         onPosition: (position) => this.changeToolbarPosition(position)
       });
@@ -60,7 +90,7 @@
       this.boundKeydown = (event) => this.handleKeydown(event);
       this.unsubscribeVoiceChanges = this.speech.onVoicesChanged(() => {
         if (this.enabled) {
-          this.refreshVoices();
+          this.refreshBrowserVoices();
         }
       });
     }
@@ -87,11 +117,15 @@
       await settingsPromise;
       this.applySettings();
 
-      this.refreshVoices();
-      if (!this.voices.some(isNaturalVoice)) {
-        this.toolbar.setStatus("Loading Natural voice…");
-        await this.speech.waitForVoices(350, (voices) => voices.some(isNaturalVoice));
-        this.refreshVoices();
+      this.refreshBrowserVoices();
+      if (this.browserVoices.length === 0) {
+        this.toolbar.setStatus("Loading local voices…");
+        await this.speech.waitForVoices(350, (voices) => voices.length > 0);
+        this.refreshBrowserVoices();
+      }
+
+      if (this.azure.isAvailable() && this.azure.hasCredentials()) {
+        void this.refreshAzureVoices({ restartIfSelectionChanges: true });
       }
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -104,7 +138,7 @@
       this.currentBlockIndex = startBlock.index;
       this.currentSegmentIndex = 0;
       console.debug(
-        `Edge Natural TTS startup prepared in ${Math.round(performance.now() - openStartedAt)}ms`
+        `Microsoft TTS startup prepared in ${Math.round(performance.now() - openStartedAt)}ms`
       );
       this.speakCurrentPosition();
     }
@@ -136,6 +170,7 @@
       this.stopped = true;
       this.paused = false;
       this.speech.cancel();
+      this.azure.cancel();
       this.highlighter.clear();
       this.toolbar.setStopped();
     }
@@ -160,14 +195,14 @@
 
       if (this.paused) {
         const serialBeforeResume = this.boundarySerial;
-        this.speech.resume();
+        this.activeEngine.resume();
         this.paused = false;
         this.toolbar.setPaused(false);
         this.toolbar.setStatus("Resuming…");
         this.startResumeWatchdog(serialBeforeResume);
       } else {
         this.clearResumeWatchdog();
-        this.speech.pause();
+        this.activeEngine.pause();
         this.paused = true;
         this.toolbar.setPaused(true);
       }
@@ -181,9 +216,7 @@
           return;
         }
 
-        console.warn(
-          "Edge Natural TTS resume made no progress; restarting from the current word."
-        );
+        console.warn("Microsoft TTS resume made no progress; restarting from the current word.");
         this.speakCurrentPosition();
       }, 1200);
     }
@@ -199,40 +232,111 @@
       const startedAt = performance.now();
       this.model = buildReadableModel(document);
       console.debug(
-        `Edge Natural TTS modeled ${this.model.blocks.length} blocks in ${Math.round(
+        `Microsoft TTS modeled ${this.model.blocks.length} blocks in ${Math.round(
           performance.now() - startedAt
         )}ms`
       );
     }
 
     applySettings() {
+      this.azure.configure({ key: this.settings.azureKey, region: this.settings.azureRegion });
       this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
       this.highlighter.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setRate(this.settings.rate);
       this.toolbar.setHighlightColors(this.settings.wordColor, this.settings.sentenceColor);
       this.toolbar.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setClickToSeek(this.settings.clickToSeek);
+      this.toolbar.setAzureConfig({
+        available: this.azure.isAvailable(),
+        region: this.settings.azureRegion,
+        hasKey: Boolean(this.settings.azureKey),
+        status: this.azure.isAvailable()
+          ? this.settings.azureKey && this.settings.azureRegion
+            ? "Azure configured; loading voices…"
+            : "Enter a Speech key and region to add Azure voices."
+          : "Azure SDK is available in the Firefox build."
+      });
       this.toolbar.setMinimized(this.settings.minimized);
       this.toolbar.setPosition(this.settings.toolbarPosition);
       this.syncPageClickListener();
     }
 
-    refreshVoices() {
+    refreshBrowserVoices() {
       const documentLanguage = document.documentElement.lang || navigator.language;
-      const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
-      this.voices = voices;
+      const nativeVoices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
+      this.browserVoices = nativeVoices.map(describeBrowserVoice);
+      this.rebuildVoiceCatalog();
+    }
+
+    rebuildVoiceCatalog() {
+      const previousSelectedId = this.selectedVoice?.id || "";
+      this.voices = [...this.browserVoices, ...this.azureVoices];
+
+      const savedById = this.settings.voiceId
+        ? this.voices.find((voice) => voice.id === this.settings.voiceId)
+        : null;
+      const migratedByName = !this.settings.voiceId && this.settings.voiceName
+        ? this.voices.find((voice) => voice.name === this.settings.voiceName)
+        : null;
+      const stillSelected = this.voices.find((voice) => voice.id === previousSelectedId);
+      const browserNatural = this.browserVoices.find((voice) => voice.source === "edge-online");
+
       this.selectedVoice =
-        voices.find((voice) => voice.name === this.settings.voiceName) ||
-        voices.find(isNaturalVoice) ||
-        voices[0] ||
+        savedById ||
+        migratedByName ||
+        stillSelected ||
+        browserNatural ||
+        this.browserVoices[0] ||
+        this.azureVoices[0] ||
         null;
 
+      if (!this.settings.voiceId && this.selectedVoice) {
+        this.settings.voiceId = this.selectedVoice.id;
+      }
       if (this.selectedVoice) {
         this.settings.voiceName = this.selectedVoice.name;
       }
 
-      this.toolbar.setVoices(voices, this.settings.voiceName);
+      this.toolbar.setVoices(this.voices, this.selectedVoice?.id || this.settings.voiceId);
       this.toolbar.setRate(this.settings.rate);
+    }
+
+    async refreshAzureVoices({ restartIfSelectionChanges = false } = {}) {
+      if (!this.azure.isAvailable()) {
+        this.azureVoices = [];
+        this.rebuildVoiceCatalog();
+        this.toolbar.setAzureStatus("Azure SDK is not bundled in this build.");
+        return;
+      }
+      if (!this.azure.hasCredentials()) {
+        this.azureVoices = [];
+        this.rebuildVoiceCatalog();
+        this.toolbar.setAzureStatus("Enter a Speech key and region to add Azure voices.");
+        return;
+      }
+
+      const before = this.selectedVoice?.id || "";
+      this.toolbar.setAzureStatus("Loading Azure voices…");
+      try {
+        this.azureVoices = await this.azure.getVoices();
+        this.rebuildVoiceCatalog();
+        this.toolbar.setAzureStatus(`${this.azureVoices.length} Azure voices loaded.`);
+
+        if (
+          restartIfSelectionChanges &&
+          !this.stopped &&
+          before &&
+          this.selectedVoice?.id &&
+          this.selectedVoice.id !== before
+        ) {
+          this.speakCurrentPosition();
+        }
+      } catch (error) {
+        console.error("Microsoft TTS Azure voice loading failed", error);
+        this.azureVoices = [];
+        this.rebuildVoiceCatalog();
+        this.toolbar.setAzureStatus(`Azure error: ${error.message}`);
+      }
     }
 
     speakCurrentPosition() {
@@ -242,23 +346,39 @@
         this.finishDocument();
         return;
       }
+      if (!this.selectedVoice) {
+        this.handleError(new Error("No TTS voices are available."));
+        return;
+      }
+
+      this.speech.cancel();
+      this.azure.cancel();
+      this.activeEngine = this.selectedVoice.source === "azure" ? this.azure : this.speech;
 
       this.stopped = false;
       this.paused = false;
       this.toolbar.setPaused(false);
       this.toolbar.setStatus("Starting speech…");
       this.lastSpeakRequestedAt = performance.now();
-      this.speech.speak(block, this.currentSegmentIndex, {
-        rate: this.settings.rate,
-        voice: this.selectedVoice
-      });
+
+      if (this.selectedVoice.source === "azure") {
+        this.azure.speak(block, this.currentSegmentIndex, {
+          rate: this.settings.rate,
+          voice: this.selectedVoice
+        });
+      } else {
+        this.speech.speak(block, this.currentSegmentIndex, {
+          rate: this.settings.rate,
+          voice: this.selectedVoice.nativeVoice
+        });
+      }
     }
 
     handleSpeechStart(latencyMs) {
       if (this.stopped) return;
       this.clearResumeWatchdog();
       this.toolbar.setStatus("Reading");
-      console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
+      console.debug(`Microsoft TTS first audio started in ${Math.round(latencyMs)}ms`);
     }
 
     handleBoundary(segment) {
@@ -290,6 +410,7 @@
       this.clearResumeWatchdog();
       this.stopped = true;
       this.speech.cancel();
+      this.azure.cancel();
       this.highlighter.clear();
       this.toolbar.setStatus("Finished");
       this.toolbar.setStopped();
@@ -297,8 +418,10 @@
 
     handleError(error) {
       this.clearResumeWatchdog();
-      console.error("Edge Natural TTS", error);
+      console.error("Microsoft TTS", error);
       this.stopped = true;
+      this.speech.cancel();
+      this.azure.cancel();
       this.highlighter.clear();
       this.toolbar.setStatus(error.message);
       this.toolbar.setStopped();
@@ -367,11 +490,13 @@
       }
     }
 
-    async changeVoice(name) {
-      const voice = this.voices.find((candidate) => candidate.name === name);
+    async changeVoice(id) {
+      const voice = this.voices.find((candidate) => candidate.id === id);
       if (!voice) return;
       this.selectedVoice = voice;
+      this.settings.voiceId = voice.id;
       this.settings.voiceName = voice.name;
+      this.toolbar.setVoices(this.voices, voice.id);
       await this.saveSettings();
       if (!this.stopped) {
         this.speakCurrentPosition();
@@ -410,6 +535,49 @@
       await this.saveSettings();
     }
 
+    async changeAzureConfig({ key, region }) {
+      const nextRegion = String(region || "").trim();
+      const enteredKey = String(key || "").trim();
+      if (nextRegion) this.settings.azureRegion = nextRegion;
+      if (enteredKey) this.settings.azureKey = enteredKey;
+
+      this.azure.configure({ key: this.settings.azureKey, region: this.settings.azureRegion });
+      this.toolbar.setAzureConfig({
+        available: this.azure.isAvailable(),
+        region: this.settings.azureRegion,
+        hasKey: Boolean(this.settings.azureKey),
+        status: "Loading Azure voices…"
+      });
+      await this.saveSettings();
+      await this.refreshAzureVoices({ restartIfSelectionChanges: true });
+    }
+
+    async clearAzureConfig() {
+      const wasUsingAzure = this.selectedVoice?.source === "azure";
+      this.settings.azureKey = "";
+      this.azure.configure({ key: "", region: this.settings.azureRegion });
+      this.azureVoices = [];
+      if (this.settings.voiceId.startsWith("azure:")) {
+        this.settings.voiceId = "";
+      }
+      this.rebuildVoiceCatalog();
+      this.toolbar.setAzureConfig({
+        available: this.azure.isAvailable(),
+        region: this.settings.azureRegion,
+        hasKey: false,
+        status: "Azure key removed. Local voices remain available."
+      });
+      await this.saveSettings();
+      if (wasUsingAzure && !this.stopped) {
+        this.azure.cancel();
+        if (this.selectedVoice) {
+          this.speakCurrentPosition();
+        } else {
+          this.stop();
+        }
+      }
+    }
+
     async changeMinimized(minimized) {
       this.settings.minimized = Boolean(minimized);
       await this.saveSettings();
@@ -426,6 +594,7 @@
         const toolbarPosition = stored.toolbarPosition;
         this.settings = {
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
+          voiceId: stored.voiceId || "",
           voiceName: stored.voiceName || "",
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
@@ -437,10 +606,12 @@
             Number.isFinite(Number(toolbarPosition.x)) &&
             Number.isFinite(Number(toolbarPosition.y))
               ? { x: Number(toolbarPosition.x), y: Number(toolbarPosition.y) }
-              : null
+              : null,
+          azureRegion: String(stored.azureRegion || ""),
+          azureKey: String(stored.azureKey || "")
         };
       } catch (error) {
-        console.warn("Could not load Edge Natural TTS settings.", error);
+        console.warn("Could not load Microsoft TTS settings.", error);
       }
     }
 
@@ -448,10 +619,10 @@
       try {
         await chrome.storage.local.set(this.settings);
       } catch (error) {
-        console.warn("Could not save Edge Natural TTS settings.", error);
+        console.warn("Could not save Microsoft TTS settings.", error);
       }
     }
   }
 
-  extension.Reader = { ReaderApp };
+  extension.Reader = { ReaderApp, browserVoiceId, describeBrowserVoice };
 })(globalThis);
