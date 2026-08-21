@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 global.navigator = { language: "en-US" };
 const {
+  createSpeechBatch,
   createUtteranceChunks,
   createUtterancePayload,
   isNaturalVoice,
@@ -22,6 +23,44 @@ test("createUtterancePayload remaps segment starts after a seek", () => {
   assert.equal(payload.text, "one two");
   assert.deepEqual(payload.starts, [0, 4]);
   assert.equal(payload.segments.length, 2);
+});
+
+test("payload preserves paragraph boundaries when batching blocks", () => {
+  const block = {
+    segments: [
+      { text: "First.", blockIndex: 0 },
+      { text: "Second.", blockIndex: 1 }
+    ]
+  };
+
+  const payload = createUtterancePayload(block, 0);
+  assert.equal(payload.text, "First.\n\nSecond.");
+  assert.deepEqual(payload.starts, [0, 8]);
+});
+
+test("speech batch combines short adjacent paragraphs to the target", () => {
+  const blocks = [
+    { segments: [{ text: "a".repeat(300), blockIndex: 0, sentenceIndex: 0 }] },
+    { segments: [{ text: "b".repeat(350), blockIndex: 1, sentenceIndex: 0 }] },
+    { segments: [{ text: "c".repeat(600), blockIndex: 2, sentenceIndex: 0 }] },
+    { segments: [{ text: "d".repeat(600), blockIndex: 3, sentenceIndex: 0 }] }
+  ];
+
+  const batch = createSpeechBatch(blocks, 0, 0, { minChars: 1000, maxChars: 2000 });
+  assert.equal(batch.endBlockIndex, 2);
+  assert.equal(batch.segments.length, 3);
+  assert.ok(batch.charLength >= 1000);
+});
+
+test("speech batch leaves a substantial paragraph on its own", () => {
+  const blocks = [
+    { segments: [{ text: "a".repeat(1300), blockIndex: 0, sentenceIndex: 0 }] },
+    { segments: [{ text: "b".repeat(200), blockIndex: 1, sentenceIndex: 0 }] }
+  ];
+
+  const batch = createSpeechBatch(blocks, 0, 0, { minChars: 1200, maxChars: 2400 });
+  assert.equal(batch.endBlockIndex, 0);
+  assert.equal(batch.segments.length, 1);
 });
 
 test("short neighboring sentences stay in one utterance for continuous playback", () => {
