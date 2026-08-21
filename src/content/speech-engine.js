@@ -39,13 +39,24 @@
     );
   }
 
+  function separatorForSegments(left, right) {
+    if (
+      left?.blockIndex !== undefined &&
+      right?.blockIndex !== undefined &&
+      left.blockIndex !== right.blockIndex
+    ) {
+      return "\n\n";
+    }
+    return " ";
+  }
+
   function createPayloadFromSegments(segments) {
     const starts = [];
     let text = "";
 
     segments.forEach((segment, index) => {
       if (index > 0) {
-        text += " ";
+        text += separatorForSegments(segments[index - 1], segment);
       }
       starts.push(text.length);
       text += segment.text;
@@ -56,6 +67,59 @@
 
   function createUtterancePayload(block, startSegmentIndex) {
     return createPayloadFromSegments(block.segments.slice(startSegmentIndex));
+  }
+
+  function createSpeechBatch(
+    blocks,
+    startBlockIndex,
+    startSegmentIndex,
+    { minChars = 1200, maxChars = Math.max(2400, minChars * 2) } = {}
+  ) {
+    const targetMin = Math.max(1, Math.floor(Number(minChars) || 1200));
+    const targetMax = Math.max(targetMin, Math.floor(Number(maxChars) || targetMin * 2));
+    const segments = [];
+    let charLength = 0;
+    let endBlockIndex = -1;
+
+    for (let blockIndex = startBlockIndex; blockIndex < blocks.length; blockIndex += 1) {
+      const block = blocks[blockIndex];
+      if (!block?.segments?.length) continue;
+
+      const firstSegmentIndex = blockIndex === startBlockIndex ? startSegmentIndex : 0;
+      const blockSegments = block.segments.slice(firstSegmentIndex);
+      if (blockSegments.length === 0) continue;
+
+      const blockPayload = createPayloadFromSegments(blockSegments);
+      const joinLength = segments.length
+        ? separatorForSegments(segments[segments.length - 1], blockSegments[0]).length
+        : 0;
+      const projectedLength = charLength + joinLength + blockPayload.text.length;
+
+      // Do not drag a large following paragraph into a nearly-complete batch.
+      // It can be synthesized efficiently as the first block of the next batch.
+      if (segments.length > 0 && projectedLength > targetMax) {
+        break;
+      }
+
+      segments.push(...blockSegments);
+      charLength = projectedLength;
+      endBlockIndex = blockIndex;
+
+      if (charLength >= targetMin) {
+        break;
+      }
+    }
+
+    if (segments.length === 0) {
+      return null;
+    }
+
+    return {
+      segments,
+      startBlockIndex,
+      endBlockIndex,
+      charLength
+    };
   }
 
   function createUtteranceChunks(
@@ -80,19 +144,25 @@
     for (let index = 0; index < remaining.length; index += 1) {
       const segment = remaining[index];
       const next = remaining[index + 1];
-      currentLength += (current.length > 0 ? 1 : 0) + segment.text.length;
+      if (current.length > 0) {
+        currentLength += separatorForSegments(current[current.length - 1], segment).length;
+      }
+      currentLength += segment.text.length;
       current.push(segment);
 
+      const blockEnds = Boolean(next && segment.blockIndex !== next.blockIndex);
       const sentenceEnds =
         !next ||
+        blockEnds ||
         segment.sentenceIndex !== next.sentenceIndex ||
         /[.!?]["'”’\)\]]*$/.test(segment.text);
       const targetMax = chunks.length === 0 ? firstChunkMaxChars : maxChars;
       const reachedSentenceBoundary = currentLength >= targetMax && sentenceEnds;
       const reachedHardLimit = currentLength >= Math.ceil(targetMax * hardLimitFactor);
 
-      // Keep several sentences inside one utterance. Edge's Online (Natural)
-      // voices can incur a fresh startup delay at each utterance boundary.
+      // Keep several sentences (and, when supplied, several small DOM blocks)
+      // inside one utterance. Edge's Online (Natural) voices can incur a fresh
+      // startup delay at every utterance boundary.
       if (reachedSentenceBoundary || reachedHardLimit || !next) {
         flush();
       }
@@ -198,7 +268,7 @@
         return;
       }
 
-      const chunks = createUtteranceChunks(block, startSegmentIndex);
+      const chunks = createUtteranceChunks(block, startSegmentIndex, options?.chunkOptions);
       if (chunks.length === 0) {
         this.onEnd?.();
         return;
@@ -293,6 +363,7 @@
 
   return {
     SpeechEngine,
+    createSpeechBatch,
     createUtteranceChunks,
     createUtterancePayload,
     isNaturalVoice,
