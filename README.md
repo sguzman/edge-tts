@@ -4,9 +4,11 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 
 ## Current behavior
 
-- Click the extension action to inject and start the reader on the current tab.
+- Click the extension action to inject the reader into the current tab and start reading near the current viewport.
 - Uses Edge's `SpeechSynthesis` voices and prefers voices whose names contain `Natural` or `Online`.
 - Highlights the currently spoken word and sentence using the CSS Custom Highlight API.
+- Adjacent short paragraphs are batched into a single speech request to avoid repeated online-voice startup latency. A sufficiently large paragraph stays on its own.
+- The **Batch target** control is configurable from 400 to 2400 characters and persists with the other reader settings. The default is 1200 characters.
 - Pause/resume, stop, voice filtering, playback speed, highlight colors, and auto-scroll live in a movable/minimizable toolbar.
 - Click-to-seek is optional and is **off by default**. When disabled, the extension does not install a page click listener.
 - Editable controls and rich-text editors are excluded without watching or mutating the page DOM.
@@ -14,11 +16,9 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 
 ## Zero-idle page cost
 
-The extension does not declare `content_scripts` or broad `host_permissions`.
+The extension does not declare automatic `content_scripts` or broad host permissions. Reader JavaScript and CSS are injected only after you explicitly click the extension action on a tab, using `activeTab` and `scripting` permissions.
 
-When you have not clicked the extension action on a tab, no Edge Natural TTS JavaScript or CSS is injected into that webpage. The background service worker is event-driven and does not run inside the page. The reader stack is injected only after an explicit action click using `activeTab` + `chrome.scripting`.
-
-This is a hard performance boundary: merely having the extension enabled must not add page listeners, DOM scans, styles, speech subscriptions, or page-main-thread work to untouched tabs.
+Before that first click, the extension has no JavaScript, CSS, DOM observers, event listeners, or text model running inside the webpage.
 
 ## ChatGPT safety profile
 
@@ -27,6 +27,17 @@ ChatGPT is a large, continuously mutating web application, so the reader deliber
 On `chatgpt.com` and `chat.openai.com`, the text model prefers only message containers marked as user or assistant messages. Sidebar controls, the composer, navigation, and other app chrome are not part of the reading model.
 
 The extension also does **no background MutationObserver scanning**. Model building happens only when the reader starts, when Start is pressed after stopping, or when **Refresh text** is pressed.
+
+## Paragraph batching
+
+Online Natural voices can incur noticeable startup latency each time a new `SpeechSynthesisUtterance` begins. The reader therefore builds a speech batch before synthesis:
+
+- if the current paragraph already meets the configured **Batch target**, it is synthesized normally;
+- if it is short, following readable paragraphs are appended until the target is reached;
+- paragraph boundaries are retained as blank-line separators in the utterance so speech keeps a natural break;
+- very large content is still chunked so pause/resume and seeking remain manageable.
+
+Increasing the Batch target generally reduces gaps between tiny paragraphs at the cost of larger synthesis requests. Changing it while reading restarts from the current word with the new target.
 
 ## Install in Edge
 
@@ -37,7 +48,7 @@ The extension also does **no background MutationObserver scanning**. Model build
 5. Select this repository folder.
 6. Open a normal webpage and click the extension icon.
 
-After pulling source changes, click **Reload** on the extension card. Refresh any already-open webpage before testing idle performance so an older injected content-script instance cannot remain in that tab.
+After pulling source changes, click **Reload** on the extension card. Because injection is on demand, newly opened/reloaded pages remain untouched until you click the extension action on that tab.
 
 ## Why this works without an Azure key
 
@@ -48,14 +59,11 @@ Microsoft Edge exposes its online Natural voice catalog through the standard Web
 This project intentionally avoids background work on host pages:
 
 - no automatic content-script injection;
-- no broad host permission or always-on page access;
 - no MutationObserver over the document;
 - no automatic full-document rebuild from arbitrary page clicks;
 - no `getBoundingClientRect()` calls for every candidate while constructing the text model;
 - auto-scroll geometry checks are throttled rather than performed at every spoken word boundary;
-- highlight CSS is created lazily only after highlighting actually begins.
-
-`tests/idle-safety.test.js` protects the zero-idle contract and fails if automatic content scripts, broad host permissions, or document mutation monitoring are reintroduced.
+- highlight CSS is injected lazily only after highlighting actually begins.
 
 ## Development
 
