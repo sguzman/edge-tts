@@ -7,7 +7,7 @@
     Highlighter,
     normalizeColor
   } = extension.Highlighter;
-  const { SpeechEngine, isNaturalVoice } = extension.SpeechEngine;
+  const { SpeechEngine, createSpeechBatch, isNaturalVoice } = extension.SpeechEngine;
   const { Toolbar } = extension.Toolbar;
 
   const EDITABLE_SELECTOR = [
@@ -26,10 +26,15 @@
     "[data-slate-editor='true']"
   ].join(",");
 
+  const MIN_BATCH_CHARS = 400;
+  const MAX_BATCH_CHARS = 2400;
+  const DEFAULT_BATCH_CHARS = 1200;
+
   const DEFAULT_SETTINGS = {
     settingsVersion: 2,
     rate: 1,
     voiceName: "",
+    minBatchChars: DEFAULT_BATCH_CHARS,
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
     autoScroll: true,
@@ -37,6 +42,15 @@
     minimized: false,
     toolbarPosition: null
   };
+
+  function normalizeBatchChars(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_BATCH_CHARS;
+    }
+    const stepped = Math.round(numeric / 100) * 100;
+    return Math.min(MAX_BATCH_CHARS, Math.max(MIN_BATCH_CHARS, stepped));
+  }
 
   function isEditableTarget(target) {
     if (!(target instanceof Element)) {
@@ -50,6 +64,7 @@
       this.model = null;
       this.currentBlockIndex = -1;
       this.currentSegmentIndex = 0;
+      this.activeBatchEndBlockIndex = -1;
       this.enabled = false;
       this.stopped = true;
       this.paused = false;
@@ -73,6 +88,7 @@
         onRefresh: () => this.refreshText(),
         onVoice: (name) => this.changeVoice(name),
         onRate: (rate) => this.changeRate(rate),
+        onBatchChars: (chars) => this.changeBatchChars(chars),
         onWordColor: (color) => this.changeWordColor(color),
         onSentenceColor: (color) => this.changeSentenceColor(color),
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
@@ -154,6 +170,7 @@
 
     stop() {
       this.clearResumeWatchdog();
+      this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.paused = false;
       this.speech.cancel();
@@ -196,6 +213,7 @@
     refreshText() {
       const wasReading = !this.stopped;
       this.clearResumeWatchdog();
+      this.activeBatchEndBlockIndex = -1;
       this.speech.cancel();
       this.highlighter.clear();
       this.rebuildModel();
@@ -260,6 +278,7 @@
       this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
       this.highlighter.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setRate(this.settings.rate);
+      this.toolbar.setBatchChars(this.settings.minBatchChars);
       this.toolbar.setHighlightColors(this.settings.wordColor, this.settings.sentenceColor);
       this.toolbar.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setClickToSeek(this.settings.clickToSeek);
@@ -294,14 +313,39 @@
         return;
       }
 
+      const batch = createSpeechBatch(
+        this.model.blocks,
+        this.currentBlockIndex,
+        this.currentSegmentIndex,
+        {
+          minChars: this.settings.minBatchChars,
+          maxChars: Math.max(MAX_BATCH_CHARS, this.settings.minBatchChars * 2)
+        }
+      );
+      if (!batch) {
+        this.finishDocument();
+        return;
+      }
+
+      this.activeBatchEndBlockIndex = batch.endBlockIndex;
+      const utteranceTargetChars = Math.min(
+        MAX_BATCH_CHARS,
+        Math.max(this.settings.minBatchChars, batch.charLength)
+      );
+
       this.stopped = false;
       this.paused = false;
       this.toolbar.setPaused(false);
       this.toolbar.setStatus("Starting speech…");
       this.lastSpeakRequestedAt = performance.now();
-      this.speech.speak(block, this.currentSegmentIndex, {
+      this.speech.speak({ segments: batch.segments }, 0, {
         rate: this.settings.rate,
-        voice: this.selectedVoice
+        voice: this.selectedVoice,
+        chunkOptions: {
+          firstChunkMaxChars: utteranceTargetChars,
+          maxChars: Math.max(1800, utteranceTargetChars),
+          hardLimitFactor: 1.35
+        }
       });
     }
 
@@ -327,7 +371,12 @@
     handleBlockEnd() {
       if (this.stopped || !this.model) return;
 
-      this.currentBlockIndex += 1;
+      const completedEndBlock =
+        this.activeBatchEndBlockIndex >= 0
+          ? this.activeBatchEndBlockIndex
+          : this.currentBlockIndex;
+      this.activeBatchEndBlockIndex = -1;
+      this.currentBlockIndex = completedEndBlock + 1;
       this.currentSegmentIndex = 0;
       if (this.currentBlockIndex >= this.model.blocks.length) {
         this.finishDocument();
@@ -339,6 +388,7 @@
 
     finishDocument() {
       this.clearResumeWatchdog();
+      this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.speech.cancel();
       this.highlighter.clear();
@@ -348,6 +398,7 @@
 
     handleError(error) {
       this.clearResumeWatchdog();
+      this.activeBatchEndBlockIndex = -1;
       console.error("Edge Natural TTS", error);
       this.stopped = true;
       this.highlighter.clear();
@@ -387,6 +438,7 @@
 
       this.currentBlockIndex = block.index;
       this.currentSegmentIndex = segment.segmentIndex;
+      this.activeBatchEndBlockIndex = -1;
       this.stopped = false;
       this.paused = false;
       this.speakCurrentPosition();
@@ -423,6 +475,15 @@
 
     async changeRate(rate) {
       this.settings.rate = rate;
+      await this.saveSettings();
+      if (!this.stopped) {
+        this.speakCurrentPosition();
+      }
+    }
+
+    async changeBatchChars(chars) {
+      this.settings.minBatchChars = normalizeBatchChars(chars);
+      this.toolbar.setBatchChars(this.settings.minBatchChars);
       await this.saveSettings();
       if (!this.stopped) {
         this.speakCurrentPosition();
@@ -472,6 +533,7 @@
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
           voiceName: stored.voiceName || "",
+          minBatchChars: normalizeBatchChars(stored.minBatchChars),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
           autoScroll: stored.autoScroll !== false,
@@ -507,5 +569,5 @@
     }
   }
 
-  extension.Reader = { ReaderApp, isEditableTarget };
+  extension.Reader = { ReaderApp, isEditableTarget, normalizeBatchChars };
 })(globalThis);
