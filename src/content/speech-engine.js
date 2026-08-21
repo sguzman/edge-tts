@@ -125,7 +125,7 @@
   function createUtteranceChunks(
     block,
     startSegmentIndex,
-    { firstChunkMaxChars = 900, maxChars = 1800, hardLimitFactor = 1.35 } = {}
+    { firstChunkMaxChars = 900, maxChars = 1800, emergencyMaxChars = 8000 } = {}
   ) {
     const remaining = block.segments.slice(startSegmentIndex);
     if (remaining.length === 0) return [];
@@ -158,12 +158,15 @@
         /[.!?]["'”’\)\]]*$/.test(segment.text);
       const targetMax = chunks.length === 0 ? firstChunkMaxChars : maxChars;
       const reachedSentenceBoundary = currentLength >= targetMax && sentenceEnds;
-      const reachedHardLimit = currentLength >= Math.ceil(targetMax * hardLimitFactor);
+      const reachedEmergencyLimit =
+        currentLength >= Math.max(targetMax, Number(emergencyMaxChars) || 8000);
 
-      // Keep several sentences (and, when supplied, several small DOM blocks)
-      // inside one utterance. Edge's Online (Natural) voices can incur a fresh
-      // startup delay at every utterance boundary.
-      if (reachedSentenceBoundary || reachedHardLimit || !next) {
+      // The normal target is soft: once it is reached, wait for the end of the
+      // current sentence/paragraph before starting another online request. A
+      // mid-sentence split causes a very noticeable Natural-voice startup gap.
+      // Only pathological giant unpunctuated text is allowed to cross the much
+      // larger emergency ceiling.
+      if (reachedSentenceBoundary || reachedEmergencyLimit || !next) {
         flush();
       }
     }
