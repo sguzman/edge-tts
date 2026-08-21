@@ -95,7 +95,7 @@ test("long content chunks near the target while preferring sentence boundaries",
   const chunks = createUtteranceChunks({ segments }, 0, {
     firstChunkMaxChars: 180,
     maxChars: 300,
-    hardLimitFactor: 1.5
+    emergencyMaxChars: 5000
   });
 
   assert.ok(chunks.length > 1);
@@ -103,7 +103,41 @@ test("long content chunks near the target while preferring sentence boundaries",
   assert.match(chunks[0].text, /\.$/);
 });
 
-test("one extremely long sentence is hard-capped", () => {
+test("soft target never cuts through a normal sentence", () => {
+  const segments = [];
+
+  for (let index = 0; index < 20; index += 1) {
+    segments.push({
+      text: index === 19 ? "first-end." : `first-${index}`,
+      sentenceIndex: 0
+    });
+  }
+  for (let index = 0; index < 30; index += 1) {
+    segments.push({
+      text: index === 29 ? "second-end." : `second-${index}`,
+      sentenceIndex: 1
+    });
+  }
+  for (let index = 0; index < 20; index += 1) {
+    segments.push({
+      text: index === 19 ? "third-end." : `third-${index}`,
+      sentenceIndex: 2
+    });
+  }
+
+  const chunks = createUtteranceChunks({ segments }, 0, {
+    firstChunkMaxChars: 250,
+    maxChars: 300,
+    emergencyMaxChars: 5000
+  });
+
+  assert.ok(chunks.length > 1);
+  assert.equal(chunks[0].segments.at(-1).sentenceIndex, 1);
+  assert.match(chunks[0].text, /second-end\.$/);
+  assert.equal(chunks[1].segments[0].sentenceIndex, 2);
+});
+
+test("pathological unpunctuated text still respects the emergency ceiling", () => {
   const segments = Array.from({ length: 100 }, (_, index) => ({
     text: `word${index}`,
     sentenceIndex: 0
@@ -111,12 +145,12 @@ test("one extremely long sentence is hard-capped", () => {
   const chunks = createUtteranceChunks({ segments }, 0, {
     firstChunkMaxChars: 80,
     maxChars: 160,
-    hardLimitFactor: 1.25
+    emergencyMaxChars: 110
   });
 
   assert.ok(chunks.length > 1);
-  assert.ok(chunks[0].text.length >= 100);
-  assert.ok(chunks[0].text.length < 120);
+  assert.ok(chunks[0].text.length >= 110);
+  assert.ok(chunks[0].text.length < 130);
 });
 
 test("natural voices sort ahead of local voices for the same language", () => {
