@@ -36,6 +36,8 @@
       this.selectedVoiceName = "";
       this.rateInput = null;
       this.rateValue = null;
+      this.batchCharsInput = null;
+      this.batchCharsValue = null;
       this.status = null;
       this.wordColorInput = null;
       this.sentenceColorInput = null;
@@ -91,6 +93,13 @@
               <output data-edge-tts-rate-value>1.0×</output>
             </label>
           </div>
+          <div class="edge-tts-row">
+            <label class="edge-tts-rate-label" title="Combine adjacent short paragraphs until roughly this many characters are ready for one speech request.">
+              Batch target
+              <input data-edge-tts-batch-chars type="range" min="400" max="2400" step="100" value="1200">
+              <output data-edge-tts-batch-chars-value>1200</output>
+            </label>
+          </div>
           <div class="edge-tts-row edge-tts-color-row">
             <label>
               Word highlight
@@ -115,7 +124,7 @@
               <span>Auto-scroll while reading</span>
             </label>
           </div>
-          <div class="edge-tts-hint">Click-to-seek is off by default · Refresh text after dynamic page changes · Drag header to move</div>
+          <div class="edge-tts-hint">Short paragraphs are grouped to the batch target · Click-to-seek is off by default · Refresh text after dynamic page changes</div>
         </div>
       `;
 
@@ -129,6 +138,8 @@
       this.clearVoiceFilterButton = element.querySelector("[data-edge-tts-action='clear-voice-filter']");
       this.rateInput = element.querySelector("[data-edge-tts-rate]");
       this.rateValue = element.querySelector("[data-edge-tts-rate-value]");
+      this.batchCharsInput = element.querySelector("[data-edge-tts-batch-chars]");
+      this.batchCharsValue = element.querySelector("[data-edge-tts-batch-chars-value]");
       this.status = element.querySelector("[data-edge-tts-status]");
       this.wordColorInput = element.querySelector("[data-edge-tts-word-color]");
       this.sentenceColorInput = element.querySelector("[data-edge-tts-sentence-color]");
@@ -142,7 +153,8 @@
       this.refreshButton.addEventListener("click", () => this.handlers.onRefresh());
       this.voiceSelect.addEventListener("change", () => {
         if (this.voiceSelect.value) {
-          this.handlers.onVoice(this.voiceSelect.value);
+          this.selectedVoiceName = this.voiceSelect.value;
+          this.handlers.onVoice(this.selectedVoiceName);
         }
       });
       this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
@@ -153,6 +165,12 @@
       });
       this.rateInput.addEventListener("change", () => {
         this.handlers.onRate(Number(this.rateInput.value));
+      });
+      this.batchCharsInput.addEventListener("input", () => {
+        this.batchCharsValue.value = String(Number(this.batchCharsInput.value));
+      });
+      this.batchCharsInput.addEventListener("change", () => {
+        this.handlers.onBatchChars(Number(this.batchCharsInput.value));
       });
       this.wordColorInput.addEventListener("input", () => {
         this.handlers.onWordColor(this.wordColorInput.value);
@@ -205,6 +223,13 @@
       if (!this.rateInput || !this.rateValue) return;
       this.rateInput.value = String(rate);
       this.rateValue.value = `${Number(rate).toFixed(1)}×`;
+    }
+
+    setBatchChars(chars) {
+      if (!this.batchCharsInput || !this.batchCharsValue) return;
+      const numeric = Number(chars);
+      this.batchCharsInput.value = String(numeric);
+      this.batchCharsValue.value = String(numeric);
     }
 
     setVoices(voices, selectedName) {
