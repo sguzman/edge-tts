@@ -9,6 +9,11 @@
     root.EdgeTtsExtension.SpeechEngine = api;
   }
 })(globalThis, function createSpeechEngineApi(root) {
+  const DEFAULT_HEARTBEAT_MS = 10_000;
+  const DEFAULT_STALL_TIMEOUT_MS = 8_000;
+  const RECOVERY_CHUNK_SIZES = [700, 280, 80];
+  const MAX_RECOVERY_ATTEMPTS_PER_SEGMENT = RECOVERY_CHUNK_SIZES.length;
+
   function isNaturalVoice(voice) {
     return /\b(natural|online)\b/i.test(voice.name || "");
   }
@@ -174,19 +179,64 @@
     return chunks;
   }
 
+  function createRecoveryChunks(segments, maxChars = RECOVERY_CHUNK_SIZES[0]) {
+    const limit = Math.max(1, Math.floor(Number(maxChars) || RECOVERY_CHUNK_SIZES[0]));
+    const chunks = [];
+    let current = [];
+    let currentLength = 0;
+
+    function flush() {
+      if (current.length === 0) return;
+      chunks.push(createPayloadFromSegments(current));
+      current = [];
+      currentLength = 0;
+    }
+
+    for (const segment of segments) {
+      const separatorLength = current.length
+        ? separatorForSegments(current[current.length - 1], segment).length
+        : 0;
+      const projectedLength = currentLength + separatorLength + segment.text.length;
+
+      if (current.length > 0 && projectedLength > limit) {
+        flush();
+      }
+
+      if (current.length > 0) {
+        currentLength += separatorForSegments(current[current.length - 1], segment).length;
+      }
+      current.push(segment);
+      currentLength += segment.text.length;
+    }
+
+    flush();
+    return chunks;
+  }
+
+  function recoveryKeyForSegment(segment) {
+    if (!segment) return "unknown";
+    return `${segment.blockIndex ?? "?"}:${segment.segmentIndex ?? "?"}:${segment.text ?? ""}`;
+  }
+
   class SpeechEngine {
-    constructor({ onBoundary, onEnd, onError, onStart }) {
+    constructor({ onBoundary, onEnd, onError, onStart, onRecover }) {
       this.onBoundary = onBoundary;
       this.onEnd = onEnd;
       this.onError = onError;
       this.onStart = onStart;
+      this.onRecover = onRecover;
       this.synth = root.speechSynthesis;
       this.currentUtterance = null;
       this.currentChunks = [];
       this.currentChunkIndex = -1;
+      this.currentChunkBoundaryIndex = -1;
       this.currentOptions = null;
       this.generation = 0;
       this.requestedAt = 0;
+      this.heartbeatTimer = null;
+      this.progressWatchdog = null;
+      this.recoveryKey = "";
+      this.recoveryAttempts = 0;
     }
 
     getVoices() {
@@ -236,16 +286,32 @@
       return sortVoices(this.getVoices(), language, savedName);
     }
 
+    clearPlaybackTimers() {
+      if (this.heartbeatTimer !== null) {
+        root.clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
+      if (this.progressWatchdog !== null) {
+        root.clearTimeout(this.progressWatchdog);
+        this.progressWatchdog = null;
+      }
+    }
+
     cancel() {
+      this.clearPlaybackTimers();
       this.generation += 1;
       this.currentUtterance = null;
       this.currentChunks = [];
       this.currentChunkIndex = -1;
+      this.currentChunkBoundaryIndex = -1;
       this.currentOptions = null;
+      this.recoveryKey = "";
+      this.recoveryAttempts = 0;
       this.synth?.cancel();
     }
 
     pause() {
+      this.clearPlaybackTimers();
       if (this.synth?.speaking && !this.synth.paused) {
         this.synth.pause();
       }
@@ -254,6 +320,12 @@
     resume() {
       if (this.synth?.paused) {
         this.synth.resume();
+      }
+      if (this.currentUtterance) {
+        this.startHeartbeat(this.generation);
+        if (this.currentChunkBoundaryIndex >= 0) {
+          this.armProgressWatchdog(this.generation);
+        }
       }
     }
 
@@ -286,20 +358,142 @@
       this.speakCurrentChunk(generation);
     }
 
+    startHeartbeat(generation) {
+      if (this.heartbeatTimer !== null) {
+        root.clearInterval(this.heartbeatTimer);
+      }
+      const heartbeatMs = Math.max(
+        3000,
+        Number(this.currentOptions?.heartbeatMs) || DEFAULT_HEARTBEAT_MS
+      );
+      this.heartbeatTimer = root.setInterval(() => {
+        if (generation !== this.generation || !this.currentUtterance) {
+          this.clearPlaybackTimers();
+          return;
+        }
+        if (!this.synth?.paused) {
+          // Chromium has a long-standing long-utterance failure mode where
+          // periodically nudging resume() keeps the speech pipeline alive.
+          this.synth?.resume();
+        }
+      }, heartbeatMs);
+    }
+
+    armProgressWatchdog(generation) {
+      if (this.progressWatchdog !== null) {
+        root.clearTimeout(this.progressWatchdog);
+      }
+      const stallTimeoutMs = Math.max(
+        3000,
+        Number(this.currentOptions?.stallTimeoutMs) || DEFAULT_STALL_TIMEOUT_MS
+      );
+      this.progressWatchdog = root.setTimeout(() => {
+        this.progressWatchdog = null;
+        if (
+          generation !== this.generation ||
+          !this.currentUtterance ||
+          this.synth?.paused ||
+          this.currentChunkBoundaryIndex < 0
+        ) {
+          return;
+        }
+        this.recoverCurrentChunk("stalled");
+      }, stallTimeoutMs);
+    }
+
+    recoverCurrentChunk(reason) {
+      const payload = this.currentChunks[this.currentChunkIndex];
+      if (!payload?.segments?.length) {
+        this.advanceChunkAfterRecovery();
+        return;
+      }
+
+      const restartIndex = Math.min(
+        Math.max(this.currentChunkBoundaryIndex, 0),
+        payload.segments.length - 1
+      );
+      const stalledSegment = payload.segments[restartIndex];
+      const recoveryKey = recoveryKeyForSegment(stalledSegment);
+
+      if (recoveryKey === this.recoveryKey) {
+        this.recoveryAttempts += 1;
+      } else {
+        this.recoveryKey = recoveryKey;
+        this.recoveryAttempts = 1;
+      }
+
+      let remainingStartIndex = restartIndex;
+      let skipped = false;
+      let recoverySize =
+        RECOVERY_CHUNK_SIZES[
+          Math.min(this.recoveryAttempts - 1, RECOVERY_CHUNK_SIZES.length - 1)
+        ];
+
+      if (this.recoveryAttempts > MAX_RECOVERY_ATTEMPTS_PER_SEGMENT) {
+        // A single token must never be allowed to deadlock the entire reader.
+        // After several increasingly-small retries, skip that one token and
+        // continue with the rest of the document.
+        remainingStartIndex = Math.min(restartIndex + 1, payload.segments.length);
+        recoverySize = RECOVERY_CHUNK_SIZES.at(-1);
+        skipped = true;
+      }
+
+      const remainingSegments = payload.segments.slice(remainingStartIndex);
+      const replacementChunks = createRecoveryChunks(remainingSegments, recoverySize);
+      const currentChunkIndex = this.currentChunkIndex;
+
+      this.clearPlaybackTimers();
+      this.generation += 1;
+      const generation = this.generation;
+      this.currentUtterance = null;
+      this.currentChunkBoundaryIndex = -1;
+      this.synth?.cancel();
+      this.currentChunks.splice(currentChunkIndex, 1, ...replacementChunks);
+
+      console.warn(
+        `Edge Natural TTS recovered from ${reason} at ${recoveryKey}; ` +
+          `attempt ${this.recoveryAttempts}${skipped ? "; skipped one stuck token" : ""}.`
+      );
+      this.onRecover?.({
+        reason,
+        segment: stalledSegment,
+        attempt: this.recoveryAttempts,
+        skipped,
+        recoverySize
+      });
+
+      root.setTimeout(() => this.speakCurrentChunk(generation), 50);
+    }
+
+    advanceChunkAfterRecovery() {
+      this.clearPlaybackTimers();
+      this.generation += 1;
+      const generation = this.generation;
+      this.currentUtterance = null;
+      this.currentChunkBoundaryIndex = -1;
+      this.currentChunkIndex += 1;
+      root.setTimeout(() => this.speakCurrentChunk(generation), 0);
+    }
+
     speakCurrentChunk(generation) {
       if (generation !== this.generation) return;
 
       const payload = this.currentChunks[this.currentChunkIndex];
       if (!payload) {
+        this.clearPlaybackTimers();
         this.currentUtterance = null;
         this.currentChunks = [];
         this.currentChunkIndex = -1;
+        this.currentChunkBoundaryIndex = -1;
         this.currentOptions = null;
+        this.recoveryKey = "";
+        this.recoveryAttempts = 0;
         this.onEnd?.();
         return;
       }
 
       const chunkIndex = this.currentChunkIndex;
+      this.currentChunkBoundaryIndex = -1;
       const utterance = new root.SpeechSynthesisUtterance(payload.text);
       utterance.rate = this.currentOptions.rate;
       if (this.currentOptions.voice) {
@@ -309,6 +503,7 @@
 
       utterance.addEventListener("start", () => {
         if (generation !== this.generation) return;
+        this.startHeartbeat(generation);
         if (chunkIndex === 0) {
           const startedAt = root.performance?.now?.() ?? Date.now();
           this.onStart?.(payload.segments[0], Math.max(0, startedAt - this.requestedAt));
@@ -323,13 +518,36 @@
         );
         const segment = payload.segments[localIndex];
         if (segment) {
+          this.currentChunkBoundaryIndex = localIndex;
+          const key = recoveryKeyForSegment(segment);
+          if (key !== this.recoveryKey) {
+            this.recoveryKey = "";
+            this.recoveryAttempts = 0;
+          }
+          this.armProgressWatchdog(generation);
           this.onBoundary?.(segment, event);
         }
       });
 
       utterance.addEventListener("end", () => {
         if (generation !== this.generation) return;
+        this.clearPlaybackTimers();
+
+        // If Edge says the utterance ended but it never reached the final
+        // segment boundary, treat that as a truncated utterance rather than
+        // silently advancing past unread text.
+        if (
+          this.currentChunkBoundaryIndex >= 0 &&
+          this.currentChunkBoundaryIndex < payload.segments.length - 1
+        ) {
+          this.recoverCurrentChunk("premature-end");
+          return;
+        }
+
         this.currentUtterance = null;
+        this.currentChunkBoundaryIndex = -1;
+        this.recoveryKey = "";
+        this.recoveryAttempts = 0;
         this.currentChunkIndex += 1;
 
         if (this.currentChunkIndex >= this.currentChunks.length) {
@@ -348,10 +566,17 @@
 
       utterance.addEventListener("error", (event) => {
         if (generation !== this.generation) return;
+        this.clearPlaybackTimers();
         this.currentUtterance = null;
         if (event.error !== "canceled" && event.error !== "interrupted") {
-          this.cancel();
-          this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
+          // Online voices occasionally fail transiently. Recover from the last
+          // confirmed boundary instead of turning the whole reader off.
+          if (this.currentChunkBoundaryIndex >= 0) {
+            this.recoverCurrentChunk(`error:${event.error}`);
+          } else {
+            this.cancel();
+            this.onError?.(new Error(`Speech synthesis failed: ${event.error}`));
+          }
         }
       });
 
@@ -366,11 +591,13 @@
 
   return {
     SpeechEngine,
+    createRecoveryChunks,
     createSpeechBatch,
     createUtteranceChunks,
     createUtterancePayload,
     isNaturalVoice,
     preferredLanguage,
+    recoveryKeyForSegment,
     scoreVoice,
     sortVoices
   };
