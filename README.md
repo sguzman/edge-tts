@@ -9,6 +9,7 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 - Highlights the currently spoken word and sentence using the CSS Custom Highlight API.
 - Adjacent short paragraphs are batched into a single speech request to avoid repeated online-voice startup latency. A sufficiently large paragraph stays on its own.
 - The **Batch target** control is configurable from 400 to 2400 characters and persists with the other reader settings. The default is 1200 characters.
+- Long playback is self-healing: a heartbeat nudges Chromium's speech pipeline, stalled or prematurely-ended utterances restart from the last confirmed word, and recovery requests become progressively smaller if the same token stalls repeatedly.
 - Pause/resume, stop, voice filtering, playback speed, highlight colors, and auto-scroll live in a movable/minimizable toolbar.
 - Click-to-seek is optional and is **off by default**. When disabled, the extension does not install a page click listener.
 - Editable controls and rich-text editors are excluded without watching or mutating the page DOM.
@@ -35,9 +36,24 @@ Online Natural voices can incur noticeable startup latency each time a new `Spee
 - if the current paragraph already meets the configured **Batch target**, it is synthesized normally;
 - if it is short, following readable paragraphs are appended until the target is reached;
 - paragraph boundaries are retained as blank-line separators in the utterance so speech keeps a natural break;
-- very large content is still chunked so pause/resume and seeking remain manageable.
+- normal chunk targets are sentence-safe, with a much larger emergency ceiling reserved for pathological unpunctuated text.
 
 Increasing the Batch target generally reduces gaps between tiny paragraphs at the cost of larger synthesis requests. Changing it while reading restarts from the current word with the new target.
+
+## Playback recovery
+
+Chromium speech synthesis can occasionally stop making progress during a long utterance, especially with streamed Online/Natural voices. The reader treats silence in the middle of unread text as a recoverable transport failure rather than the end of the document.
+
+The recovery policy is:
+
+1. keep long utterances alive with a periodic `speechSynthesis.resume()` heartbeat;
+2. after a confirmed word boundary, detect an extended period with no further boundary progress;
+3. if an `end` event arrives before the final segment boundary, treat it as premature rather than advancing past unread text;
+4. restart from the last confirmed word using a smaller request;
+5. retry the same stuck token with progressively smaller recovery windows;
+6. as an absolute last resort, skip one irrecoverable token rather than deadlocking the rest of the document.
+
+Normal playback still uses the configured paragraph batch size. The smaller requests are only a failure-recovery path.
 
 ## Install in Edge
 
