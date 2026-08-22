@@ -13,13 +13,35 @@ class BaseSpeechEngine {
     this.recoveryAttempts = 0;
     this.browserCancelCalls = 0;
     this.timersCleared = 0;
+    this.heartbeatStarts = 0;
+    this.progressWatchdog = null;
+    this.heartbeatTimer = null;
+    this.synth = { paused: false };
+    this.onBoundary = null;
   }
 
   clearPlaybackTimers() {
     this.timersCleared += 1;
+    if (this.progressWatchdog !== null) {
+      clearTimeout(this.progressWatchdog);
+      this.progressWatchdog = null;
+    }
+    if (this.heartbeatTimer !== null) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+  }
+
+  startHeartbeat() {
+    this.heartbeatStarts += 1;
+  }
+
+  recoverCurrentChunk(reason) {
+    this.recoveredReason = reason;
   }
 
   cancel() {
+    this.clearPlaybackTimers();
     this.browserCancelCalls += 1;
     this.generation += 1;
     this.currentUtterance = null;
@@ -65,4 +87,30 @@ test("active speech still uses the base cancel path", () => {
 
   assert.equal(engine.browserCancelCalls, 1);
   assert.equal(engine.currentUtterance, null);
+});
+
+test("utterance start provisionally commits the first token before real boundaries", () => {
+  const engine = new ReliableSpeechEngine();
+  const first = { blockIndex: 4, segmentIndex: 7, text: "broken" };
+  let emitted = null;
+
+  engine.currentUtterance = { active: true };
+  engine.currentChunks = [{ segments: [first, { blockIndex: 4, segmentIndex: 8, text: "line" }] }];
+  engine.currentChunkIndex = 0;
+  engine.currentChunkBoundaryIndex = -1;
+  engine.currentOptions = { rate: 1, stallTimeoutMs: 3000 };
+  engine.generation = 5;
+  engine.onBoundary = (segment, event) => {
+    emitted = { segment, event };
+  };
+
+  engine.startHeartbeat(5);
+
+  assert.equal(engine.heartbeatStarts, 1);
+  assert.equal(engine.currentChunkBoundaryIndex, 0);
+  assert.equal(emitted.segment, first);
+  assert.equal(emitted.event.synthetic, true);
+  assert.notEqual(engine.progressWatchdog, null);
+
+  engine.clearPlaybackTimers();
 });
