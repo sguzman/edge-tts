@@ -11,7 +11,7 @@
 })(globalThis, function createReliableSpeechEngineApi(root) {
   const speechModule = root.EdgeTtsExtension?.SpeechEngine;
   const BaseSpeechEngine = speechModule?.SpeechEngine;
-  const DEFAULT_NO_BOUNDARY_STALL_MS = 8000;
+  const DEFAULT_NO_BOUNDARY_STALL_MS = 6000;
 
   function isInternallyIdle(engine) {
     return Boolean(
@@ -23,11 +23,23 @@
     );
   }
 
+  function recoveryKeyForCurrentSegment(engine) {
+    const payload = engine?.currentChunks?.[engine.currentChunkIndex];
+    if (!payload?.segments?.length) return "";
+    const index = Math.min(
+      Math.max(Number(engine.currentChunkBoundaryIndex) || 0, 0),
+      payload.segments.length - 1
+    );
+    const segment = payload.segments[index];
+    return `${segment.blockIndex ?? "?"}:${segment.segmentIndex ?? "?"}:${segment.text ?? ""}`;
+  }
+
   if (!BaseSpeechEngine) {
     return {
       ReliableSpeechEngine: null,
       DEFAULT_NO_BOUNDARY_STALL_MS,
-      isInternallyIdle
+      isInternallyIdle,
+      recoveryKeyForCurrentSegment
     };
   }
 
@@ -49,6 +61,7 @@
         this.currentOptions = null;
         this.recoveryKey = "";
         this.recoveryAttempts = 0;
+        this.provisionalBoundaryActive = false;
         return;
       }
 
@@ -58,6 +71,13 @@
     armProgressWatchdog(generation) {
       if (this.progressWatchdog !== null) {
         root.clearTimeout(this.progressWatchdog);
+      }
+
+      // Base boundary events call this method too. Any arm that did not come
+      // directly from startHeartbeat represents real boundary progress and
+      // supersedes the provisional audio-start cursor.
+      if (!this.armingFromUtteranceStart) {
+        this.provisionalBoundaryActive = false;
       }
 
       const stallTimeoutMs = Math.max(
@@ -75,14 +95,29 @@
           return;
         }
 
-        // Unlike the base implementation, a missing boundary is itself a stall.
-        // Edge can play Natural-voice audio after `start` while never emitting a
-        // word boundary. Retrying must therefore not depend on already having a
-        // real boundary event.
         this.recoverCurrentChunk?.(
-          this.currentChunkBoundaryIndex < 0 ? "no-boundary-progress" : "stalled"
+          this.provisionalBoundaryActive ? "no-boundary-progress" : "stalled"
         );
       }, stallTimeoutMs);
+    }
+
+    recoverCurrentChunk(reason) {
+      if (reason === "no-boundary-progress") {
+        const key = recoveryKeyForCurrentSegment(this);
+
+        // The first boundary-less playback gets one normal retry. If the same
+        // provisional token starts audio again and still yields no real word
+        // boundaries, force the base recovery ladder into its one-token escape
+        // rather than replaying the same broken sentence through every chunk
+        // size. The base method will observe attempts > its retry ceiling and
+        // skip exactly one token before continuing.
+        if (key && key === this.recoveryKey && Number(this.recoveryAttempts) >= 1) {
+          this.recoveryAttempts = Number.MAX_SAFE_INTEGER;
+        }
+      }
+
+      this.provisionalBoundaryActive = false;
+      return super.recoverCurrentChunk(reason);
     }
 
     startHeartbeat(generation) {
@@ -98,6 +133,7 @@
         // to emit its normal `boundary` events. A real boundary immediately
         // replaces this provisional position if/when one arrives.
         this.currentChunkBoundaryIndex = 0;
+        this.provisionalBoundaryActive = true;
         this.onBoundary?.(payload.segments[0], {
           synthetic: true,
           type: "utterance-start",
@@ -108,13 +144,19 @@
       // Arm progress from `start`, not from the first real boundary. Otherwise
       // an utterance that produces audio but zero boundary events can hang
       // forever and repeatedly restart from the same sentence.
-      this.armProgressWatchdog(generation);
+      this.armingFromUtteranceStart = true;
+      try {
+        this.armProgressWatchdog(generation);
+      } finally {
+        this.armingFromUtteranceStart = false;
+      }
     }
   }
 
   return {
     ReliableSpeechEngine,
     DEFAULT_NO_BOUNDARY_STALL_MS,
-    isInternallyIdle
+    isInternallyIdle,
+    recoveryKeyForCurrentSegment
   };
 });
