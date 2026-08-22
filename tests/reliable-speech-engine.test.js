@@ -19,6 +19,12 @@ class BaseSpeechEngine {
     this.synth = { paused: false };
     this.onBoundary = null;
     this.advancedAfterRecovery = false;
+    this.lastSpeak = null;
+  }
+
+  speak(block, startSegmentIndex, options) {
+    this.lastSpeak = { block, startSegmentIndex, options };
+    return this.lastSpeak;
   }
 
   clearPlaybackTimers() {
@@ -62,10 +68,56 @@ class BaseSpeechEngine {
 global.EdgeTtsExtension = { SpeechEngine: { SpeechEngine: BaseSpeechEngine } };
 const {
   ReliableSpeechEngine,
+  REMOTE_VOICE_MAX_CHARS,
   isInternallyIdle,
+  isRemoteVoice,
   prematureEndRecoveryPlan,
-  recoveryKeyForCurrentSegment
+  recoveryKeyForCurrentSegment,
+  safeChunkOptionsForVoice
 } = require("../src/content/reliable-speech-engine.js");
+
+test("remote Natural voices are detected even when localService metadata is absent", () => {
+  assert.equal(isRemoteVoice({ name: "Microsoft Aria Online (Natural)" }), true);
+  assert.equal(isRemoteVoice({ name: "Some remote", localService: false }), true);
+  assert.equal(isRemoteVoice({ name: "Microsoft David", localService: true }), false);
+});
+
+test("remote voices are transport-capped at Chromium's 175 character limit", () => {
+  const safe = safeChunkOptionsForVoice(
+    { name: "Microsoft Aria Online (Natural)", localService: false },
+    { firstChunkMaxChars: 2400, maxChars: 2400, emergencyMaxChars: 8000 }
+  );
+
+  assert.equal(REMOTE_VOICE_MAX_CHARS, 175);
+  assert.equal(safe.firstChunkMaxChars, 175);
+  assert.equal(safe.maxChars, 175);
+  assert.equal(safe.emergencyMaxChars, 175);
+});
+
+test("local voices keep the requested transport chunk sizes", () => {
+  const requested = { firstChunkMaxChars: 900, maxChars: 1800, emergencyMaxChars: 8000 };
+  const safe = safeChunkOptionsForVoice(
+    { name: "Microsoft David", localService: true },
+    requested
+  );
+
+  assert.deepEqual(safe, requested);
+});
+
+test("ReliableSpeechEngine applies the remote cap before delegating to the base engine", () => {
+  const engine = new ReliableSpeechEngine();
+  const voice = { name: "Microsoft Aria Online (Natural)", localService: false };
+
+  engine.speak({ segments: [{ text: "hello" }] }, 0, {
+    voice,
+    rate: 1,
+    chunkOptions: { firstChunkMaxChars: 2400, maxChars: 2400, emergencyMaxChars: 8000 }
+  });
+
+  assert.equal(engine.lastSpeak.options.chunkOptions.firstChunkMaxChars, 175);
+  assert.equal(engine.lastSpeak.options.chunkOptions.maxChars, 175);
+  assert.equal(engine.lastSpeak.options.chunkOptions.emergencyMaxChars, 175);
+});
 
 test("completed batch is internally idle even if currentUtterance is stale", () => {
   const engine = new ReliableSpeechEngine();
