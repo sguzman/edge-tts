@@ -3,10 +3,12 @@ const assert = require("node:assert/strict");
 
 global.navigator = { language: "en-US" };
 const {
+  createRecoveryChunks,
   createSpeechBatch,
   createUtteranceChunks,
   createUtterancePayload,
   isNaturalVoice,
+  recoveryKeyForSegment,
   sortVoices
 } = require("../src/content/speech-engine.js");
 
@@ -151,6 +153,28 @@ test("pathological unpunctuated text still respects the emergency ceiling", () =
   assert.ok(chunks.length > 1);
   assert.ok(chunks[0].text.length >= 110);
   assert.ok(chunks[0].text.length < 130);
+});
+
+test("recovery chunks preserve every remaining segment while shrinking requests", () => {
+  const segments = Array.from({ length: 20 }, (_, index) => ({
+    text: `segment-${index}-${"x".repeat(18)}`,
+    blockIndex: Math.floor(index / 5),
+    segmentIndex: index
+  }));
+
+  const chunks = createRecoveryChunks(segments, 120);
+  assert.ok(chunks.length > 1);
+  assert.deepEqual(chunks.flatMap((chunk) => chunk.segments), segments);
+  for (const chunk of chunks) {
+    assert.ok(chunk.text.length <= 120);
+  }
+});
+
+test("recovery key identifies the exact stuck model token", () => {
+  assert.equal(
+    recoveryKeyForSegment({ blockIndex: 12, segmentIndex: 7, text: "misconception" }),
+    "12:7:misconception"
+  );
 });
 
 test("natural voices sort ahead of local voices for the same language", () => {
