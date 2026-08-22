@@ -1,6 +1,6 @@
 {
   "name": "edge-natural-tts",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
   "description": "Microsoft Edge extension for natural text-to-speech with synchronized highlighting.",
   "scripts": {
