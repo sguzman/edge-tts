@@ -34,11 +34,35 @@
     return `${segment.blockIndex ?? "?"}:${segment.segmentIndex ?? "?"}:${segment.text ?? ""}`;
   }
 
+  function prematureEndRecoveryPlan(boundaryIndex, segmentCount) {
+    const count = Math.max(0, Math.floor(Number(segmentCount) || 0));
+    const boundary = Math.floor(Number(boundaryIndex));
+
+    if (count === 0 || !Number.isInteger(boundary) || boundary < 0) {
+      return { action: "complete", restartIndex: -1 };
+    }
+
+    const nextIndex = boundary + 1;
+    const remainingAfterBoundary = count - nextIndex;
+
+    // A normal end event is authoritative enough when only the final token lacks
+    // a boundary callback. Replaying that tail token is the source of the creepy
+    // "word... word... word" echo seen at paragraph/chunk boundaries.
+    if (remainingAfterBoundary <= 1) {
+      return { action: "complete", restartIndex: -1 };
+    }
+
+    // If the end really arrived suspiciously early, resume from the first token
+    // after the last confirmed boundary. Never replay the already-confirmed token.
+    return { action: "resume", restartIndex: nextIndex };
+  }
+
   if (!BaseSpeechEngine) {
     return {
       ReliableSpeechEngine: null,
       DEFAULT_NO_BOUNDARY_STALL_MS,
       isInternallyIdle,
+      prematureEndRecoveryPlan,
       recoveryKeyForCurrentSegment
     };
   }
@@ -102,6 +126,32 @@
     }
 
     recoverCurrentChunk(reason) {
+      if (reason === "premature-end") {
+        const payload = this.currentChunks?.[this.currentChunkIndex];
+        const plan = prematureEndRecoveryPlan(
+          this.currentChunkBoundaryIndex,
+          payload?.segments?.length || 0
+        );
+
+        this.provisionalBoundaryActive = false;
+
+        if (plan.action === "complete") {
+          // The utterance emitted a real `end`; do not second-guess a missing
+          // final boundary by replaying the tail word. Move to the next chunk.
+          this.recoveryKey = "";
+          this.recoveryAttempts = 0;
+          return this.advanceChunkAfterRecovery?.();
+        }
+
+        // Base recovery starts exactly at currentChunkBoundaryIndex. Point it at
+        // the first token AFTER the last confirmed token so a premature-end
+        // recovery cannot duplicate already-heard speech.
+        this.currentChunkBoundaryIndex = plan.restartIndex;
+        this.recoveryKey = "";
+        this.recoveryAttempts = 0;
+        return super.recoverCurrentChunk(reason);
+      }
+
       if (reason === "no-boundary-progress") {
         const key = recoveryKeyForCurrentSegment(this);
 
@@ -157,6 +207,7 @@
     ReliableSpeechEngine,
     DEFAULT_NO_BOUNDARY_STALL_MS,
     isInternallyIdle,
+    prematureEndRecoveryPlan,
     recoveryKeyForCurrentSegment
   };
 });
