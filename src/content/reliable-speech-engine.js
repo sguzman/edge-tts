@@ -13,6 +13,13 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const DEFAULT_NO_BOUNDARY_STALL_MS = 6000;
 
+  // Chromium's own Read Anything / Read Aloud controller caps remote voices at
+  // 175 characters because long SpeechSynthesisUtterance requests can time out
+  // inside the remote TTS engine. Keep our larger Batch target as an application
+  // aggregation unit, but never expose that large unit directly to an Online /
+  // Natural browser voice.
+  const REMOTE_VOICE_MAX_CHARS = 175;
+
   function isInternallyIdle(engine) {
     return Boolean(
       engine &&
@@ -21,6 +28,38 @@
         engine.currentChunks.length === 0 &&
         engine.currentOptions === null
     );
+  }
+
+  function isRemoteVoice(voice) {
+    if (!voice) return false;
+    if (voice.localService === false) return true;
+    return /\b(natural|online)\b/i.test(String(voice.name || ""));
+  }
+
+  function safeChunkOptionsForVoice(voice, chunkOptions = {}) {
+    if (!isRemoteVoice(voice)) {
+      return { ...chunkOptions };
+    }
+
+    const requestedFirst = Number(chunkOptions.firstChunkMaxChars);
+    const requestedNext = Number(chunkOptions.maxChars);
+    const requestedEmergency = Number(chunkOptions.emergencyMaxChars);
+
+    return {
+      ...chunkOptions,
+      firstChunkMaxChars: Number.isFinite(requestedFirst)
+        ? Math.min(requestedFirst, REMOTE_VOICE_MAX_CHARS)
+        : REMOTE_VOICE_MAX_CHARS,
+      maxChars: Number.isFinite(requestedNext)
+        ? Math.min(requestedNext, REMOTE_VOICE_MAX_CHARS)
+        : REMOTE_VOICE_MAX_CHARS,
+      // Base chunking treats this as a hard escape even in the middle of a
+      // sentence. For remote voices that is intentional: transport safety is
+      // more important than keeping a giant sentence inside one utterance.
+      emergencyMaxChars: Number.isFinite(requestedEmergency)
+        ? Math.min(requestedEmergency, REMOTE_VOICE_MAX_CHARS)
+        : REMOTE_VOICE_MAX_CHARS
+    };
   }
 
   function recoveryKeyForCurrentSegment(engine) {
@@ -61,13 +100,24 @@
     return {
       ReliableSpeechEngine: null,
       DEFAULT_NO_BOUNDARY_STALL_MS,
+      REMOTE_VOICE_MAX_CHARS,
       isInternallyIdle,
+      isRemoteVoice,
       prematureEndRecoveryPlan,
-      recoveryKeyForCurrentSegment
+      recoveryKeyForCurrentSegment,
+      safeChunkOptionsForVoice
     };
   }
 
   class ReliableSpeechEngine extends BaseSpeechEngine {
+    speak(block, startSegmentIndex, options = {}) {
+      const safeOptions = {
+        ...options,
+        chunkOptions: safeChunkOptionsForVoice(options.voice, options.chunkOptions)
+      };
+      return super.speak(block, startSegmentIndex, safeOptions);
+    }
+
     cancel() {
       // Base SpeechEngine.speak() begins every new session by calling cancel().
       // That is necessary when replacing active speech, but harmful immediately
@@ -206,8 +256,11 @@
   return {
     ReliableSpeechEngine,
     DEFAULT_NO_BOUNDARY_STALL_MS,
+    REMOTE_VOICE_MAX_CHARS,
     isInternallyIdle,
+    isRemoteVoice,
     prematureEndRecoveryPlan,
-    recoveryKeyForCurrentSegment
+    recoveryKeyForCurrentSegment,
+    safeChunkOptionsForVoice
   };
 });
