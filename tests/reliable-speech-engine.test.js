@@ -38,6 +38,7 @@ class BaseSpeechEngine {
 
   recoverCurrentChunk(reason) {
     this.recoveredReason = reason;
+    this.attemptsAtRecovery = this.recoveryAttempts;
   }
 
   cancel() {
@@ -55,7 +56,8 @@ class BaseSpeechEngine {
 global.EdgeTtsExtension = { SpeechEngine: { SpeechEngine: BaseSpeechEngine } };
 const {
   ReliableSpeechEngine,
-  isInternallyIdle
+  isInternallyIdle,
+  recoveryKeyForCurrentSegment
 } = require("../src/content/reliable-speech-engine.js");
 
 test("completed batch is internally idle even if currentUtterance is stale", () => {
@@ -110,7 +112,26 @@ test("utterance start provisionally commits the first token before real boundari
   assert.equal(engine.currentChunkBoundaryIndex, 0);
   assert.equal(emitted.segment, first);
   assert.equal(emitted.event.synthetic, true);
+  assert.equal(engine.provisionalBoundaryActive, true);
   assert.notEqual(engine.progressWatchdog, null);
 
   engine.clearPlaybackTimers();
+});
+
+test("second no-boundary failure at the same token forces the one-token escape", () => {
+  const engine = new ReliableSpeechEngine();
+  const first = { blockIndex: 2, segmentIndex: 11, text: "stuck" };
+
+  engine.currentChunks = [{ segments: [first, { blockIndex: 2, segmentIndex: 12, text: "next" }] }];
+  engine.currentChunkIndex = 0;
+  engine.currentChunkBoundaryIndex = 0;
+  engine.recoveryKey = recoveryKeyForCurrentSegment(engine);
+  engine.recoveryAttempts = 1;
+  engine.provisionalBoundaryActive = true;
+
+  engine.recoverCurrentChunk("no-boundary-progress");
+
+  assert.equal(engine.recoveredReason, "no-boundary-progress");
+  assert.equal(engine.attemptsAtRecovery, Number.MAX_SAFE_INTEGER);
+  assert.equal(engine.provisionalBoundaryActive, false);
 });
