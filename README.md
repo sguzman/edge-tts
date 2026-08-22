@@ -7,9 +7,10 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 - Click the extension action to inject the reader into the current tab and start reading near the current viewport.
 - Uses Edge's `SpeechSynthesis` voices and prefers voices whose names contain `Natural` or `Online`.
 - Highlights the currently spoken word and sentence using the CSS Custom Highlight API.
-- Adjacent short paragraphs are batched into a single speech request to avoid repeated online-voice startup latency. A sufficiently large paragraph stays on its own.
+- Adjacent short paragraphs are aggregated into a logical speech batch so the reader can plan continuous playback across paragraph boundaries.
 - The **Batch target** control is configurable from 400 to 2400 characters and persists with the other reader settings. The default is 1200 characters.
-- Long playback is self-healing: a heartbeat nudges Chromium's speech pipeline, stalled or prematurely-ended utterances restart from the last confirmed word, and recovery requests become progressively smaller if the same token stalls repeatedly.
+- Online/Natural voices are transported as short internal utterances capped at 175 characters, matching Chromium Read Aloud's own safety limit for remote voices. The configured Batch target does not enlarge these browser-level requests.
+- Long playback is self-healing: stalled or prematurely-ended utterances recover from the last safe cursor, and repeated boundary-less failures cannot deadlock the rest of the document.
 - Pause/resume, stop, voice filtering, playback speed, highlight colors, and auto-scroll live in a movable/minimizable toolbar.
 - Click-to-seek is optional and is **off by default**. When disabled, the extension does not install a page click listener.
 - Editable controls and rich-text editors are excluded without watching or mutating the page DOM.
@@ -29,31 +30,32 @@ On `chatgpt.com` and `chat.openai.com`, the text model prefers only message cont
 
 The extension also does **no background MutationObserver scanning**. Model building happens only when the reader starts, when Start is pressed after stopping, or when **Refresh text** is pressed.
 
-## Paragraph batching
+## Paragraph batching and transport chunking
 
-Online Natural voices can incur noticeable startup latency each time a new `SpeechSynthesisUtterance` begins. The reader therefore builds a speech batch before synthesis:
+The Batch target and the browser utterance size are intentionally different layers.
 
-- if the current paragraph already meets the configured **Batch target**, it is synthesized normally;
+The reader first builds a logical batch:
+
+- if the current paragraph already meets the configured **Batch target**, it can form the batch by itself;
 - if it is short, following readable paragraphs are appended until the target is reached;
-- paragraph boundaries are retained as blank-line separators in the utterance so speech keeps a natural break;
-- normal chunk targets are sentence-safe, with a much larger emergency ceiling reserved for pathological unpunctuated text.
+- paragraph boundaries remain represented in the batch so model position, seeking, and sentence highlighting continue across the combined material.
 
-Increasing the Batch target generally reduces gaps between tiny paragraphs at the cost of larger synthesis requests. Changing it while reading restarts from the current word with the new target.
+The logical batch is then broken into browser-safe transport utterances. Chromium's own Read Anything / Read Aloud implementation caps remote voices at 175 characters because of a TTS engine timeout bug on overly long remote text. Edge Natural/Online voices therefore use the same 175-character ceiling here, regardless of whether the Batch target is 400 or 2400 characters.
+
+This means increasing the Batch target controls how much adjacent material the reader plans as one continuous unit; it no longer creates a giant remote `SpeechSynthesisUtterance`.
 
 ## Playback recovery
 
-Chromium speech synthesis can occasionally stop making progress during a long utterance, especially with streamed Online/Natural voices. The reader treats silence in the middle of unread text as a recoverable transport failure rather than the end of the document.
+Web Speech boundary callbacks are useful for word highlighting but are not treated as infallible transport state.
 
 The recovery policy is:
 
-1. keep long utterances alive with a periodic `speechSynthesis.resume()` heartbeat;
-2. after a confirmed word boundary, detect an extended period with no further boundary progress;
-3. if an `end` event arrives before the final segment boundary, treat it as premature rather than advancing past unread text;
-4. restart from the last confirmed word using a smaller request;
-5. retry the same stuck token with progressively smaller recovery windows;
+1. keep remote utterances short enough to avoid Chromium's known long-text timeout path in the first place;
+2. provisionally commit the first token when audio starts so a boundary-less utterance still has a model cursor;
+3. detect extended periods with no further word-boundary progress;
+4. distinguish a genuine `end` from a suspiciously early termination without replaying the last confirmed token;
+5. retry a failed cursor with a smaller recovery request;
 6. as an absolute last resort, skip one irrecoverable token rather than deadlocking the rest of the document.
-
-Normal playback still uses the configured paragraph batch size. The smaller requests are only a failure-recovery path.
 
 ## Install in Edge
 
@@ -103,8 +105,10 @@ src/
     text-model.js
     highlighter.js
     speech-engine.js
+    reliable-speech-engine.js
     toolbar.js
     reader.js
+    reliable-reader.js
     content-script.js
     content.css
 tests/
