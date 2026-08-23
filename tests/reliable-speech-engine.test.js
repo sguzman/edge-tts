@@ -68,7 +68,8 @@ class BaseSpeechEngine {
 global.EdgeTtsExtension = { SpeechEngine: { SpeechEngine: BaseSpeechEngine } };
 const {
   ReliableSpeechEngine,
-  REMOTE_VOICE_MAX_CHARS,
+  REMOTE_VOICE_TARGET_CHARS,
+  REMOTE_VOICE_HARD_MAX_CHARS,
   isInternallyIdle,
   isRemoteVoice,
   prematureEndRecoveryPlan,
@@ -82,16 +83,28 @@ test("remote Natural voices are detected even when localService metadata is abse
   assert.equal(isRemoteVoice({ name: "Microsoft David", localService: true }), false);
 });
 
-test("remote voices are transport-capped at Chromium's 175 character limit", () => {
+test("remote voices use coarse healthy transport instead of 175-character stutter chunks", () => {
   const safe = safeChunkOptionsForVoice(
     { name: "Microsoft Aria Online (Natural)", localService: false },
     { firstChunkMaxChars: 2400, maxChars: 2400, emergencyMaxChars: 8000 }
   );
 
-  assert.equal(REMOTE_VOICE_MAX_CHARS, 175);
-  assert.equal(safe.firstChunkMaxChars, 175);
-  assert.equal(safe.maxChars, 175);
-  assert.equal(safe.emergencyMaxChars, 175);
+  assert.equal(REMOTE_VOICE_TARGET_CHARS, 900);
+  assert.equal(REMOTE_VOICE_HARD_MAX_CHARS, 1200);
+  assert.equal(safe.firstChunkMaxChars, 900);
+  assert.equal(safe.maxChars, 900);
+  assert.equal(safe.emergencyMaxChars, 1200);
+});
+
+test("smaller caller transport requests are preserved", () => {
+  const safe = safeChunkOptionsForVoice(
+    { name: "Microsoft Aria Online (Natural)", localService: false },
+    { firstChunkMaxChars: 700, maxChars: 800, emergencyMaxChars: 1000 }
+  );
+
+  assert.equal(safe.firstChunkMaxChars, 700);
+  assert.equal(safe.maxChars, 800);
+  assert.equal(safe.emergencyMaxChars, 1000);
 });
 
 test("local voices keep the requested transport chunk sizes", () => {
@@ -104,7 +117,7 @@ test("local voices keep the requested transport chunk sizes", () => {
   assert.deepEqual(safe, requested);
 });
 
-test("ReliableSpeechEngine applies the remote cap before delegating to the base engine", () => {
+test("ReliableSpeechEngine applies balanced remote sizing before delegating", () => {
   const engine = new ReliableSpeechEngine();
   const voice = { name: "Microsoft Aria Online (Natural)", localService: false };
 
@@ -114,9 +127,9 @@ test("ReliableSpeechEngine applies the remote cap before delegating to the base 
     chunkOptions: { firstChunkMaxChars: 2400, maxChars: 2400, emergencyMaxChars: 8000 }
   });
 
-  assert.equal(engine.lastSpeak.options.chunkOptions.firstChunkMaxChars, 175);
-  assert.equal(engine.lastSpeak.options.chunkOptions.maxChars, 175);
-  assert.equal(engine.lastSpeak.options.chunkOptions.emergencyMaxChars, 175);
+  assert.equal(engine.lastSpeak.options.chunkOptions.firstChunkMaxChars, 900);
+  assert.equal(engine.lastSpeak.options.chunkOptions.maxChars, 900);
+  assert.equal(engine.lastSpeak.options.chunkOptions.emergencyMaxChars, 1200);
 });
 
 test("completed batch is internally idle even if currentUtterance is stale", () => {
