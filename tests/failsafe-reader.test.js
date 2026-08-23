@@ -64,7 +64,8 @@ class BaseReaderApp {
 global.EdgeTtsExtension = { Reader: { ReaderApp: BaseReaderApp } };
 const {
   FailSafeReaderApp,
-  advanceCursorOneSegment
+  advanceCursorOneSegment,
+  isRecoverableReaderError
 } = require("../src/content/failsafe-reader.js");
 
 test("failsafe cursor advances within a block and across block boundaries", () => {
@@ -80,6 +81,12 @@ test("failsafe cursor advances within a block and across block boundaries", () =
   assert.equal(advanceCursorOneSegment(model, 1, 0), null);
 });
 
+test("speech transport failures are classified as recoverable reader errors", () => {
+  assert.equal(isRecoverableReaderError(new Error("Speech synthesis failed: network")), true);
+  assert.equal(isRecoverableReaderError(new Error("Speech synthesis failed: synthesis-failed")), true);
+  assert.equal(isRecoverableReaderError(new Error("SpeechSynthesis is not available on this page.")), false);
+});
+
 test("liveness timeout cannot leave the reader on the same dead cursor", async () => {
   const app = new FailSafeReaderApp();
   app.playbackLivenessTimeoutMs = 100;
@@ -93,6 +100,23 @@ test("liveness timeout cannot leave the reader on the same dead cursor", async (
   assert.equal(app.currentSegmentIndex, 1);
   assert.equal(app.speakCalls, 1);
   assert.equal(app.status, "Recovering playback…");
+
+  app.stop();
+});
+
+test("fatal transport error auto-continues instead of marking reader stopped", async () => {
+  const app = new FailSafeReaderApp();
+  app.failsafeRestartDelayMs = 10;
+
+  app.handleError(new Error("Speech synthesis failed: network"));
+  await new Promise((resolve) => setTimeout(resolve, 40));
+
+  assert.equal(app.stopped, false);
+  assert.equal(app.cancelCalls, 1);
+  assert.equal(app.currentBlockIndex, 0);
+  assert.equal(app.currentSegmentIndex, 1);
+  assert.equal(app.speakCalls, 1);
+  assert.equal(app.status, "Recovering speech error…");
 
   app.stop();
 });
