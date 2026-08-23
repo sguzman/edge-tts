@@ -7,6 +7,7 @@ const READER_FILES = [
   "src/content/toolbar.js",
   "src/content/reader.js",
   "src/content/reliable-reader.js",
+  "src/content/failsafe-reader.js",
   "src/content/content-script.js"
 ];
 
