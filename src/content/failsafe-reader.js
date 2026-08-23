@@ -54,6 +54,8 @@
       super();
       this.playbackLivenessTimer = null;
       this.playbackLivenessSerial = 0;
+      this.playbackLivenessTimeoutMs = PLAYBACK_LIVENESS_TIMEOUT_MS;
+      this.failsafeRestartDelayMs = FAILSAFE_RESTART_DELAY_MS;
     }
 
     clearPlaybackLivenessWatchdog() {
@@ -139,8 +141,8 @@
             return;
           }
           this.speakCurrentPosition();
-        }, FAILSAFE_RESTART_DELAY_MS);
-      }, PLAYBACK_LIVENESS_TIMEOUT_MS);
+        }, Math.max(0, Number(this.failsafeRestartDelayMs) || 0));
+      }, Math.max(100, Number(this.playbackLivenessTimeoutMs) || PLAYBACK_LIVENESS_TIMEOUT_MS));
     }
 
     speakCurrentPosition() {
