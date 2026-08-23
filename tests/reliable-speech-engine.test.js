@@ -1,6 +1,24 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+class FakeUtterance {
+  constructor() {
+    this.listeners = new Map();
+  }
+
+  addEventListener(type, listener) {
+    const listeners = this.listeners.get(type) || [];
+    listeners.push(listener);
+    this.listeners.set(type, listeners);
+  }
+
+  emit(type, event = {}) {
+    for (const listener of this.listeners.get(type) || []) {
+      listener(event);
+    }
+  }
+}
+
 class BaseSpeechEngine {
   constructor() {
     this.currentUtterance = null;
@@ -13,7 +31,6 @@ class BaseSpeechEngine {
     this.recoveryAttempts = 0;
     this.browserCancelCalls = 0;
     this.timersCleared = 0;
-    this.heartbeatStarts = 0;
     this.progressWatchdog = null;
     this.heartbeatTimer = null;
     this.synth = { paused: false };
@@ -27,6 +44,20 @@ class BaseSpeechEngine {
     return this.lastSpeak;
   }
 
+  speakCurrentChunk(generation) {
+    const utterance = new FakeUtterance();
+    utterance.addEventListener("error", (event) => {
+      if (generation !== this.generation) return;
+      this.clearPlaybackTimers();
+      this.currentUtterance = null;
+      // Mirrors the old base dead branch: canceled/interrupted are swallowed.
+      if (event.error !== "canceled" && event.error !== "interrupted") {
+        this.recoverCurrentChunk(`error:${event.error}`);
+      }
+    });
+    this.currentUtterance = utterance;
+  }
+
   clearPlaybackTimers() {
     this.timersCleared += 1;
     if (this.progressWatchdog !== null) {
@@ -37,10 +68,6 @@ class BaseSpeechEngine {
       clearInterval(this.heartbeatTimer);
       this.heartbeatTimer = null;
     }
-  }
-
-  startHeartbeat() {
-    this.heartbeatStarts += 1;
   }
 
   recoverCurrentChunk(reason) {
@@ -72,6 +99,7 @@ const {
   REMOTE_VOICE_HARD_MAX_CHARS,
   isInternallyIdle,
   isRemoteVoice,
+  isSpontaneousRecoverableError,
   prematureEndRecoveryPlan,
   recoveryKeyForCurrentSegment,
   safeChunkOptionsForVoice
@@ -163,7 +191,7 @@ test("active speech still uses the base cancel path", () => {
   assert.equal(engine.currentUtterance, null);
 });
 
-test("utterance start provisionally commits the first token before real boundaries", () => {
+test("utterance start commits a provisional token without a periodic resume heartbeat", () => {
   const engine = new ReliableSpeechEngine();
   const first = { blockIndex: 4, segmentIndex: 7, text: "broken" };
   let emitted = null;
@@ -180,7 +208,7 @@ test("utterance start provisionally commits the first token before real boundari
 
   engine.startHeartbeat(5);
 
-  assert.equal(engine.heartbeatStarts, 1);
+  assert.equal(engine.heartbeatTimer, null);
   assert.equal(engine.currentChunkBoundaryIndex, 0);
   assert.equal(emitted.segment, first);
   assert.equal(emitted.event.synthetic, true);
@@ -188,6 +216,47 @@ test("utterance start provisionally commits the first token before real boundari
   assert.notEqual(engine.progressWatchdog, null);
 
   engine.clearPlaybackTimers();
+});
+
+test("spontaneous canceled/interrupted errors are recoverable", () => {
+  assert.equal(isSpontaneousRecoverableError("canceled"), true);
+  assert.equal(isSpontaneousRecoverableError("interrupted"), true);
+  assert.equal(isSpontaneousRecoverableError("network"), false);
+
+  for (const error of ["canceled", "interrupted"]) {
+    const engine = new ReliableSpeechEngine();
+    engine.currentChunks = [{
+      segments: [
+        { blockIndex: 1, segmentIndex: 0, text: "keep" },
+        { blockIndex: 1, segmentIndex: 1, text: "going" }
+      ]
+    }];
+    engine.currentChunkIndex = 0;
+    engine.currentChunkBoundaryIndex = 0;
+    engine.currentOptions = { rate: 1 };
+    engine.generation = 4;
+
+    engine.speakCurrentChunk(4);
+    const utterance = engine.currentUtterance;
+    utterance.emit("error", { error });
+
+    assert.equal(engine.recoveredReason, `error:${error}`);
+  }
+});
+
+test("intentional cancel generation invalidates later interruption callbacks", () => {
+  const engine = new ReliableSpeechEngine();
+  engine.currentChunks = [{ segments: [{ blockIndex: 1, segmentIndex: 0, text: "old" }] }];
+  engine.currentChunkIndex = 0;
+  engine.currentOptions = { rate: 1 };
+  engine.generation = 2;
+  engine.speakCurrentChunk(2);
+  const utterance = engine.currentUtterance;
+
+  engine.generation = 3;
+  utterance.emit("error", { error: "interrupted" });
+
+  assert.equal(engine.recoveredReason, undefined);
 });
 
 test("second no-boundary failure at the same token forces the one-token escape", () => {
