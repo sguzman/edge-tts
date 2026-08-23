@@ -16,9 +16,6 @@
   // Batch size and transport size are separate concerns. A large logical batch
   // reduces paragraph startup gaps, while the browser receives moderately-sized
   // utterances so one giant remote request cannot wedge the Natural voice.
-  // 0.3.9's 175-character hard cap was far too small for Windows/Edge and caused
-  // a fresh remote startup every few seconds. Keep healthy playback coarse and
-  // let the existing recovery ladder shrink requests only after a real failure.
   const REMOTE_VOICE_TARGET_CHARS = 900;
   const REMOTE_VOICE_HARD_MAX_CHARS = 1200;
 
@@ -55,8 +52,6 @@
       maxChars: Number.isFinite(requestedNext)
         ? Math.min(requestedNext, REMOTE_VOICE_TARGET_CHARS)
         : REMOTE_VOICE_TARGET_CHARS,
-      // The soft target waits for a sentence boundary. The hard ceiling is only
-      // an escape for a giant/unpunctuated sentence.
       emergencyMaxChars: Number.isFinite(requestedEmergency)
         ? Math.min(requestedEmergency, REMOTE_VOICE_HARD_MAX_CHARS)
         : REMOTE_VOICE_HARD_MAX_CHARS
@@ -92,6 +87,10 @@
     return { action: "resume", restartIndex: nextIndex };
   }
 
+  function isSpontaneousRecoverableError(errorName) {
+    return errorName === "canceled" || errorName === "interrupted";
+  }
+
   if (!BaseSpeechEngine) {
     return {
       ReliableSpeechEngine: null,
@@ -100,6 +99,7 @@
       REMOTE_VOICE_HARD_MAX_CHARS,
       isInternallyIdle,
       isRemoteVoice,
+      isSpontaneousRecoverableError,
       prematureEndRecoveryPlan,
       recoveryKeyForCurrentSegment,
       safeChunkOptionsForVoice
@@ -131,6 +131,34 @@
       }
 
       return super.cancel();
+    }
+
+    // Do not periodically call speechSynthesis.resume() while healthy speech is
+    // already running. That workaround is invasive and can itself perturb an
+    // Online/Natural voice. Liveness is enforced by progress watchdogs instead.
+    startHeartbeat(generation) {
+      if (this.heartbeatTimer !== null) {
+        root.clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = null;
+      }
+
+      const payload = this.currentChunks?.[this.currentChunkIndex];
+      if (this.currentChunkBoundaryIndex < 0 && payload?.segments?.length) {
+        this.currentChunkBoundaryIndex = 0;
+        this.provisionalBoundaryActive = true;
+        this.onBoundary?.(payload.segments[0], {
+          synthetic: true,
+          type: "utterance-start",
+          charIndex: 0
+        });
+      }
+
+      this.armingFromUtteranceStart = true;
+      try {
+        this.armProgressWatchdog(generation);
+      } finally {
+        this.armingFromUtteranceStart = false;
+      }
     }
 
     armProgressWatchdog(generation) {
@@ -196,26 +224,42 @@
       return super.recoverCurrentChunk(reason);
     }
 
-    startHeartbeat(generation) {
-      super.startHeartbeat(generation);
+    speakCurrentChunk(generation) {
+      super.speakCurrentChunk(generation);
 
-      const payload = this.currentChunks?.[this.currentChunkIndex];
-      if (this.currentChunkBoundaryIndex < 0 && payload?.segments?.length) {
-        this.currentChunkBoundaryIndex = 0;
-        this.provisionalBoundaryActive = true;
-        this.onBoundary?.(payload.segments[0], {
-          synthetic: true,
-          type: "utterance-start",
-          charIndex: 0
-        });
+      const utterance = this.currentUtterance;
+      if (!utterance?.addEventListener) {
+        return;
       }
 
-      this.armingFromUtteranceStart = true;
-      try {
-        this.armProgressWatchdog(generation);
-      } finally {
-        this.armingFromUtteranceStart = false;
-      }
+      // The base engine intentionally ignores `canceled` and `interrupted`
+      // errors. That creates a dead state when Chromium emits one spontaneously:
+      // its handler clears the timers/current utterance and then does nothing.
+      // Intentional cancels are already protected by a generation bump, so any
+      // such error that still matches this generation must be recovered.
+      utterance.addEventListener("error", (event) => {
+        if (
+          generation !== this.generation ||
+          !isSpontaneousRecoverableError(event?.error)
+        ) {
+          return;
+        }
+
+        const payload = this.currentChunks?.[this.currentChunkIndex];
+        if (!payload?.segments?.length) {
+          this.advanceChunkAfterRecovery?.();
+          return;
+        }
+
+        if (this.currentChunkBoundaryIndex < 0) {
+          this.currentChunkBoundaryIndex = 0;
+        }
+
+        console.warn(
+          `Edge Natural TTS recovering spontaneous speech ${event.error} instead of going idle.`
+        );
+        this.recoverCurrentChunk?.(`error:${event.error}`);
+      });
     }
   }
 
@@ -226,6 +270,7 @@
     REMOTE_VOICE_HARD_MAX_CHARS,
     isInternallyIdle,
     isRemoteVoice,
+    isSpontaneousRecoverableError,
     prematureEndRecoveryPlan,
     recoveryKeyForCurrentSegment,
     safeChunkOptionsForVoice
