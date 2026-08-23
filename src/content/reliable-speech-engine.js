@@ -13,12 +13,14 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const DEFAULT_NO_BOUNDARY_STALL_MS = 6000;
 
-  // Chromium's own Read Anything / Read Aloud controller caps remote voices at
-  // 175 characters because long SpeechSynthesisUtterance requests can time out
-  // inside the remote TTS engine. Keep our larger Batch target as an application
-  // aggregation unit, but never expose that large unit directly to an Online /
-  // Natural browser voice.
-  const REMOTE_VOICE_MAX_CHARS = 175;
+  // Batch size and transport size are separate concerns. A large logical batch
+  // reduces paragraph startup gaps, while the browser receives moderately-sized
+  // utterances so one giant remote request cannot wedge the Natural voice.
+  // 0.3.9's 175-character hard cap was far too small for Windows/Edge and caused
+  // a fresh remote startup every few seconds. Keep healthy playback coarse and
+  // let the existing recovery ladder shrink requests only after a real failure.
+  const REMOTE_VOICE_TARGET_CHARS = 900;
+  const REMOTE_VOICE_HARD_MAX_CHARS = 1200;
 
   function isInternallyIdle(engine) {
     return Boolean(
@@ -48,17 +50,16 @@
     return {
       ...chunkOptions,
       firstChunkMaxChars: Number.isFinite(requestedFirst)
-        ? Math.min(requestedFirst, REMOTE_VOICE_MAX_CHARS)
-        : REMOTE_VOICE_MAX_CHARS,
+        ? Math.min(requestedFirst, REMOTE_VOICE_TARGET_CHARS)
+        : REMOTE_VOICE_TARGET_CHARS,
       maxChars: Number.isFinite(requestedNext)
-        ? Math.min(requestedNext, REMOTE_VOICE_MAX_CHARS)
-        : REMOTE_VOICE_MAX_CHARS,
-      // Base chunking treats this as a hard escape even in the middle of a
-      // sentence. For remote voices that is intentional: transport safety is
-      // more important than keeping a giant sentence inside one utterance.
+        ? Math.min(requestedNext, REMOTE_VOICE_TARGET_CHARS)
+        : REMOTE_VOICE_TARGET_CHARS,
+      // The soft target waits for a sentence boundary. The hard ceiling is only
+      // an escape for a giant/unpunctuated sentence.
       emergencyMaxChars: Number.isFinite(requestedEmergency)
-        ? Math.min(requestedEmergency, REMOTE_VOICE_MAX_CHARS)
-        : REMOTE_VOICE_MAX_CHARS
+        ? Math.min(requestedEmergency, REMOTE_VOICE_HARD_MAX_CHARS)
+        : REMOTE_VOICE_HARD_MAX_CHARS
     };
   }
 
@@ -84,15 +85,10 @@
     const nextIndex = boundary + 1;
     const remainingAfterBoundary = count - nextIndex;
 
-    // A normal end event is authoritative enough when only the final token lacks
-    // a boundary callback. Replaying that tail token is the source of the creepy
-    // "word... word... word" echo seen at paragraph/chunk boundaries.
     if (remainingAfterBoundary <= 1) {
       return { action: "complete", restartIndex: -1 };
     }
 
-    // If the end really arrived suspiciously early, resume from the first token
-    // after the last confirmed boundary. Never replay the already-confirmed token.
     return { action: "resume", restartIndex: nextIndex };
   }
 
@@ -100,7 +96,8 @@
     return {
       ReliableSpeechEngine: null,
       DEFAULT_NO_BOUNDARY_STALL_MS,
-      REMOTE_VOICE_MAX_CHARS,
+      REMOTE_VOICE_TARGET_CHARS,
+      REMOTE_VOICE_HARD_MAX_CHARS,
       isInternallyIdle,
       isRemoteVoice,
       prematureEndRecoveryPlan,
@@ -119,12 +116,6 @@
     }
 
     cancel() {
-      // Base SpeechEngine.speak() begins every new session by calling cancel().
-      // That is necessary when replacing active speech, but harmful immediately
-      // after a batch completed normally: Chromium is still settling the online
-      // voice and a global speechSynthesis.cancel() can prevent the next batch
-      // from ever starting. A cleanly-ended session is already idle; only reset
-      // our stale bookkeeping and leave the browser speech pipeline alone.
       if (isInternallyIdle(this)) {
         this.clearPlaybackTimers?.();
         this.generation += 1;
@@ -147,9 +138,6 @@
         root.clearTimeout(this.progressWatchdog);
       }
 
-      // Base boundary events call this method too. Any arm that did not come
-      // directly from startHeartbeat represents real boundary progress and
-      // supersedes the provisional audio-start cursor.
       if (!this.armingFromUtteranceStart) {
         this.provisionalBoundaryActive = false;
       }
@@ -186,16 +174,11 @@
         this.provisionalBoundaryActive = false;
 
         if (plan.action === "complete") {
-          // The utterance emitted a real `end`; do not second-guess a missing
-          // final boundary by replaying the tail word. Move to the next chunk.
           this.recoveryKey = "";
           this.recoveryAttempts = 0;
           return this.advanceChunkAfterRecovery?.();
         }
 
-        // Base recovery starts exactly at currentChunkBoundaryIndex. Point it at
-        // the first token AFTER the last confirmed token so a premature-end
-        // recovery cannot duplicate already-heard speech.
         this.currentChunkBoundaryIndex = plan.restartIndex;
         this.recoveryKey = "";
         this.recoveryAttempts = 0;
@@ -204,13 +187,6 @@
 
       if (reason === "no-boundary-progress") {
         const key = recoveryKeyForCurrentSegment(this);
-
-        // The first boundary-less playback gets one normal retry. If the same
-        // provisional token starts audio again and still yields no real word
-        // boundaries, force the base recovery ladder into its one-token escape
-        // rather than replaying the same broken sentence through every chunk
-        // size. The base method will observe attempts > its retry ceiling and
-        // skip exactly one token before continuing.
         if (key && key === this.recoveryKey && Number(this.recoveryAttempts) >= 1) {
           this.recoveryAttempts = Number.MAX_SAFE_INTEGER;
         }
@@ -224,14 +200,7 @@
       super.startHeartbeat(generation);
 
       const payload = this.currentChunks?.[this.currentChunkIndex];
-      if (
-        this.currentChunkBoundaryIndex < 0 &&
-        payload?.segments?.length
-      ) {
-        // Treat audio start as a provisional first-token boundary. This keeps
-        // the model cursor and highlighting monotonic even when Chromium fails
-        // to emit its normal `boundary` events. A real boundary immediately
-        // replaces this provisional position if/when one arrives.
+      if (this.currentChunkBoundaryIndex < 0 && payload?.segments?.length) {
         this.currentChunkBoundaryIndex = 0;
         this.provisionalBoundaryActive = true;
         this.onBoundary?.(payload.segments[0], {
@@ -241,9 +210,6 @@
         });
       }
 
-      // Arm progress from `start`, not from the first real boundary. Otherwise
-      // an utterance that produces audio but zero boundary events can hang
-      // forever and repeatedly restart from the same sentence.
       this.armingFromUtteranceStart = true;
       try {
         this.armProgressWatchdog(generation);
@@ -256,7 +222,8 @@
   return {
     ReliableSpeechEngine,
     DEFAULT_NO_BOUNDARY_STALL_MS,
-    REMOTE_VOICE_MAX_CHARS,
+    REMOTE_VOICE_TARGET_CHARS,
+    REMOTE_VOICE_HARD_MAX_CHARS,
     isInternallyIdle,
     isRemoteVoice,
     prematureEndRecoveryPlan,
