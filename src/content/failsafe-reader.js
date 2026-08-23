@@ -40,12 +40,17 @@
     return null;
   }
 
+  function isRecoverableReaderError(error) {
+    return /^Speech synthesis failed:/i.test(String(error?.message || ""));
+  }
+
   if (!BaseReaderApp) {
     return {
       FailSafeReaderApp: null,
       FAILSAFE_RESTART_DELAY_MS,
       PLAYBACK_LIVENESS_TIMEOUT_MS,
-      advanceCursorOneSegment
+      advanceCursorOneSegment,
+      isRecoverableReaderError
     };
   }
 
@@ -64,6 +69,45 @@
         root.clearTimeout(this.playbackLivenessTimer);
         this.playbackLivenessTimer = null;
       }
+    }
+
+    scheduleForcedContinuation(cursor, status) {
+      const nextCursor = advanceCursorOneSegment(
+        this.model,
+        cursor.blockIndex,
+        cursor.segmentIndex
+      );
+
+      if (!nextCursor) {
+        this.finishDocument();
+        return false;
+      }
+
+      if (Number.isFinite(Number(this.batchRequestSerial))) {
+        this.batchRequestSerial += 1;
+      }
+      this.clearReliabilityTimers?.();
+      this.activeBatchRequest = null;
+      this.activeBatchEndBlockIndex = -1;
+      this.currentBlockIndex = nextCursor.blockIndex;
+      this.currentSegmentIndex = nextCursor.segmentIndex;
+      this.speech?.cancel?.();
+      this.toolbar?.setStatus?.(status);
+
+      const restartSerial = ++this.playbackLivenessSerial;
+      root.setTimeout(() => {
+        if (
+          restartSerial !== this.playbackLivenessSerial ||
+          this.stopped ||
+          this.paused ||
+          !this.model
+        ) {
+          return;
+        }
+        this.speakCurrentPosition();
+      }, Math.max(0, Number(this.failsafeRestartDelayMs) || 0));
+
+      return true;
     }
 
     armPlaybackLivenessWatchdog() {
@@ -99,49 +143,12 @@
           return;
         }
 
-        const nextCursor = advanceCursorOneSegment(
-          this.model,
-          cursor.blockIndex,
-          cursor.segmentIndex
-        );
-
-        if (!nextCursor) {
-          this.finishDocument();
-          return;
-        }
-
         console.warn(
           `Edge Natural TTS reader-level liveness timeout at ${cursor.blockIndex}:${cursor.segmentIndex}; ` +
-            `forcing continuation at ${nextCursor.blockIndex}:${nextCursor.segmentIndex}.`
+            "forcing continuation instead of waiting for manual Stop/Play."
         );
 
-        // Invalidate every lower-level pending transition before replacing the
-        // transport. This watchdog is deliberately independent of SpeechEngine:
-        // even if Chromium cleared/stranded all engine timers, the reader itself
-        // can still move the committed document cursor forward.
-        if (Number.isFinite(Number(this.batchRequestSerial))) {
-          this.batchRequestSerial += 1;
-        }
-        this.clearReliabilityTimers?.();
-        this.activeBatchRequest = null;
-        this.activeBatchEndBlockIndex = -1;
-        this.currentBlockIndex = nextCursor.blockIndex;
-        this.currentSegmentIndex = nextCursor.segmentIndex;
-        this.speech?.cancel?.();
-        this.toolbar?.setStatus?.("Recovering playback…");
-
-        const restartSerial = ++this.playbackLivenessSerial;
-        root.setTimeout(() => {
-          if (
-            restartSerial !== this.playbackLivenessSerial ||
-            this.stopped ||
-            this.paused ||
-            !this.model
-          ) {
-            return;
-          }
-          this.speakCurrentPosition();
-        }, Math.max(0, Number(this.failsafeRestartDelayMs) || 0));
+        this.scheduleForcedContinuation(cursor, "Recovering playback…");
       }, Math.max(100, Number(this.playbackLivenessTimeoutMs) || PLAYBACK_LIVENESS_TIMEOUT_MS));
     }
 
@@ -195,6 +202,21 @@
 
     handleError(error) {
       this.clearPlaybackLivenessWatchdog();
+
+      if (isRecoverableReaderError(error) && !this.stopped && !this.paused && this.model) {
+        const cursor = {
+          blockIndex: this.currentBlockIndex,
+          segmentIndex: this.currentSegmentIndex
+        };
+        console.warn(
+          `Edge Natural TTS transport error at ${cursor.blockIndex}:${cursor.segmentIndex}; ` +
+            "continuing automatically.",
+          error
+        );
+        this.scheduleForcedContinuation(cursor, "Recovering speech error…");
+        return;
+      }
+
       return super.handleError(error);
     }
   }
@@ -203,6 +225,7 @@
     FailSafeReaderApp,
     FAILSAFE_RESTART_DELAY_MS,
     PLAYBACK_LIVENESS_TIMEOUT_MS,
-    advanceCursorOneSegment
+    advanceCursorOneSegment,
+    isRecoverableReaderError
   };
 });
