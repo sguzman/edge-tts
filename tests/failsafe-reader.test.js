@@ -64,8 +64,6 @@ class BaseReaderApp {
 global.EdgeTtsExtension = { Reader: { ReaderApp: BaseReaderApp } };
 const {
   FailSafeReaderApp,
-  FAILSAFE_RESTART_DELAY_MS,
-  PLAYBACK_LIVENESS_TIMEOUT_MS,
   advanceCursorOneSegment
 } = require("../src/content/failsafe-reader.js");
 
@@ -84,11 +82,11 @@ test("failsafe cursor advances within a block and across block boundaries", () =
 
 test("liveness timeout cannot leave the reader on the same dead cursor", async () => {
   const app = new FailSafeReaderApp();
+  app.playbackLivenessTimeoutMs = 100;
+  app.failsafeRestartDelayMs = 10;
   app.armPlaybackLivenessWatchdog();
 
-  await new Promise((resolve) =>
-    setTimeout(resolve, PLAYBACK_LIVENESS_TIMEOUT_MS + FAILSAFE_RESTART_DELAY_MS + 80)
-  );
+  await new Promise((resolve) => setTimeout(resolve, 180));
 
   assert.equal(app.cancelCalls, 1);
   assert.equal(app.currentBlockIndex, 0);
@@ -101,6 +99,7 @@ test("liveness timeout cannot leave the reader on the same dead cursor", async (
 
 test("real boundary progress rearms the failsafe instead of forcing recovery", async () => {
   const app = new FailSafeReaderApp();
+  app.playbackLivenessTimeoutMs = 100;
   app.armPlaybackLivenessWatchdog();
 
   await new Promise((resolve) => setTimeout(resolve, 25));
