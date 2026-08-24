@@ -6,13 +6,14 @@ const path = require("node:path");
 const backgroundPath = path.join(__dirname, "..", "src", "background.js");
 const source = fs.readFileSync(backgroundPath, "utf8");
 
-test("stable reliability stack and startup fast path load before bootstrap", () => {
+test("stable reliability stack, boundaryless fallback, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');
   const toolbar = source.indexOf('"src/content/toolbar.js"');
   const reader = source.indexOf('"src/content/reader.js"');
   const reliableReader = source.indexOf('"src/content/reliable-reader.js"');
   const failsafeReader = source.indexOf('"src/content/failsafe-reader.js"');
+  const boundarylessFallback = source.indexOf('"src/content/boundaryless-fallback.js"');
   const startupFastPath = source.indexOf('"src/content/startup-fastpath.js"');
   const bootstrap = source.indexOf('"src/content/content-script.js"');
 
@@ -22,7 +23,8 @@ test("stable reliability stack and startup fast path load before bootstrap", () 
   assert.ok(reader > toolbar);
   assert.ok(reliableReader > reader);
   assert.ok(failsafeReader > reliableReader);
-  assert.ok(startupFastPath > failsafeReader);
+  assert.ok(boundarylessFallback > failsafeReader);
+  assert.ok(startupFastPath > boundarylessFallback);
   assert.ok(bootstrap > startupFastPath);
   assert.equal(source.includes("quit-toolbar.js"), false);
   assert.equal(source.includes("session-reader.js"), false);
