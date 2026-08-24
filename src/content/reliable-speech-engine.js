@@ -143,14 +143,19 @@
       }
 
       const payload = this.currentChunks?.[this.currentChunkIndex];
-      if (this.currentChunkBoundaryIndex < 0 && payload?.segments?.length) {
-        this.currentChunkBoundaryIndex = 0;
-        this.provisionalBoundaryActive = true;
-        this.onBoundary?.(payload.segments[0], {
-          synthetic: true,
-          type: "utterance-start",
-          charIndex: 0
-        });
+      if (payload?.segments?.length) {
+        if (this.currentChunkBoundaryIndex < 0) {
+          this.currentChunkBoundaryIndex = 0;
+          this.provisionalBoundaryActive = true;
+        }
+
+        if (this.provisionalBoundaryActive) {
+          this.onBoundary?.(payload.segments[0], {
+            synthetic: true,
+            type: "utterance-start",
+            charIndex: 0
+          });
+        }
       }
 
       this.armingFromUtteranceStart = true;
@@ -192,6 +197,15 @@
     }
 
     recoverCurrentChunk(reason) {
+      if (reason === "premature-end" && this.provisionalBoundaryActive) {
+        // The transport reached `end` before any real word boundary confirmed
+        // progress. The provisional cursor exists only for highlighting and
+        // liveness; it must never be interpreted as a spoken token here.
+        this.provisionalBoundaryActive = false;
+        this.currentChunkBoundaryIndex = -1;
+        return super.recoverCurrentChunk("end-without-confirmed-boundary");
+      }
+
       if (reason === "premature-end") {
         const payload = this.currentChunks?.[this.currentChunkIndex];
         const plan = prematureEndRecoveryPlan(
@@ -228,8 +242,19 @@
       super.speakCurrentChunk(generation);
 
       const utterance = this.currentUtterance;
+      const payload = this.currentChunks?.[this.currentChunkIndex];
       if (!utterance?.addEventListener) {
         return;
+      }
+
+      // Mark the first token as provisional before Chromium receives the
+      // utterance. If it immediately emits `end` without start/boundary events,
+      // the base premature-end check can no longer mistake that transport for
+      // successful playback. startHeartbeat emits the visible synthetic
+      // boundary only once the utterance actually starts.
+      if (this.currentChunkBoundaryIndex < 0 && payload?.segments?.length) {
+        this.currentChunkBoundaryIndex = 0;
+        this.provisionalBoundaryActive = true;
       }
 
       // The base engine intentionally ignores `canceled` and `interrupted`
@@ -245,8 +270,8 @@
           return;
         }
 
-        const payload = this.currentChunks?.[this.currentChunkIndex];
-        if (!payload?.segments?.length) {
+        const currentPayload = this.currentChunks?.[this.currentChunkIndex];
+        if (!currentPayload?.segments?.length) {
           this.advanceChunkAfterRecovery?.();
           return;
         }
