@@ -29,6 +29,7 @@
       this.playButton = null;
       this.stopButton = null;
       this.refreshButton = null;
+      this.quitButton = null;
       this.voiceSelect = null;
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
@@ -65,6 +66,7 @@
         <div class="edge-tts-header" data-edge-tts-drag-handle>
           <strong>Edge TTS</strong>
           <span data-edge-tts-status>Starting…</span>
+          <button type="button" data-edge-tts-action="quit" title="Quit Edge TTS for this tab" aria-label="Quit Edge TTS for this tab">Quit</button>
           <button type="button" class="edge-tts-icon-button" data-edge-tts-action="minimize" title="Minimize controls" aria-label="Minimize controls">−</button>
         </div>
         <div class="edge-tts-row edge-tts-transport-row">
@@ -133,6 +135,7 @@
       this.playButton = element.querySelector("[data-edge-tts-action='play']");
       this.stopButton = element.querySelector("[data-edge-tts-action='stop']");
       this.refreshButton = element.querySelector("[data-edge-tts-action='refresh']");
+      this.quitButton = element.querySelector("[data-edge-tts-action='quit']");
       this.voiceSelect = element.querySelector("[data-edge-tts-voice]");
       this.voiceFilterInput = element.querySelector("[data-edge-tts-voice-filter]");
       this.clearVoiceFilterButton = element.querySelector("[data-edge-tts-action='clear-voice-filter']");
@@ -151,6 +154,7 @@
       this.playButton.addEventListener("click", () => this.handlers.onPlayPause());
       this.stopButton.addEventListener("click", () => this.handlers.onStop());
       this.refreshButton.addEventListener("click", () => this.handlers.onRefresh());
+      this.quitButton.addEventListener("click", () => this.handlers.onQuit?.());
       this.voiceSelect.addEventListener("change", () => {
         if (this.voiceSelect.value) {
           this.selectedVoiceName = this.voiceSelect.value;
@@ -196,6 +200,34 @@
       if (this.element) {
         this.element.hidden = true;
       }
+    }
+
+    destroy() {
+      root.removeEventListener("resize", this.boundResize);
+      document.removeEventListener("pointermove", this.boundPointerMove, true);
+      document.removeEventListener("pointerup", this.boundPointerUp, true);
+      document.removeEventListener("pointercancel", this.boundPointerUp, true);
+      this.dragState = null;
+      this.element?.remove();
+      this.element = null;
+      this.playButton = null;
+      this.stopButton = null;
+      this.refreshButton = null;
+      this.quitButton = null;
+      this.voiceSelect = null;
+      this.voiceFilterInput = null;
+      this.clearVoiceFilterButton = null;
+      this.rateInput = null;
+      this.rateValue = null;
+      this.batchCharsInput = null;
+      this.batchCharsValue = null;
+      this.status = null;
+      this.wordColorInput = null;
+      this.sentenceColorInput = null;
+      this.autoScrollInput = null;
+      this.clickToSeekInput = null;
+      this.minimizeButton = null;
+      this.dragHandle = null;
     }
 
     setPaused(paused) {
