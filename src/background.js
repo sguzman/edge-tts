@@ -5,11 +5,9 @@ const READER_FILES = [
   "src/content/speech-engine.js",
   "src/content/reliable-speech-engine.js",
   "src/content/toolbar.js",
-  "src/content/quit-toolbar.js",
   "src/content/reader.js",
   "src/content/reliable-reader.js",
   "src/content/failsafe-reader.js",
-  "src/content/session-reader.js",
   "src/content/content-script.js"
 ];
 
