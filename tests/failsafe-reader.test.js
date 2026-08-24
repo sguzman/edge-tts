@@ -65,7 +65,9 @@ global.EdgeTtsExtension = { Reader: { ReaderApp: BaseReaderApp } };
 const {
   FailSafeReaderApp,
   advanceCursorOneSegment,
-  isRecoverableReaderError
+  findFreshTerminalContinuation,
+  isRecoverableReaderError,
+  matchingSegmentPrefixLength
 } = require("../src/content/failsafe-reader.js");
 
 test("failsafe cursor advances within a block and across block boundaries", () => {
@@ -85,6 +87,80 @@ test("speech transport failures are classified as recoverable reader errors", ()
   assert.equal(isRecoverableReaderError(new Error("Speech synthesis failed: network")), true);
   assert.equal(isRecoverableReaderError(new Error("Speech synthesis failed: synthesis-failed")), true);
   assert.equal(isRecoverableReaderError(new Error("SpeechSynthesis is not available on this page.")), false);
+});
+
+test("terminal verification detects a block appended after the old ChatGPT snapshot", () => {
+  const previous = {
+    blocks: [
+      {
+        authorRole: "assistant",
+        text: "old terminal paragraph",
+        segments: [{ text: "old" }, { text: "terminal" }, { text: "paragraph" }]
+      }
+    ]
+  };
+  const fresh = {
+    blocks: [
+      previous.blocks[0],
+      {
+        authorRole: "assistant",
+        text: "new paragraph",
+        segments: [{ text: "new" }, { text: "paragraph" }]
+      }
+    ]
+  };
+
+  assert.deepEqual(findFreshTerminalContinuation(previous, fresh), {
+    blockIndex: 1,
+    segmentIndex: 0,
+    reason: "appended-block"
+  });
+});
+
+test("terminal verification resumes a final block that grew while streaming", () => {
+  const previous = {
+    blocks: [
+      {
+        authorRole: "assistant",
+        text: "alpha beta",
+        segments: [{ text: "alpha" }, { text: "beta" }]
+      }
+    ]
+  };
+  const fresh = {
+    blocks: [
+      {
+        authorRole: "assistant",
+        text: "alpha beta gamma delta",
+        segments: [
+          { text: "alpha" },
+          { text: "beta" },
+          { text: "gamma" },
+          { text: "delta" }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(matchingSegmentPrefixLength(previous.blocks[0].segments, fresh.blocks[0].segments), 2);
+  assert.deepEqual(findFreshTerminalContinuation(previous, fresh), {
+    blockIndex: 0,
+    segmentIndex: 2,
+    reason: "grown-terminal-block"
+  });
+});
+
+test("terminal verification accepts a truly unchanged document end", () => {
+  const model = {
+    blocks: [
+      {
+        authorRole: "assistant",
+        text: "the actual end",
+        segments: [{ text: "the" }, { text: "actual" }, { text: "end" }]
+      }
+    ]
+  };
+  assert.equal(findFreshTerminalContinuation(model, model), null);
 });
 
 test("liveness timeout cannot leave the reader on the same dead cursor", async () => {
