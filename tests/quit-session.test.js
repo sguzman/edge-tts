@@ -37,8 +37,11 @@ test("Reader owns Quit directly so no lifecycle subclass can perturb startup", (
   assert.match(readerSource, /root\.__EDGE_TTS_READER__\?\.detach\?\.\(this\)/);
 });
 
-test("content-script detaches the runtime listener so the next icon click reinjects", () => {
-  assert.match(contentScriptSource, /onMessage\.removeListener\(onMessage\)/);
-  assert.match(contentScriptSource, /delete root\.__EDGE_TTS_READER__/);
-  assert.match(contentScriptSource, /EDGE_TTS_SESSION_QUIT/);
+test("Quit leaves only a dormant wake listener and next toggle constructs a fresh Reader", () => {
+  assert.match(contentScriptSource, /let app = new extension\.Reader\.ReaderApp\(\)/);
+  assert.match(contentScriptSource, /app = null/);
+  assert.match(contentScriptSource, /if \(!app\) \{\s*app = new extension\.Reader\.ReaderApp\(\)/s);
+  assert.match(contentScriptSource, /sendResponse\(\{ ready: true, active: Boolean\(app\) \}\)/);
+  assert.doesNotMatch(contentScriptSource, /onMessage\.removeListener/);
+  assert.doesNotMatch(contentScriptSource, /EDGE_TTS_SESSION_QUIT/);
 });
