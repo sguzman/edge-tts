@@ -44,13 +44,109 @@
     return /^Speech synthesis failed:/i.test(String(error?.message || ""));
   }
 
+  function blockText(block) {
+    return String(block?.text || "").trim();
+  }
+
+  function sameBlockRole(left, right) {
+    return String(left?.authorRole || "") === String(right?.authorRole || "");
+  }
+
+  function matchingSegmentPrefixLength(leftSegments, rightSegments) {
+    const left = Array.isArray(leftSegments) ? leftSegments : [];
+    const right = Array.isArray(rightSegments) ? rightSegments : [];
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (index < limit && String(left[index]?.text || "") === String(right[index]?.text || "")) {
+      index += 1;
+    }
+    return index;
+  }
+
+  function findFreshTerminalContinuation(previousModel, freshModel) {
+    const previousBlocks = previousModel?.blocks;
+    const freshBlocks = freshModel?.blocks;
+    if (
+      !Array.isArray(previousBlocks) ||
+      previousBlocks.length === 0 ||
+      !Array.isArray(freshBlocks) ||
+      freshBlocks.length === 0
+    ) {
+      return null;
+    }
+
+    const previousLast = previousBlocks[previousBlocks.length - 1];
+    const previousText = blockText(previousLast);
+    if (!previousText) {
+      return null;
+    }
+
+    // The normal dynamic-page case is that another readable block appeared
+    // after the terminal block captured by the old snapshot. Match from the
+    // end so repeated short messages earlier in a conversation do not confuse
+    // the anchor.
+    for (let index = freshBlocks.length - 1; index >= 0; index -= 1) {
+      const freshBlock = freshBlocks[index];
+      if (!sameBlockRole(previousLast, freshBlock) || blockText(freshBlock) !== previousText) {
+        continue;
+      }
+
+      if (index + 1 < freshBlocks.length) {
+        return {
+          blockIndex: index + 1,
+          segmentIndex: 0,
+          reason: "appended-block"
+        };
+      }
+      return null;
+    }
+
+    // A streaming ChatGPT response can grow the final paragraph itself rather
+    // than append a new block. Continue at the first newly-added token when the
+    // token prefix is stable; otherwise replay the old tail token once rather
+    // than risk skipping text that changed while streaming.
+    for (let index = freshBlocks.length - 1; index >= 0; index -= 1) {
+      const freshBlock = freshBlocks[index];
+      const freshText = blockText(freshBlock);
+      if (
+        !sameBlockRole(previousLast, freshBlock) ||
+        !freshText.startsWith(previousText) ||
+        freshText.length <= previousText.length
+      ) {
+        continue;
+      }
+
+      const previousSegments = previousLast?.segments || [];
+      const freshSegments = freshBlock?.segments || [];
+      const matchingPrefix = matchingSegmentPrefixLength(previousSegments, freshSegments);
+      if (freshSegments.length === 0) {
+        return null;
+      }
+
+      const segmentIndex =
+        matchingPrefix >= previousSegments.length
+          ? Math.min(previousSegments.length, freshSegments.length - 1)
+          : Math.max(0, Math.min(previousSegments.length - 1, freshSegments.length - 1));
+
+      return {
+        blockIndex: index,
+        segmentIndex,
+        reason: "grown-terminal-block"
+      };
+    }
+
+    return null;
+  }
+
   if (!BaseReaderApp) {
     return {
       FailSafeReaderApp: null,
       FAILSAFE_RESTART_DELAY_MS,
       PLAYBACK_LIVENESS_TIMEOUT_MS,
       advanceCursorOneSegment,
-      isRecoverableReaderError
+      findFreshTerminalContinuation,
+      isRecoverableReaderError,
+      matchingSegmentPrefixLength
     };
   }
 
@@ -197,6 +293,61 @@
 
     finishDocument() {
       this.clearPlaybackLivenessWatchdog();
+
+      const previousModel = this.model;
+      if (
+        this.enabled &&
+        !this.quitRequested &&
+        previousModel?.profile === "chatgpt" &&
+        typeof this.rebuildModel === "function"
+      ) {
+        try {
+          this.rebuildModel();
+          const continuation = findFreshTerminalContinuation(previousModel, this.model);
+          if (continuation) {
+            if (Number.isFinite(Number(this.batchRequestSerial))) {
+              this.batchRequestSerial += 1;
+            }
+            this.clearReliabilityTimers?.();
+            this.activeBatchRequest = null;
+            this.activeBatchEndBlockIndex = -1;
+            this.currentBlockIndex = continuation.blockIndex;
+            this.currentSegmentIndex = continuation.segmentIndex;
+            this.stopped = false;
+            this.paused = false;
+            this.speech?.cancel?.();
+            this.toolbar?.setStatus?.("Continuing updated text…");
+
+            console.warn(
+              `Edge Natural TTS terminal snapshot was stale (${continuation.reason}); continuing automatically.`
+            );
+
+            const restartSerial = ++this.playbackLivenessSerial;
+            root.setTimeout(() => {
+              if (
+                restartSerial !== this.playbackLivenessSerial ||
+                this.stopped ||
+                this.paused ||
+                !this.model
+              ) {
+                return;
+              }
+              this.speakCurrentPosition();
+            }, Math.max(0, Number(this.failsafeRestartDelayMs) || 0));
+            return;
+          }
+        } catch (error) {
+          console.warn("Edge Natural TTS could not verify the terminal text snapshot.", error);
+          this.model = previousModel;
+        }
+      }
+
+      root.__EDGE_TTS_LAST_TERMINAL__ = {
+        at: Date.now(),
+        reason: "verified-document-end",
+        profile: this.model?.profile || previousModel?.profile || "unknown",
+        blockCount: this.model?.blocks?.length || previousModel?.blocks?.length || 0
+      };
       return super.finishDocument();
     }
 
@@ -217,6 +368,13 @@
         return;
       }
 
+      root.__EDGE_TTS_LAST_TERMINAL__ = {
+        at: Date.now(),
+        reason: "unrecoverable-error",
+        message: String(error?.message || error || "Unknown error"),
+        blockIndex: this.currentBlockIndex,
+        segmentIndex: this.currentSegmentIndex
+      };
       return super.handleError(error);
     }
   }
@@ -226,6 +384,8 @@
     FAILSAFE_RESTART_DELAY_MS,
     PLAYBACK_LIVENESS_TIMEOUT_MS,
     advanceCursorOneSegment,
-    isRecoverableReaderError
+    findFreshTerminalContinuation,
+    isRecoverableReaderError,
+    matchingSegmentPrefixLength
   };
 });
