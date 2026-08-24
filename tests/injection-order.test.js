@@ -26,7 +26,17 @@ test("stable reliability stack loads before bootstrap without Quit wrappers", ()
   assert.equal(source.includes("session-reader.js"), false);
 });
 
-test("background removes injected CSS when a session quits", () => {
-  assert.match(source, /EDGE_TTS_SESSION_QUIT/);
-  assert.match(source, /chrome\.scripting\s*\.removeCSS/);
+test("fresh injection does not spend an extra readiness round trip before Start", () => {
+  const injectStart = source.indexOf("async function injectReader");
+  const ensureStart = source.indexOf("async function ensureReader");
+  const injectSource = source.slice(injectStart, ensureStart);
+
+  assert.ok(injectStart >= 0 && ensureStart > injectStart);
+  assert.match(injectSource, /chrome\.scripting\.executeScript/);
+  assert.doesNotMatch(injectSource, /readerReady\(/);
+});
+
+test("Quit no longer asks the background to remove CSS and force full reinjection", () => {
+  assert.equal(source.includes("EDGE_TTS_SESSION_QUIT"), false);
+  assert.equal(source.includes("removeCSS"), false);
 });
