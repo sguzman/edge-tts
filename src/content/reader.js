@@ -68,6 +68,7 @@
       this.enabled = false;
       this.stopped = true;
       this.paused = false;
+      this.quitRequested = false;
       this.settings = { ...DEFAULT_SETTINGS };
       this.voices = [];
       this.selectedVoice = null;
@@ -85,6 +86,7 @@
       this.toolbar = new Toolbar({
         onPlayPause: () => this.playPause(),
         onStop: () => this.stop(),
+        onQuit: () => this.quit(),
         onRefresh: () => this.refreshText(),
         onVoice: (name) => this.changeVoice(name),
         onRate: (rate) => this.changeRate(rate),
@@ -152,6 +154,36 @@
       this.enabled = false;
       this.syncPageClickListener();
       this.toolbar.hide();
+    }
+
+    quit() {
+      if (this.quitRequested) return;
+      this.quitRequested = true;
+
+      // Run the normal stop chain first. ReliableReader/FailSafeReader override
+      // stop(), so this also clears every speech/recovery/liveness timer.
+      this.stop();
+      this.enabled = false;
+      this.syncPageClickListener();
+
+      this.unsubscribeVoiceChanges?.();
+      this.unsubscribeVoiceChanges = null;
+
+      this.highlighter.clear();
+      this.highlighter.styleElement?.remove?.();
+      this.highlighter.styleElement = null;
+      this.toolbar.destroy?.();
+
+      this.model = null;
+      this.voices = [];
+      this.selectedVoice = null;
+      this.activeBatchRequest = null;
+      this.activeBatchEndBlockIndex = -1;
+
+      // content-script owns the tab registration. Detaching removes its runtime
+      // message listener and marker so the next extension-icon click injects a
+      // completely fresh reader instance.
+      root.__EDGE_TTS_READER__?.detach?.(this);
     }
 
     syncPageClickListener() {
@@ -421,8 +453,6 @@
         return;
       }
 
-      // Never rebuild the entire document because of an arbitrary click.
-      // Dynamic pages can use the explicit Refresh text control instead.
       const block = this.model?.nodeToBlock.get(caret.node);
       if (!block) {
         return;
@@ -537,8 +567,6 @@
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
           autoScroll: stored.autoScroll !== false,
-          // v0.3.1 intentionally makes page-click interception opt-in. Existing
-          // installs are migrated once because the old default was too invasive.
           clickToSeek: requiresSafetyMigration ? false : stored.clickToSeek === true,
           minimized: stored.minimized === true,
           toolbarPosition:
