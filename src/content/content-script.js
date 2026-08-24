@@ -9,43 +9,41 @@
     return;
   }
 
-  const app = new extension.Reader.ReaderApp();
+  let app = new extension.Reader.ReaderApp();
+
+  const session = {
+    get app() {
+      return app;
+    },
+    detach(requestingApp) {
+      if (requestingApp && requestingApp !== app) {
+        return;
+      }
+
+      // Quit destroys the actual ReaderApp and all of its active resources, but
+      // leaves this tiny runtime-message bootstrap resident. The next toolbar
+      // click can therefore construct a genuinely fresh ReaderApp without
+      // reinjecting/reparsing the entire extension stack.
+      app = null;
+    }
+  };
 
   const onMessage = (message, _sender, sendResponse) => {
     if (message?.type === "EDGE_TTS_PING") {
-      sendResponse({ ready: true });
+      sendResponse({ ready: true, active: Boolean(app) });
       return false;
     }
 
     if (message?.type === "EDGE_TTS_TOGGLE") {
+      if (!app) {
+        app = new extension.Reader.ReaderApp();
+      }
       void app.toggle();
       sendResponse({ accepted: true });
       return false;
     }
 
     return false;
-  };
-
-  const session = {
-    app,
-    detach(requestingApp) {
-      if (requestingApp && requestingApp !== app) {
-        return;
-      }
-
-      chrome.runtime.onMessage.removeListener(onMessage);
-      if (root.__EDGE_TTS_READER__ === session) {
-        delete root.__EDGE_TTS_READER__;
-      }
-
-      try {
-        const pending = chrome.runtime.sendMessage({ type: "EDGE_TTS_SESSION_QUIT" });
-        pending?.catch?.(() => {});
-      } catch (_error) {
-        // The page-side session is already fully detached. CSS cleanup in the
-        // background is best-effort and does not affect the next fresh launch.
-      }
-    }
   };
 
   root.__EDGE_TTS_READER__ = session;
