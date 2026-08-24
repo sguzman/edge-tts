@@ -5,9 +5,11 @@ const READER_FILES = [
   "src/content/speech-engine.js",
   "src/content/reliable-speech-engine.js",
   "src/content/toolbar.js",
+  "src/content/quit-toolbar.js",
   "src/content/reader.js",
   "src/content/reliable-reader.js",
   "src/content/failsafe-reader.js",
+  "src/content/session-reader.js",
   "src/content/content-script.js"
 ];
 
@@ -58,6 +60,24 @@ async function ensureReader(tabId) {
     }
   }
 }
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message?.type !== "EDGE_TTS_SESSION_QUIT" || !sender.tab?.id) {
+    return false;
+  }
+
+  const tabId = sender.tab.id;
+  injectionPromises.delete(tabId);
+  void chrome.scripting
+    .removeCSS({
+      target: { tabId },
+      files: READER_CSS
+    })
+    .catch(() => {});
+
+  sendResponse({ accepted: true });
+  return false;
+});
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) {
