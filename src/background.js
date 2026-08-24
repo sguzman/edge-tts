@@ -29,14 +29,13 @@ async function injectReader(tabId) {
     files: READER_CSS
   });
 
+  // executeScript resolves only after every listed file has executed. Because
+  // content-script.js is last and registers the wake-up listener synchronously,
+  // another post-injection PING round-trip is redundant startup latency.
   await chrome.scripting.executeScript({
     target: { tabId },
     files: READER_FILES
   });
-
-  if (!(await readerReady(tabId))) {
-    throw new Error("Reader scripts were injected but did not initialize.");
-  }
 }
 
 async function ensureReader(tabId) {
@@ -58,24 +57,6 @@ async function ensureReader(tabId) {
     }
   }
 }
-
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message?.type !== "EDGE_TTS_SESSION_QUIT" || !sender.tab?.id) {
-    return false;
-  }
-
-  const tabId = sender.tab.id;
-  injectionPromises.delete(tabId);
-  void chrome.scripting
-    .removeCSS({
-      target: { tabId },
-      files: READER_CSS
-    })
-    .catch(() => {});
-
-  sendResponse({ accepted: true });
-  return false;
-});
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) {
