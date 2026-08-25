@@ -8,7 +8,6 @@ const READER_FILES = [
   "src/content/reader.js",
   "src/content/reliable-reader.js",
   "src/content/failsafe-reader.js",
-  "src/content/boundaryless-fallback.js",
   "src/content/startup-fastpath.js",
   "src/content/content-script.js"
 ];
