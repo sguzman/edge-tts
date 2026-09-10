@@ -156,6 +156,15 @@
         return;
       }
 
+      // Direct Natural playback owns its websocket timeout and media clock.
+      // The legacy six-second watchdog is specifically for Chromium Web Speech
+      // accepting an utterance without producing audio/boundaries; applying it
+      // while an MP3 is legitimately being synthesized would cancel slow but
+      // healthy direct requests and recreate the old Start/Retry loop.
+      if (this.speech?.directSessionMode) {
+        return;
+      }
+
       // Edge can accept a Natural-voice utterance and even produce audio while
       // failing to emit word boundaries. If we simply retry from the last
       // confirmed cursor, that creates an infinite "broken sentence" loop.
