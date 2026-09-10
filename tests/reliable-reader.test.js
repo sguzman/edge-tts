@@ -19,6 +19,9 @@ class BaseReaderApp {
     this.boundarySerial = 0;
     this.stopped = false;
     this.paused = false;
+    // ReliableReader now gates speech callbacks and batch handoff on the
+    // per-tab audio lease. These tests exercise the active-owner path.
+    this.audioOwner = true;
     this.baseSpeakCalls = 0;
     this.finished = false;
     this.status = "";
