@@ -6,9 +6,10 @@ const path = require("node:path");
 const backgroundPath = path.join(__dirname, "..", "src", "background.js");
 const source = fs.readFileSync(backgroundPath, "utf8");
 
-test("stable reliability stack, audio controls, and startup fast path load before bootstrap", () => {
+test("direct audio, stable reliability stack, controls, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');
+  const directAudio = source.indexOf('"src/content/direct-audio-engine.js"');
   const toolbar = source.indexOf('"src/content/toolbar.js"');
   const reader = source.indexOf('"src/content/reader.js"');
   const reliableReader = source.indexOf('"src/content/reliable-reader.js"');
@@ -19,7 +20,8 @@ test("stable reliability stack, audio controls, and startup fast path load befor
 
   assert.ok(baseSpeech >= 0);
   assert.ok(reliableSpeech > baseSpeech);
-  assert.ok(toolbar > reliableSpeech);
+  assert.ok(directAudio > reliableSpeech);
+  assert.ok(toolbar > directAudio);
   assert.ok(reader > toolbar);
   assert.ok(reliableReader > reader);
   assert.ok(failsafeReader > reliableReader);
