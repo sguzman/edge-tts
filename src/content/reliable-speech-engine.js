@@ -107,6 +107,21 @@
   }
 
   class ReliableSpeechEngine extends BaseSpeechEngine {
+    abandon() {
+      // Drop only this tab's JavaScript-side transport state. Do NOT call the
+      // browser-global speechSynthesis.cancel(); another tab may own audio.
+      this.clearPlaybackTimers?.();
+      this.generation += 1;
+      this.currentUtterance = null;
+      this.currentChunks = [];
+      this.currentChunkIndex = -1;
+      this.currentChunkBoundaryIndex = -1;
+      this.currentOptions = null;
+      this.recoveryKey = "";
+      this.recoveryAttempts = 0;
+      this.provisionalBoundaryActive = false;
+    }
+
     speak(block, startSegmentIndex, options = {}) {
       const safeOptions = {
         ...options,
@@ -117,16 +132,7 @@
 
     cancel() {
       if (isInternallyIdle(this)) {
-        this.clearPlaybackTimers?.();
-        this.generation += 1;
-        this.currentUtterance = null;
-        this.currentChunks = [];
-        this.currentChunkIndex = -1;
-        this.currentChunkBoundaryIndex = -1;
-        this.currentOptions = null;
-        this.recoveryKey = "";
-        this.recoveryAttempts = 0;
-        this.provisionalBoundaryActive = false;
+        this.abandon();
         return;
       }
 
