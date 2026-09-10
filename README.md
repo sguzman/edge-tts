@@ -12,9 +12,19 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 - Online/Natural voices use a balanced internal transport size: roughly 900 characters as a soft target, with a 1200-character hard ceiling for unusually long sentences. The configured Batch target remains independent of browser-level utterance size.
 - Long playback is self-healing: stalled or prematurely-ended utterances recover from the last safe cursor, and repeated boundary-less failures cannot deadlock the rest of the document.
 - Pause/resume, stop, voice filtering, playback speed, highlight colors, and auto-scroll live in a movable/minimizable toolbar.
+- Each tab keeps an independent reader session. Because Edge's native speech channel is shared, only the tab explicitly started/resumed most recently owns audio; the previous owner is locally paused without losing its cursor.
+- Pausing removes that tab's native utterance instead of parking it in browser-global speech state, so another tab cannot accidentally wake a paused session.
 - Click-to-seek is optional and is **off by default**. When disabled, the extension does not install a page click listener.
 - Editable controls and rich-text editors are excluded without watching or mutating the page DOM.
 - Use **Refresh text** to explicitly re-scan a dynamic page after its content changes.
+
+## Multi-tab sessions
+
+Reader state is tab-local: each tab keeps its own text model, cursor, HUD, paused/stopped state, and recovery timers.
+
+Edge's native `speechSynthesis` transport is shared enough that independent tabs cannot safely leave competing utterances queued or paused inside it. The background worker therefore arbitrates one audio owner at a time. Starting or resuming a tab explicitly claims audio; if another tab currently owns it, that older session is canceled at the browser layer and left locally paused at its last cursor. It never auto-resumes merely because another tab changes the shared speech engine.
+
+A manual Pause also cancels the native utterance while retaining the reader cursor. Resume creates a fresh utterance from that cursor after reclaiming audio ownership. Stopping, quitting, or closing a non-owner tab never calls browser-global cancellation and therefore cannot disrupt the tab that is actually speaking.
 
 ## Zero-idle page cost
 
