@@ -10,9 +10,20 @@ const manifest = JSON.parse(
 
 test("manifest performs no automatic host-page injection", () => {
   assert.equal(manifest.content_scripts, undefined);
-  assert.equal(manifest.host_permissions, undefined);
+  assert.deepEqual(manifest.host_permissions, [
+    "https://speech.platform.bing.com/*",
+    "wss://speech.platform.bing.com/*"
+  ]);
   assert.ok(manifest.permissions.includes("activeTab"));
   assert.ok(manifest.permissions.includes("scripting"));
+});
+
+test("direct audio permission is restricted to the Microsoft Read Aloud host", () => {
+  assert.equal(manifest.host_permissions.length, 2);
+  for (const permission of manifest.host_permissions) {
+    assert.match(permission, /^https?:\/\/speech\.platform\.bing\.com\/\*|^wss:\/\/speech\.platform\.bing\.com\/\*$/);
+    assert.equal(permission.includes("<all_urls>"), false);
+  }
 });
 
 test("content code contains no document MutationObserver", () => {
