@@ -213,6 +213,14 @@
         return;
       }
 
+      // Direct Natural synthesis has its own websocket timeout. Do not start
+      // the reader-level 'no playback progress' timer until the MP3 is actually
+      // playing; otherwise a healthy but slow synthesis/download can be killed
+      // by a watchdog designed for Web Speech's dead-utterance failure mode.
+      if (this.speech?.directSessionMode && !this.speech?.isSpeaking?.()) {
+        return;
+      }
+
       const serial = ++this.playbackLivenessSerial;
       const boundarySerial = this.boundarySerial;
       const cursor = {
