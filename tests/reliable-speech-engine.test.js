@@ -191,6 +191,22 @@ test("active speech still uses the base cancel path", () => {
   assert.equal(engine.currentUtterance, null);
 });
 
+test("abandon drops only this tab's transport without browser-global cancel", () => {
+  const engine = new ReliableSpeechEngine();
+  engine.currentUtterance = { active: true };
+  engine.currentChunks = [{ text: "owned elsewhere now" }];
+  engine.currentChunkIndex = 0;
+  engine.currentOptions = { rate: 1 };
+
+  engine.abandon();
+
+  assert.equal(engine.browserCancelCalls, 0);
+  assert.equal(engine.currentUtterance, null);
+  assert.equal(engine.currentChunkIndex, -1);
+  assert.equal(engine.currentOptions, null);
+  assert.equal(engine.generation, 1);
+});
+
 test("utterance start commits a provisional token without a periodic resume heartbeat", () => {
   const engine = new ReliableSpeechEngine();
   const first = { blockIndex: 4, segmentIndex: 7, text: "broken" };
