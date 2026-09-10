@@ -9,7 +9,8 @@
 })(globalThis, function createAudioControlsApi(root) {
   const DEFAULT_VOLUME = 1;
   const MIN_RATE = 0.5;
-  const MAX_RATE = 5;
+  const MAX_RATE = 8;
+  const MAX_VOLUME = 2;
 
   function clamp(value, minimum, maximum) {
     return Math.min(maximum, Math.max(minimum, value));
@@ -17,7 +18,7 @@
 
   function normalizeVolume(value) {
     const numeric = Number(value);
-    return Number.isFinite(numeric) ? clamp(numeric, 0, 1) : DEFAULT_VOLUME;
+    return Number.isFinite(numeric) ? clamp(numeric, 0, MAX_VOLUME) : DEFAULT_VOLUME;
   }
 
   function normalizeRate(value) {
@@ -56,9 +57,9 @@
         row.className = "edge-tts-row";
         row.dataset.edgeTtsVolumeRow = "true";
         row.innerHTML = `
-          <label class="edge-tts-rate-label">
+          <label class="edge-tts-rate-label" title="Natural/direct audio can boost above 100%. Local Windows voices are limited to 100% by Web Speech.">
             Volume
-            <input data-edge-tts-volume type="range" min="0" max="100" step="5" value="100" aria-label="Speech volume">
+            <input data-edge-tts-volume type="range" min="0" max="200" step="5" value="100" aria-label="Speech volume">
             <output data-edge-tts-volume-value>100%</output>
           </label>
         `;
@@ -115,7 +116,6 @@
 
     const originalLoadSettings = prototype.loadSettings;
     const originalApplySettings = prototype.applySettings;
-    const originalChangeRate = prototype.changeRate;
 
     Object.defineProperty(prototype, "__edgeTtsAudioSettingsInstalled", {
       value: true,
@@ -150,18 +150,29 @@
       return result;
     };
 
-    prototype.changeRate = function changeExpandedRate(rate) {
-      return originalChangeRate.call(this, normalizeRate(rate));
+    prototype.changeRate = async function changeClientPlaybackRate(rate) {
+      this.settings.rate = normalizeRate(rate);
+      this.toolbar?.setRate?.(this.settings.rate);
+      await this.saveSettings();
+
+      if (this.stopped || this.paused || !this.audioOwner) return;
+      if (this.speech?.setPlaybackRate?.(this.settings.rate) === true) {
+        return;
+      }
+      this.speakCurrentPosition();
     };
 
-    prototype.changeVolume = async function changeVolume(volume) {
+    prototype.changeVolume = async function changeClientVolume(volume) {
       this.settings.volume = normalizeVolume(volume);
       root.EdgeTtsExtension.AudioControls.currentVolume = this.settings.volume;
       this.toolbar?.setVolume?.(this.settings.volume);
       await this.saveSettings();
-      if (!this.stopped && !this.paused && this.audioOwner) {
-        this.speakCurrentPosition();
+
+      if (this.stopped || this.paused || !this.audioOwner) return;
+      if (this.speech?.setOutputVolume?.(this.settings.volume) === true) {
+        return;
       }
+      this.speakCurrentPosition();
     };
 
     return true;
@@ -188,8 +199,12 @@
     prototype.speakCurrentChunk = function speakCurrentChunkWithVolume(...args) {
       const result = originalSpeakCurrentChunk.apply(this, args);
       if (this.currentUtterance) {
-        this.currentUtterance.volume = normalizeVolume(
-          root.EdgeTtsExtension.AudioControls.currentVolume
+        // SpeechSynthesisUtterance.volume is hard-limited to 0..1. Natural
+        // voices on the direct MP3 backend bypass this path and use GainNode.
+        this.currentUtterance.volume = clamp(
+          normalizeVolume(root.EdgeTtsExtension.AudioControls.currentVolume),
+          0,
+          1
         );
       }
       return result;
@@ -213,6 +228,7 @@
   return {
     DEFAULT_VOLUME,
     MAX_RATE,
+    MAX_VOLUME,
     MIN_RATE,
     installAudioControls,
     installReader,
