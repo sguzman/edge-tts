@@ -17,6 +17,9 @@ class BaseReaderApp {
     this.activeBatchRequest = {};
     this.stopped = false;
     this.paused = false;
+    this.audioOwner = true;
+    this.enabled = true;
+    this.quitRequested = false;
     this.speakCalls = 0;
     this.cancelCalls = 0;
     this.status = "";
@@ -40,7 +43,7 @@ class BaseReaderApp {
 
   handleBlockEnd() {}
 
-  playPause() {
+  async playPause() {
     this.paused = !this.paused;
   }
 
@@ -59,6 +62,10 @@ class BaseReaderApp {
   }
 
   clearReliabilityTimers() {}
+
+  discardLocalSpeechState() {
+    this.cancelCalls += 1;
+  }
 }
 
 global.EdgeTtsExtension = { Reader: { ReaderApp: BaseReaderApp } };
@@ -163,7 +170,7 @@ test("terminal verification accepts a truly unchanged document end", () => {
   assert.equal(findFreshTerminalContinuation(model, model), null);
 });
 
-test("liveness timeout cannot leave the reader on the same dead cursor", async () => {
+test("liveness timeout cannot leave the owning reader on the same dead cursor", async () => {
   const app = new FailSafeReaderApp();
   app.playbackLivenessTimeoutMs = 100;
   app.failsafeRestartDelayMs = 10;
@@ -180,7 +187,22 @@ test("liveness timeout cannot leave the reader on the same dead cursor", async (
   app.stop();
 });
 
-test("fatal transport error auto-continues instead of marking reader stopped", async () => {
+test("preempted tab cannot arm liveness recovery or restart speech", async () => {
+  const app = new FailSafeReaderApp();
+  app.audioOwner = false;
+  app.paused = true;
+  app.playbackLivenessTimeoutMs = 100;
+  app.failsafeRestartDelayMs = 10;
+  app.armPlaybackLivenessWatchdog();
+
+  await new Promise((resolve) => setTimeout(resolve, 150));
+
+  assert.equal(app.playbackLivenessTimer, null);
+  assert.equal(app.cancelCalls, 0);
+  assert.equal(app.speakCalls, 0);
+});
+
+test("transport error auto-continues only while this tab owns audio", async () => {
   const app = new FailSafeReaderApp();
   app.failsafeRestartDelayMs = 10;
 
