@@ -23,10 +23,14 @@ test("background serializes browser-audio ownership by tab", () => {
 });
 
 test("preemption is delivered to the old tab before ownership changes", () => {
-  const preemptSend = background.indexOf("EDGE_TTS_AUDIO_PREEMPT");
-  const assignment = background.indexOf("audioOwnerTabId = tabId", preemptSend);
+  const claimStart = background.indexOf("async function claimAudioForTab");
+  const releaseStart = background.indexOf("async function releaseAudioForTab", claimStart);
+  const claimSource = background.slice(claimStart, releaseStart);
+  const preemptSend = claimSource.indexOf("EDGE_TTS_AUDIO_PREEMPT");
+  const ownershipCommit = claimSource.indexOf("await storeAudioOwner(tabId)");
+  assert.ok(claimStart >= 0 && releaseStart > claimStart);
   assert.ok(preemptSend >= 0);
-  assert.ok(assignment > preemptSend);
+  assert.ok(ownershipCommit > preemptSend);
 });
 
 test("content session checkpoints when another tab explicitly takes audio", () => {
