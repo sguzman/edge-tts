@@ -81,10 +81,6 @@
       return null;
     }
 
-    // The normal dynamic-page case is that another readable block appeared
-    // after the terminal block captured by the old snapshot. Match from the
-    // end so repeated short messages earlier in a conversation do not confuse
-    // the anchor.
     for (let index = freshBlocks.length - 1; index >= 0; index -= 1) {
       const freshBlock = freshBlocks[index];
       if (!sameBlockRole(previousLast, freshBlock) || blockText(freshBlock) !== previousText) {
@@ -101,10 +97,6 @@
       return null;
     }
 
-    // A streaming ChatGPT response can grow the final paragraph itself rather
-    // than append a new block. Continue at the first newly-added token when the
-    // token prefix is stable; otherwise replay the old tail token once rather
-    // than risk skipping text that changed while streaming.
     for (let index = freshBlocks.length - 1; index >= 0; index -= 1) {
       const freshBlock = freshBlocks[index];
       const freshText = blockText(freshBlock);
@@ -191,7 +183,7 @@
       this.activeBatchEndBlockIndex = -1;
       this.currentBlockIndex = nextCursor.blockIndex;
       this.currentSegmentIndex = nextCursor.segmentIndex;
-      this.speech?.cancel?.();
+      this.discardLocalSpeechState?.();
       this.toolbar?.setStatus?.(status);
 
       const restartSerial = ++this.playbackLivenessSerial;
@@ -304,6 +296,7 @@
       if (
         this.enabled &&
         !this.quitRequested &&
+        this.audioOwner &&
         previousModel?.profile === "chatgpt" &&
         typeof this.rebuildModel === "function"
       ) {
@@ -321,7 +314,7 @@
             this.currentSegmentIndex = continuation.segmentIndex;
             this.stopped = false;
             this.paused = false;
-            this.speech?.cancel?.();
+            this.discardLocalSpeechState?.();
             this.toolbar?.setStatus?.("Continuing updated text…");
 
             console.warn(
