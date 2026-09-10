@@ -168,6 +168,10 @@
     }
 
     scheduleForcedContinuation(cursor, status) {
+      if (!this.audioOwner || this.stopped || this.paused) {
+        return false;
+      }
+
       const nextCursor = advanceCursorOneSegment(
         this.model,
         cursor.blockIndex,
@@ -196,6 +200,7 @@
           restartSerial !== this.playbackLivenessSerial ||
           this.stopped ||
           this.paused ||
+          !this.audioOwner ||
           !this.model
         ) {
           return;
@@ -212,7 +217,7 @@
         this.playbackLivenessTimer = null;
       }
 
-      if (this.stopped || this.paused || !this.model) {
+      if (this.stopped || this.paused || !this.audioOwner || !this.model) {
         return;
       }
 
@@ -229,6 +234,7 @@
           serial !== this.playbackLivenessSerial ||
           this.stopped ||
           this.paused ||
+          !this.audioOwner ||
           !this.model
         ) {
           return;
@@ -271,9 +277,9 @@
       return super.handleBlockEnd();
     }
 
-    playPause() {
-      const result = super.playPause();
-      if (this.stopped || this.paused) {
+    async playPause() {
+      const result = await super.playPause();
+      if (this.stopped || this.paused || !this.audioOwner) {
         this.clearPlaybackLivenessWatchdog();
       } else {
         this.armPlaybackLivenessWatchdog();
@@ -328,6 +334,7 @@
                 restartSerial !== this.playbackLivenessSerial ||
                 this.stopped ||
                 this.paused ||
+                !this.audioOwner ||
                 !this.model
               ) {
                 return;
@@ -354,7 +361,13 @@
     handleError(error) {
       this.clearPlaybackLivenessWatchdog();
 
-      if (isRecoverableReaderError(error) && !this.stopped && !this.paused && this.model) {
+      if (
+        isRecoverableReaderError(error) &&
+        !this.stopped &&
+        !this.paused &&
+        this.audioOwner &&
+        this.model
+      ) {
         const cursor = {
           blockIndex: this.currentBlockIndex,
           segmentIndex: this.currentSegmentIndex
