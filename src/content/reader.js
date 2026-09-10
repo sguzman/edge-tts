@@ -76,6 +76,8 @@
       this.boundarySerial = 0;
       this.resumeWatchdog = null;
       this.pageClickListening = false;
+      this.audioOwner = false;
+      this.audioClaimSerial = 0;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -146,7 +148,13 @@
       console.debug(
         `Edge Natural TTS startup prepared in ${Math.round(performance.now() - openStartedAt)}ms`
       );
-      this.speakCurrentPosition();
+      if (await this.claimAudioOwnership()) {
+        this.speakCurrentPosition();
+      } else {
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus("Paused — audio unavailable");
+      }
     }
 
     close() {
@@ -186,6 +194,84 @@
       root.__EDGE_TTS_READER__?.detach?.(this);
     }
 
+    async claimAudioOwnership() {
+      const serial = ++this.audioClaimSerial;
+      this.toolbar?.setStatus?.("Claiming audio…");
+
+      try {
+        const response = await chrome.runtime.sendMessage({ type: "EDGE_TTS_AUDIO_CLAIM" });
+        if (
+          serial !== this.audioClaimSerial ||
+          !this.enabled ||
+          this.stopped ||
+          this.paused
+        ) {
+          if (response?.granted === true) {
+            try {
+              const pending = chrome.runtime.sendMessage({ type: "EDGE_TTS_AUDIO_RELEASE" });
+              pending?.catch?.(() => {});
+            } catch (_error) {}
+          }
+          return false;
+        }
+
+        this.audioOwner = response?.granted === true;
+        return this.audioOwner;
+      } catch (error) {
+        console.warn("Edge Natural TTS could not claim browser audio ownership.", error);
+        this.audioOwner = false;
+        return false;
+      }
+    }
+
+    releaseAudioOwnership() {
+      this.audioClaimSerial += 1;
+      this.audioOwner = false;
+      try {
+        const pending = chrome.runtime.sendMessage({ type: "EDGE_TTS_AUDIO_RELEASE" });
+        pending?.catch?.(() => {});
+      } catch (_error) {
+        // The local session is already detached from browser speech.
+      }
+    }
+
+    suspendForOtherTab() {
+      this.audioClaimSerial += 1;
+      const shouldRemainPaused = !this.stopped;
+
+      this.clearResumeWatchdog();
+      this.clearReliabilityTimers?.();
+      this.clearPlaybackLivenessWatchdog?.();
+      if (Number.isFinite(Number(this.batchRequestSerial))) {
+        this.batchRequestSerial += 1;
+      }
+      this.activeBatchRequest = null;
+      this.activeBatchEndBlockIndex = -1;
+
+      // The background sends this only to the current audio owner and waits for
+      // us to finish before granting another tab. Canceling here is therefore
+      // safe: at this moment the browser-global utterance belongs to this tab.
+      this.speech?.cancel?.();
+      this.audioOwner = false;
+
+      if (shouldRemainPaused) {
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar?.setPaused?.(true);
+        this.toolbar?.setStatus?.("Paused — another tab is playing");
+      }
+
+      return true;
+    }
+
+    discardLocalSpeechState() {
+      if (this.audioOwner) {
+        this.speech?.cancel?.();
+      } else {
+        this.speech?.abandon?.();
+      }
+    }
+
     syncPageClickListener() {
       const shouldListen = Boolean(this.enabled && this.settings.clickToSeek);
       if (shouldListen === this.pageClickListening) {
@@ -205,12 +291,13 @@
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.paused = false;
-      this.speech.cancel();
+      this.discardLocalSpeechState();
+      this.releaseAudioOwnership();
       this.highlighter.clear();
       this.toolbar.setStopped();
     }
 
-    playPause() {
+    async playPause() {
       if (this.stopped) {
         this.rebuildModel();
         const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -223,30 +310,46 @@
         this.currentSegmentIndex = 0;
         this.stopped = false;
         this.paused = false;
-        this.speakCurrentPosition();
+        if (await this.claimAudioOwnership()) {
+          this.speakCurrentPosition();
+        } else {
+          this.paused = true;
+          this.toolbar.setPaused(true);
+          this.toolbar.setStatus("Paused — audio unavailable");
+        }
         return;
       }
 
       if (this.paused) {
-        const serialBeforeResume = this.boundarySerial;
-        this.speech.resume();
         this.paused = false;
         this.toolbar.setPaused(false);
         this.toolbar.setStatus("Resuming…");
-        this.startResumeWatchdog(serialBeforeResume);
+        if (await this.claimAudioOwnership()) {
+          this.speakCurrentPosition();
+        } else {
+          this.paused = true;
+          this.toolbar.setPaused(true);
+          this.toolbar.setStatus("Paused — audio unavailable");
+        }
       } else {
+        // Never leave a native SpeechSynthesisUtterance parked in Edge. The
+        // speech service is browser-global, so another tab's resume() can wake
+        // a parked utterance. Pause is therefore local state + transport cancel.
         this.clearResumeWatchdog();
-        this.speech.pause();
+        this.discardLocalSpeechState();
+        this.releaseAudioOwnership();
         this.paused = true;
         this.toolbar.setPaused(true);
+        this.toolbar.setStatus("Paused");
       }
     }
 
     refreshText() {
-      const wasReading = !this.stopped;
+      const wasReading = !this.stopped && !this.paused && this.audioOwner;
+      const wasPaused = !this.stopped && this.paused;
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
-      this.speech.cancel();
+      this.discardLocalSpeechState();
       this.highlighter.clear();
       this.rebuildModel();
 
@@ -265,6 +368,11 @@
         this.stopped = false;
         this.paused = false;
         this.speakCurrentPosition();
+      } else if (wasPaused) {
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus("Paused");
       } else {
         this.stopped = true;
         this.toolbar.setStopped();
@@ -339,6 +447,15 @@
 
     speakCurrentPosition() {
       this.clearResumeWatchdog();
+      if (!this.audioOwner) {
+        if (!this.stopped) {
+          this.paused = true;
+          this.toolbar?.setPaused?.(true);
+          this.toolbar?.setStatus?.("Paused — another tab is playing");
+        }
+        return;
+      }
+
       const block = this.model?.blocks[this.currentBlockIndex];
       if (!block) {
         this.finishDocument();
@@ -382,13 +499,14 @@
     }
 
     handleSpeechStart(latencyMs) {
-      if (this.stopped) return;
+      if (this.stopped || this.paused || !this.audioOwner) return;
       this.clearResumeWatchdog();
       this.toolbar.setStatus("Reading");
       console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
     }
 
     handleBoundary(segment) {
+      if (this.stopped || this.paused || !this.audioOwner) return;
       this.boundarySerial += 1;
       this.clearResumeWatchdog();
       this.currentBlockIndex = segment.blockIndex;
@@ -401,7 +519,7 @@
     }
 
     handleBlockEnd() {
-      if (this.stopped || !this.model) return;
+      if (this.stopped || this.paused || !this.audioOwner || !this.model) return;
 
       const completedEndBlock =
         this.activeBatchEndBlockIndex >= 0
@@ -422,7 +540,8 @@
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
-      this.speech.cancel();
+      this.discardLocalSpeechState();
+      this.releaseAudioOwnership();
       this.highlighter.clear();
       this.toolbar.setStatus("Finished");
       this.toolbar.setStopped();
@@ -433,12 +552,14 @@
       this.activeBatchEndBlockIndex = -1;
       console.error("Edge Natural TTS", error);
       this.stopped = true;
+      this.discardLocalSpeechState();
+      this.releaseAudioOwnership();
       this.highlighter.clear();
       this.toolbar.setStatus(error.message);
       this.toolbar.setStopped();
     }
 
-    handlePageClick(event) {
+    async handlePageClick(event) {
       if (
         !this.enabled ||
         !this.settings.clickToSeek ||
@@ -471,7 +592,13 @@
       this.activeBatchEndBlockIndex = -1;
       this.stopped = false;
       this.paused = false;
-      this.speakCurrentPosition();
+      if (await this.claimAudioOwnership()) {
+        this.speakCurrentPosition();
+      } else {
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus("Paused — audio unavailable");
+      }
     }
 
     caretFromPoint(x, y) {
@@ -498,7 +625,7 @@
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
       await this.saveSettings();
-      if (!this.stopped) {
+      if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
       }
     }
@@ -506,7 +633,7 @@
     async changeRate(rate) {
       this.settings.rate = rate;
       await this.saveSettings();
-      if (!this.stopped) {
+      if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
       }
     }
@@ -515,7 +642,7 @@
       this.settings.minBatchChars = normalizeBatchChars(chars);
       this.toolbar.setBatchChars(this.settings.minBatchChars);
       await this.saveSettings();
-      if (!this.stopped) {
+      if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
       }
     }
