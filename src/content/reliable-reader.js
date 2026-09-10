@@ -133,6 +133,11 @@
       this.clearBatchTransitionTimer();
       this.clearBatchStartWatchdog();
 
+      if (!this.audioOwner) {
+        this.activeBatchRequest = null;
+        return super.speakCurrentPosition();
+      }
+
       const requestSerial = ++this.batchRequestSerial;
       const boundarySerialBeforeRequest = this.boundarySerial;
       const requestCursor = {
@@ -164,6 +169,7 @@
           request?.serial !== requestSerial ||
           this.stopped ||
           this.paused ||
+          !this.audioOwner ||
           this.boundarySerial !== boundarySerialBeforeRequest
         ) {
           return;
@@ -217,7 +223,8 @@
           if (
             requestSerial !== this.batchRequestSerial ||
             this.stopped ||
-            this.paused
+            this.paused ||
+            !this.audioOwner
           ) {
             return;
           }
@@ -230,6 +237,10 @@
     }
 
     handleSpeechStart(latencyMs) {
+      if (this.stopped || this.paused || !this.audioOwner) {
+        return super.handleSpeechStart(latencyMs);
+      }
+
       const request = this.activeBatchRequest;
       if (request?.serial === this.batchRequestSerial) {
         request.audioStarted = true;
@@ -258,7 +269,7 @@
       this.clearBatchStartWatchdog();
       this.activeBatchRequest = null;
       this.resetNoBoundaryRecovery();
-      if (this.stopped || !this.model) {
+      if (this.stopped || this.paused || !this.audioOwner || !this.model) {
         return;
       }
 
@@ -284,7 +295,7 @@
       this.clearBatchTransitionTimer();
       this.batchTransitionTimer = root.setTimeout(() => {
         this.batchTransitionTimer = null;
-        if (this.stopped || this.paused || !this.model) {
+        if (this.stopped || this.paused || !this.audioOwner || !this.model) {
           return;
         }
         this.speakCurrentPosition();
