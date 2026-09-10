@@ -130,8 +130,8 @@ test("reader pause is local and cannot leave a browser-global utterance parked",
   assert.match(preemptSource, /this\.speech\?\.cancel\?\.\(\)/);
   assert.match(preemptSource, /this\.paused = true/);
 
-  const speakStart = readerSource.indexOf("speakCurrentPosition()");
-  const speechStartHandler = readerSource.indexOf("handleSpeechStart(", speakStart);
+  const speakStart = readerSource.indexOf("    speakCurrentPosition() {");
+  const speechStartHandler = readerSource.indexOf("    handleSpeechStart(", speakStart);
   const speakSource = readerSource.slice(speakStart, speechStartHandler);
   assert.match(speakSource, /!this\.audioOwner/);
 });
