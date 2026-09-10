@@ -15,8 +15,36 @@ const READER_FILES = [
 const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
+const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 let audioOwnerTabId = null;
+let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
+
+async function loadAudioOwner() {
+  if (audioOwnerLoaded) return audioOwnerTabId;
+  audioOwnerLoaded = true;
+  try {
+    const stored = await chrome.storage.session.get(AUDIO_OWNER_STORAGE_KEY);
+    const value = stored?.[AUDIO_OWNER_STORAGE_KEY];
+    audioOwnerTabId = Number.isInteger(value) ? value : null;
+  } catch (_error) {
+    audioOwnerTabId = null;
+  }
+  return audioOwnerTabId;
+}
+
+async function storeAudioOwner(tabId) {
+  audioOwnerTabId = Number.isInteger(tabId) ? tabId : null;
+  try {
+    if (audioOwnerTabId === null) {
+      await chrome.storage.session.remove(AUDIO_OWNER_STORAGE_KEY);
+    } else {
+      await chrome.storage.session.set({ [AUDIO_OWNER_STORAGE_KEY]: audioOwnerTabId });
+    }
+  } catch (_error) {
+    // In-memory ownership still protects the current service-worker lifetime.
+  }
+}
 
 function queueAudioMutation(operation) {
   const next = audioMutationChain.then(operation, operation);
@@ -26,6 +54,7 @@ function queueAudioMutation(operation) {
 
 async function claimAudioForTab(tabId) {
   return queueAudioMutation(async () => {
+    await loadAudioOwner();
     if (audioOwnerTabId === tabId) {
       return true;
     }
@@ -41,15 +70,16 @@ async function claimAudioForTab(tabId) {
       }
     }
 
-    audioOwnerTabId = tabId;
+    await storeAudioOwner(tabId);
     return true;
   });
 }
 
 async function releaseAudioForTab(tabId) {
   return queueAudioMutation(async () => {
+    await loadAudioOwner();
     if (audioOwnerTabId === tabId) {
-      audioOwnerTabId = null;
+      await storeAudioOwner(null);
     }
     return true;
   });
@@ -90,9 +120,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectionPromises.delete(tabId);
-  if (audioOwnerTabId === tabId) {
-    audioOwnerTabId = null;
-  }
+  void queueAudioMutation(async () => {
+    await loadAudioOwner();
+    if (audioOwnerTabId === tabId) {
+      await storeAudioOwner(null);
+    }
+  });
 });
 
 async function readerReady(tabId) {
