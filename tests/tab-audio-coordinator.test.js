@@ -135,3 +135,14 @@ test("reader pause is local and cannot leave a browser-global utterance parked",
   const speakSource = readerSource.slice(speakStart, speechStartHandler);
   assert.match(speakSource, /!this\.audioOwner/);
 });
+
+test("startup claims audio before the first speech request", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
+    "utf8"
+  );
+  const claim = source.indexOf("await this.claimAudioOwnership");
+  const speak = source.indexOf("this.speakCurrentPosition()", claim);
+  assert.ok(claim >= 0);
+  assert.ok(speak > claim);
+});
