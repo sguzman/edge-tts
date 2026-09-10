@@ -5,7 +5,6 @@ class MockToolbar {
   constructor() {
     this.handlers = {};
     this.rate = null;
-    this.volume = null;
   }
 
   mount() {}
@@ -94,7 +93,7 @@ test("stored volume loads independently and rate is clamped to the expanded rang
 
   assert.equal(app.settings.volume, 0.45);
   assert.equal(app.settings.rate, 5);
-  assert.equal(app.toolbar.volume, 0.45);
+  assert.equal(app.toolbar.rate, 5);
   assert.equal(global.EdgeTtsExtension.AudioControls.currentVolume, 0.45);
 });
 
