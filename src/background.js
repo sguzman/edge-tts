@@ -15,6 +15,86 @@ const READER_FILES = [
 const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
+let audioOwnerTabId = null;
+let audioMutationChain = Promise.resolve();
+
+function queueAudioMutation(operation) {
+  const next = audioMutationChain.then(operation, operation);
+  audioMutationChain = next.catch(() => {});
+  return next;
+}
+
+async function claimAudioForTab(tabId) {
+  return queueAudioMutation(async () => {
+    if (audioOwnerTabId === tabId) {
+      return true;
+    }
+
+    const previousOwner = audioOwnerTabId;
+    if (previousOwner !== null) {
+      try {
+        await chrome.tabs.sendMessage(previousOwner, {
+          type: "EDGE_TTS_AUDIO_PREEMPT"
+        });
+      } catch (_error) {
+        // The previous tab may have navigated or closed. Its claim is stale.
+      }
+    }
+
+    audioOwnerTabId = tabId;
+    return true;
+  });
+}
+
+async function releaseAudioForTab(tabId) {
+  return queueAudioMutation(async () => {
+    if (audioOwnerTabId === tabId) {
+      audioOwnerTabId = null;
+    }
+    return true;
+  });
+}
+
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const tabId = sender.tab?.id;
+
+  if (message?.type === "EDGE_TTS_AUDIO_CLAIM") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ granted: false });
+      return false;
+    }
+
+    void claimAudioForTab(tabId)
+      .then(() => sendResponse({ granted: true }))
+      .catch((error) => {
+        console.warn("Edge Natural TTS could not arbitrate audio ownership.", error);
+        sendResponse({ granted: false });
+      });
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_AUDIO_RELEASE") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ released: false });
+      return false;
+    }
+
+    void releaseAudioForTab(tabId)
+      .then(() => sendResponse({ released: true }))
+      .catch(() => sendResponse({ released: false }));
+    return true;
+  }
+
+  return false;
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  injectionPromises.delete(tabId);
+  if (audioOwnerTabId === tabId) {
+    audioOwnerTabId = null;
+  }
+});
+
 async function readerReady(tabId) {
   try {
     const response = await chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_PING" });
