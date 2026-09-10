@@ -114,7 +114,15 @@
         `Edge Natural TTS startup prepared in ${round(trace.prepMs)}ms ` +
           `(model ${round(trace.modelMs)}ms, extra voice wait ${round(trace.extraVoiceWaitMs)}ms).`
       );
-      this.speakCurrentPosition();
+
+      if (await this.claimAudioOwnership?.()) {
+        this.speakCurrentPosition();
+      } else {
+        trace.active = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus("Paused — audio unavailable");
+      }
     };
 
     prototype.handleSpeechStart = function profiledHandleSpeechStart(latencyMs) {
