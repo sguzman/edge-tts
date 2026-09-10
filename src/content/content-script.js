@@ -43,6 +43,12 @@
       return false;
     }
 
+    if (message?.type === "EDGE_TTS_AUDIO_PREEMPT") {
+      app?.suspendForOtherTab?.();
+      sendResponse({ accepted: true });
+      return false;
+    }
+
     return false;
   };
 
