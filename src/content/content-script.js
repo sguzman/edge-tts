@@ -18,6 +18,9 @@
       previousSession.dispose?.();
     } catch (_error) {}
     try {
+      previousSession.app?.stop?.();
+    } catch (_error) {}
+    try {
       previousSession.app?.toolbar?.destroy?.();
     } catch (_error) {}
     try {
@@ -105,19 +108,28 @@
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_AUDIO_PREEMPT_V2") {
+    if (
+      message?.type === "EDGE_TTS_AUDIO_PREEMPT_V2" ||
+      message?.type === "EDGE_TTS_AUDIO_PREEMPT"
+    ) {
       app?.suspendForOtherTab?.();
       sendResponse({ accepted: true });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_LOCAL_EVENT_V2") {
+    if (
+      message?.type === "EDGE_TTS_LOCAL_EVENT_V2" ||
+      message?.type === "EDGE_TTS_LOCAL_EVENT"
+    ) {
       const accepted = app?.speech?.handleChromeTtsEvent?.(message) === true;
       sendResponse({ accepted });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_WIN_NATURAL_EVENT_V2") {
+    if (
+      message?.type === "EDGE_TTS_WIN_NATURAL_EVENT_V2" ||
+      message?.type === "EDGE_TTS_WIN_NATURAL_EVENT"
+    ) {
       const accepted = app?.speech?.handleWinNaturalEvent?.(message) === true;
       sendResponse({ accepted });
       return false;
