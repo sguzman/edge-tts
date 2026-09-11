@@ -21,19 +21,23 @@ test("startup summary separates extension prep from remote speech latency", () =
   );
 });
 
-test("Natural voice readiness starts before text modeling", () => {
+test("voice readiness starts before text modeling and catalog selection waits for local voices", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
     "utf8"
   );
 
-  const voiceWait = source.indexOf("this.speech.waitForVoices(");
+  const localVoiceWait = source.indexOf("this.speech.refreshExtensionVoices?.()");
+  const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
-  const awaitSettings = source.indexOf("await settingsReady;");
-  const awaitVoices = source.indexOf("await naturalVoicesReady;");
+  const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady]);");
+  const firstRefresh = source.indexOf("this.refreshVoices();", awaitPrep);
+  const awaitNaturalFallback = source.indexOf("await naturalVoicesReady;", firstRefresh);
 
-  assert.ok(voiceWait >= 0);
-  assert.ok(modelBuild > voiceWait);
-  assert.ok(awaitSettings > modelBuild);
-  assert.ok(awaitVoices > awaitSettings);
+  assert.ok(localVoiceWait >= 0);
+  assert.ok(naturalVoiceWait > localVoiceWait);
+  assert.ok(modelBuild > naturalVoiceWait);
+  assert.ok(awaitPrep > modelBuild);
+  assert.ok(firstRefresh > awaitPrep);
+  assert.ok(awaitNaturalFallback > firstRefresh);
 });
