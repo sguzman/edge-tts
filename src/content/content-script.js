@@ -9,6 +9,15 @@
     return;
   }
 
+  // Reloading an unpacked extension destroys the old isolated JS world but the
+  // DOM it created can survive in an already-open page. Those orphaned HUDs no
+  // longer have live extension event handlers, so they look like duplicate
+  // readers whose Quit button does nothing. A fresh bootstrap owns the page UI:
+  // remove any orphaned reader chrome before constructing the new app.
+  for (const element of document.querySelectorAll("[data-edge-tts-ui='true'], #edge-tts-toolbar")) {
+    element.remove();
+  }
+
   let app = new extension.Reader.ReaderApp();
 
   const session = {
