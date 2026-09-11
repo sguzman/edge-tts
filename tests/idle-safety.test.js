@@ -16,6 +16,7 @@ test("manifest performs no automatic host-page injection", () => {
   ]);
   assert.ok(manifest.permissions.includes("activeTab"));
   assert.ok(manifest.permissions.includes("scripting"));
+  assert.ok(manifest.permissions.includes("tts"));
 });
 
 test("direct audio permission is restricted to the Microsoft Read Aloud host", () => {
