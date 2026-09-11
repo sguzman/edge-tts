@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Edge Natural TTS",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Read webpages with Microsoft Edge online natural voices and synchronized highlighting.",
-  "permissions": ["storage", "scripting", "activeTab"],
+  "permissions": ["storage", "scripting", "activeTab", "tts"],
   "host_permissions": [
     "https://speech.platform.bing.com/*",
     "wss://speech.platform.bing.com/*"
