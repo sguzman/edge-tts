@@ -73,12 +73,15 @@
       this.toolbar.mount();
       this.toolbar.setStatus("Starting…");
 
-      // Start every independent readiness path immediately. The Windows local
-      // voice catalog comes from extension chrome.tts rather than page Web
-      // Speech, so wait for it before choosing/restoring the saved voice.
+      // Settings and the extension-level legacy catalog are part of ordinary
+      // startup. WIN-NATURAL is explicitly optional: helper discovery must
+      // never hold the reader in Starting… or prevent the existing online /
+      // legacy transports from working. Its voice-change notification refreshes
+      // the toolbar whenever the native catalog arrives.
       const settingsReady = this.loadSettings();
       const extensionVoicesReady = this.speech.refreshExtensionVoices?.() || Promise.resolve();
       const winNaturalVoicesReady = this.speech.refreshWinNaturalVoices?.() || Promise.resolve();
+      Promise.resolve(winNaturalVoicesReady).catch(() => {});
       const naturalVoicesReady = this.speech.waitForVoices(
         350,
         (voices) => voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))
@@ -88,7 +91,12 @@
       this.rebuildModel();
       trace.modelMs = now() - modelStartedAt;
 
-      await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);
+      await Promise.all([settingsReady, extensionVoicesReady]);
+      if (!this.enabled || this.quitRequested) {
+        trace.active = false;
+        return;
+      }
+
       this.applySettings();
       this.refreshVoices();
 
@@ -97,6 +105,10 @@
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
         trace.extraVoiceWaitMs = now() - voiceWaitStartedAt;
+        if (!this.enabled || this.quitRequested) {
+          trace.active = false;
+          return;
+        }
         this.refreshVoices();
       }
 
@@ -118,9 +130,19 @@
           `(model ${round(trace.modelMs)}ms, extra voice wait ${round(trace.extraVoiceWaitMs)}ms).`
       );
 
+      if (!this.enabled || this.quitRequested) {
+        trace.active = false;
+        return;
+      }
+
       if (await this.claimAudioOwnership?.()) {
+        if (!this.enabled || this.quitRequested) {
+          trace.active = false;
+          this.releaseAudioOwnership?.();
+          return;
+        }
         this.speakCurrentPosition();
-      } else {
+      } else if (this.enabled && !this.quitRequested) {
         trace.active = false;
         this.paused = true;
         this.toolbar.setPaused(true);
