@@ -1,28 +1,51 @@
 (function bootstrapEdgeTts(root) {
-  if (root.__EDGE_TTS_READER__) {
-    return;
-  }
-
+  const SESSION_REVISION = 2;
   const extension = root.EdgeTtsExtension;
   if (!extension?.Reader?.ReaderApp) {
     console.error("Edge Natural TTS reader modules did not initialize.");
     return;
   }
 
-  // Reloading an unpacked extension destroys the old isolated JS world but the
-  // DOM it created can survive in an already-open page. Those orphaned HUDs no
-  // longer have live extension event handlers, so they look like duplicate
-  // readers whose Quit button does nothing. A fresh bootstrap owns the page UI:
-  // remove any orphaned reader chrome before constructing the new app.
+  // If this file is executing, the background has already decided that the
+  // currently registered reader is not the live reader for this extension
+  // generation. An unpacked-extension reload can leave the old isolated-world
+  // marker and DOM behind even though its chrome.runtime context is dead. Do
+  // not return merely because that stale marker exists: retire it and take
+  // ownership of the page again.
+  const previousSession = root.__EDGE_TTS_READER__;
+  if (previousSession) {
+    try {
+      previousSession.dispose?.();
+    } catch (_error) {}
+    try {
+      previousSession.app?.toolbar?.destroy?.();
+    } catch (_error) {}
+    try {
+      previousSession.app?.highlighter?.clear?.();
+    } catch (_error) {}
+  }
+
   for (const element of document.querySelectorAll("[data-edge-tts-ui='true'], #edge-tts-toolbar")) {
     element.remove();
   }
 
+  try {
+    delete root.__EDGE_TTS_READER__;
+  } catch (_error) {
+    root.__EDGE_TTS_READER__ = null;
+  }
+
   let app = new extension.Reader.ReaderApp();
+  let disposed = false;
+  let onMessage = null;
 
   const session = {
+    revision: SESSION_REVISION,
     get app() {
       return app;
+    },
+    get disposed() {
+      return disposed;
     },
     detach(requestingApp) {
       if (requestingApp && requestingApp !== app) {
@@ -34,37 +57,67 @@
       // click can therefore construct a genuinely fresh ReaderApp without
       // reinjecting/reparsing the entire extension stack.
       app = null;
+    },
+    dispose() {
+      if (disposed) return;
+      disposed = true;
+      const currentApp = app;
+      app = null;
+
+      try {
+        currentApp?.stop?.();
+      } catch (_error) {}
+      try {
+        currentApp?.unsubscribeVoiceChanges?.();
+      } catch (_error) {}
+      try {
+        currentApp?.highlighter?.clear?.();
+      } catch (_error) {}
+      try {
+        currentApp?.toolbar?.destroy?.();
+      } catch (_error) {}
+      try {
+        if (onMessage) chrome.runtime.onMessage.removeListener(onMessage);
+      } catch (_error) {}
+
+      if (root.__EDGE_TTS_READER__ === session) {
+        try {
+          delete root.__EDGE_TTS_READER__;
+        } catch (_error) {
+          root.__EDGE_TTS_READER__ = null;
+        }
+      }
     }
   };
 
-  const onMessage = (message, _sender, sendResponse) => {
-    if (message?.type === "EDGE_TTS_PING") {
-      sendResponse({ ready: true, active: Boolean(app) });
+  onMessage = (message, _sender, sendResponse) => {
+    if (message?.type === "EDGE_TTS_PING_V2") {
+      sendResponse({ ready: true, active: Boolean(app), revision: SESSION_REVISION });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_TOGGLE") {
+    if (message?.type === "EDGE_TTS_TOGGLE_V2") {
       if (!app) {
         app = new extension.Reader.ReaderApp();
       }
       void app.toggle();
-      sendResponse({ accepted: true });
+      sendResponse({ accepted: true, revision: SESSION_REVISION });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_AUDIO_PREEMPT") {
+    if (message?.type === "EDGE_TTS_AUDIO_PREEMPT_V2") {
       app?.suspendForOtherTab?.();
       sendResponse({ accepted: true });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_LOCAL_EVENT") {
+    if (message?.type === "EDGE_TTS_LOCAL_EVENT_V2") {
       const accepted = app?.speech?.handleChromeTtsEvent?.(message) === true;
       sendResponse({ accepted });
       return false;
     }
 
-    if (message?.type === "EDGE_TTS_WIN_NATURAL_EVENT") {
+    if (message?.type === "EDGE_TTS_WIN_NATURAL_EVENT_V2") {
       const accepted = app?.speech?.handleWinNaturalEvent?.(message) === true;
       sendResponse({ accepted });
       return false;
