@@ -5,7 +5,9 @@ const READER_FILES = [
   "src/content/speech-engine.js",
   "src/content/reliable-speech-engine.js",
   "src/content/direct-audio-engine.js",
+  "src/content/local-tts-engine.js",
   "src/content/toolbar.js",
+  "src/content/voice-ui.js",
   "src/content/reader.js",
   "src/content/reliable-reader.js",
   "src/content/failsafe-reader.js",
@@ -21,6 +23,7 @@ const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
+let localTtsSession = null;
 
 async function loadAudioOwner() {
   if (audioOwnerLoaded) return audioOwnerTabId;
@@ -87,6 +90,118 @@ async function releaseAudioForTab(tabId) {
   });
 }
 
+async function getExtensionTtsVoices() {
+  if (!chrome.tts?.getVoices) return [];
+  const voices = await chrome.tts.getVoices();
+  return (voices || []).map((voice) => ({
+    voiceName: String(voice.voiceName || ""),
+    lang: String(voice.lang || ""),
+    remote: voice.remote === true,
+    extensionId: voice.extensionId || null,
+    eventTypes: Array.isArray(voice.eventTypes) ? [...voice.eventTypes] : []
+  }));
+}
+
+function localTtsEventPayload(event) {
+  return {
+    type: String(event?.type || ""),
+    charIndex: Number.isFinite(Number(event?.charIndex)) ? Number(event.charIndex) : null,
+    length: Number.isFinite(Number(event?.length)) ? Number(event.length) : null,
+    errorMessage: event?.errorMessage ? String(event.errorMessage) : ""
+  };
+}
+
+function stopLocalTtsForTab(tabId, requestId = null) {
+  const session = localTtsSession;
+  if (!session || session.tabId !== tabId) return false;
+  if (requestId && session.requestId !== requestId) return false;
+
+  localTtsSession = null;
+  try {
+    chrome.tts?.stop?.();
+  } catch (_error) {}
+  return true;
+}
+
+async function speakLocalTtsForTab(tabId, message) {
+  await loadAudioOwner();
+  if (audioOwnerTabId !== tabId || !chrome.tts?.speak) {
+    return false;
+  }
+
+  const text = String(message?.text || "");
+  const voiceName = String(message?.voiceName || "");
+  const requestId = String(message?.requestId || "");
+  if (!text || !voiceName || !requestId) return false;
+
+  if (localTtsSession) {
+    try {
+      chrome.tts.stop();
+    } catch (_error) {}
+  }
+
+  const session = { tabId, requestId };
+  localTtsSession = session;
+  const options = {
+    voiceName,
+    enqueue: false,
+    rate: Math.min(10, Math.max(0.1, Number(message.rate) || 1)),
+    volume: Math.min(1, Math.max(0, Number(message.volume) || 0)),
+    onEvent(event) {
+      if (
+        !localTtsSession ||
+        localTtsSession.tabId !== tabId ||
+        localTtsSession.requestId !== requestId
+      ) {
+        return;
+      }
+
+      const payload = localTtsEventPayload(event);
+      void chrome.tabs
+        .sendMessage(tabId, {
+          type: "EDGE_TTS_LOCAL_EVENT",
+          requestId,
+          event: payload
+        })
+        .catch(() => {});
+
+      if (["end", "interrupted", "cancelled", "error"].includes(payload.type)) {
+        localTtsSession = null;
+      }
+    }
+  };
+  if (message.lang) options.lang = String(message.lang);
+
+  try {
+    const pending = chrome.tts.speak(text, options);
+    pending?.catch?.((error) => {
+      if (
+        localTtsSession?.tabId === tabId &&
+        localTtsSession?.requestId === requestId
+      ) {
+        localTtsSession = null;
+        void chrome.tabs
+          .sendMessage(tabId, {
+            type: "EDGE_TTS_LOCAL_EVENT",
+            requestId,
+            event: {
+              type: "error",
+              charIndex: null,
+              length: null,
+              errorMessage: error?.message || String(error)
+            }
+          })
+          .catch(() => {});
+      }
+    });
+    return true;
+  } catch (error) {
+    if (localTtsSession === session) localTtsSession = null;
+    console.warn("Edge Natural TTS could not start a Windows local voice.", error);
+    return false;
+  }
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
@@ -117,11 +232,42 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message?.type === "EDGE_TTS_LOCAL_VOICES") {
+    void getExtensionTtsVoices()
+      .then((voices) => sendResponse({ voices }))
+      .catch((error) => {
+        console.warn("Edge Natural TTS could not enumerate extension TTS voices.", error);
+        sendResponse({ voices: [] });
+      });
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_LOCAL_SPEAK") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ accepted: false });
+      return false;
+    }
+    void speakLocalTtsForTab(tabId, message)
+      .then((accepted) => sendResponse({ accepted }))
+      .catch(() => sendResponse({ accepted: false }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_LOCAL_STOP") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ stopped: false });
+      return false;
+    }
+    sendResponse({ stopped: stopLocalTtsForTab(tabId, message.requestId || null) });
+    return false;
+  }
+
   return false;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectionPromises.delete(tabId);
+  stopLocalTtsForTab(tabId);
   void queueAudioMutation(async () => {
     await loadAudioOwner();
     if (audioOwnerTabId === tabId) {
@@ -175,9 +321,7 @@ async function ensureReader(tabId) {
 }
 
 chrome.action.onClicked.addListener(async (tab) => {
-  if (!tab.id) {
-    return;
-  }
+  if (!tab.id) return;
 
   try {
     await ensureReader(tab.id);
