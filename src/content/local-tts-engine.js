@@ -186,14 +186,6 @@
       return super.isSpeaking?.() || false;
     }
 
-    setPlaybackRate() {
-      return false;
-    }
-
-    setOutputVolume() {
-      return false;
-    }
-
     speak(block, startSegmentIndex, options = {}) {
       if (!isChromeTtsVoice(options.voice)) {
         if (this.localSessionMode) {
