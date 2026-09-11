@@ -6,11 +6,13 @@ const path = require("node:path");
 const backgroundPath = path.join(__dirname, "..", "src", "background.js");
 const source = fs.readFileSync(backgroundPath, "utf8");
 
-test("direct audio, stable reliability stack, controls, and startup fast path load before bootstrap", () => {
+test("speech backends, voice UI, controls, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');
   const directAudio = source.indexOf('"src/content/direct-audio-engine.js"');
+  const localTts = source.indexOf('"src/content/local-tts-engine.js"');
   const toolbar = source.indexOf('"src/content/toolbar.js"');
+  const voiceUi = source.indexOf('"src/content/voice-ui.js"');
   const reader = source.indexOf('"src/content/reader.js"');
   const reliableReader = source.indexOf('"src/content/reliable-reader.js"');
   const failsafeReader = source.indexOf('"src/content/failsafe-reader.js"');
@@ -21,8 +23,10 @@ test("direct audio, stable reliability stack, controls, and startup fast path lo
   assert.ok(baseSpeech >= 0);
   assert.ok(reliableSpeech > baseSpeech);
   assert.ok(directAudio > reliableSpeech);
-  assert.ok(toolbar > directAudio);
-  assert.ok(reader > toolbar);
+  assert.ok(localTts > directAudio);
+  assert.ok(toolbar > localTts);
+  assert.ok(voiceUi > toolbar);
+  assert.ok(reader > voiceUi);
   assert.ok(reliableReader > reader);
   assert.ok(failsafeReader > reliableReader);
   assert.ok(audioControls > failsafeReader);
