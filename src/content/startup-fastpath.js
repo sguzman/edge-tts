@@ -72,10 +72,11 @@
       this.toolbar.mount();
       this.toolbar.setStatus("Starting…");
 
-      // Kick off both asynchronous readiness paths immediately. Text modeling
-      // is independent of saved settings, so its synchronous work can happen
-      // while storage and Natural-voice enumeration are already in flight.
+      // Start every independent readiness path immediately. The Windows local
+      // voice catalog comes from extension chrome.tts rather than page Web
+      // Speech, so wait for it before choosing/restoring the saved voice.
       const settingsReady = this.loadSettings();
+      const extensionVoicesReady = this.speech.refreshExtensionVoices?.() || Promise.resolve();
       const naturalVoicesReady = this.speech.waitForVoices(
         350,
         (voices) => voices.some(isNaturalVoice)
@@ -85,7 +86,7 @@
       this.rebuildModel();
       trace.modelMs = now() - modelStartedAt;
 
-      await settingsReady;
+      await Promise.all([settingsReady, extensionVoicesReady]);
       this.applySettings();
       this.refreshVoices();
 
