@@ -21,6 +21,7 @@ const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
+const READER_SESSION_REVISION = 2;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
@@ -368,8 +369,8 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 async function readerReady(tabId) {
   try {
-    const response = await chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_PING" });
-    return response?.ready === true;
+    const response = await chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_PING_V2" });
+    return response?.ready === true && response?.revision === READER_SESSION_REVISION;
   } catch (_error) {
     return false;
   }
@@ -415,7 +416,7 @@ chrome.action.onClicked.addListener(async (tab) => {
 
   try {
     await ensureReader(tab.id);
-    await chrome.tabs.sendMessage(tab.id, { type: "EDGE_TTS_TOGGLE" });
+    await chrome.tabs.sendMessage(tab.id, { type: "EDGE_TTS_TOGGLE_V2" });
   } catch (error) {
     console.warn("Edge Natural TTS could not run on this page.", error);
   }
