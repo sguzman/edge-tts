@@ -49,6 +49,12 @@
       return false;
     }
 
+    if (message?.type === "EDGE_TTS_LOCAL_EVENT") {
+      const accepted = app?.speech?.handleChromeTtsEvent?.(message) === true;
+      sendResponse({ accepted });
+      return false;
+    }
+
     return false;
   };
 
