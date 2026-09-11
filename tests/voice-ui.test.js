@@ -25,18 +25,19 @@ const natural = {
   localService: false
 };
 
-test("voice classes distinguish Windows local from Natural/Online", () => {
-  assert.equal(voiceClass(localWeb), "local");
-  assert.equal(voiceClass(localChrome), "local");
-  assert.equal(voiceClass(natural), "natural");
-  assert.match(voiceLabel(localChrome), /^\[LOCAL\]/);
-  assert.match(voiceLabel(natural), /^\[NATURAL\]/);
+test("voice classes distinguish Windows legacy, Windows Natural, and online", () => {
+  assert.equal(voiceClass(localWeb), "win-legacy");
+  assert.equal(voiceClass(localChrome), "win-legacy");
+  assert.equal(voiceClass({ name: "Microsoft Aria", lang: "en-US", localService: true, __edgeTtsSource: "win-natural" }), "win-natural");
+  assert.equal(voiceClass(natural), "online");
+  assert.match(voiceLabel(localChrome), /^\[WIN-LEGACY\]/);
+  assert.match(voiceLabel(natural), /^\[ONLINE\]/);
 });
 
 test("class filter and text search compose", () => {
   const voices = [localWeb, localChrome, natural];
-  assert.deepEqual(filterVoicesByClass(voices, "", "local"), [localWeb, localChrome]);
-  assert.deepEqual(filterVoicesByClass(voices, "aria", "natural"), [natural]);
-  assert.deepEqual(filterVoicesByClass(voices, "mark", "natural"), []);
-  assert.deepEqual(filterVoicesByClass(voices, "local", "all"), [localWeb, localChrome]);
+  assert.deepEqual(filterVoicesByClass(voices, "", "win-legacy"), [localWeb, localChrome]);
+  assert.deepEqual(filterVoicesByClass(voices, "aria", "online"), [natural]);
+  assert.deepEqual(filterVoicesByClass(voices, "mark", "online"), []);
+  assert.deepEqual(filterVoicesByClass(voices, "legacy", "all"), [localWeb, localChrome]);
 });

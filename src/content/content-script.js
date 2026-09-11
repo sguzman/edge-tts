@@ -55,6 +55,12 @@
       return false;
     }
 
+    if (message?.type === "EDGE_TTS_WIN_NATURAL_EVENT") {
+      const accepted = app?.speech?.handleWinNaturalEvent?.(message) === true;
+      sendResponse({ accepted });
+      return false;
+    }
+
     return false;
   };
 

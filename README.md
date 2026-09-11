@@ -5,9 +5,10 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 ## Current behavior
 
 - Click the extension action to inject the reader into the current tab and start reading near the current viewport.
-- **Natural / Online voices use a direct Microsoft Edge Read Aloud transport:** the extension receives MP3 audio plus word-boundary metadata and plays the audio itself.
+- **Online voices use a direct Microsoft Edge Read Aloud transport:** the extension receives MP3 audio plus word-boundary metadata and plays the audio itself.
+- **Windows Natural voices are optional and offline:** the x64 native helper uses SAPI plus NaturalVoiceSAPIAdapter, returning WAV audio and SAPI word-boundary timing.
 - **Windows-local discovery merges two catalogs:** page `speechSynthesis.getVoices()` plus extension `chrome.tts.getVoices()`. A Windows voice missing from Web Speech can therefore still appear and play through the extension-level Windows TTS backend.
-- Voice names are visibly prefixed with **[LOCAL]** or **[NATURAL]**, and the toolbar can filter **All voices / Local Windows / Natural / Online** independently of text search.
+- Voice names are visibly prefixed with **[WIN-NATURAL]**, **[WIN-LEGACY]**, or **[ONLINE]**, and the toolbar filters All voices / Windows Natural / Windows Legacy / Online.
 - Natural synthesis is requested at normal prosody; the primary **Speed** control is client-side playback speed, currently 0.5x–8x.
 - Natural/direct audio has a **Volume** control from 0–200% using Web Audio gain. Local Windows voices remain limited to the OS/browser TTS volume range.
 - Highlights the currently spoken word and sentence using Microsoft word timing metadata for direct audio, Web Speech boundary events, or `chrome.tts` word events for Windows-local fallback voices.
@@ -25,14 +26,15 @@ The reader distinguishes voice **identity/discovery** from voice **playback tran
 
 For local voices, the extension first reads the normal page Web Speech catalog. It also asks the extension-level `chrome.tts` API for OS-provided voices. Catalog entries with the same voice name and locale are deduplicated, preferring the Web Speech object when both APIs expose the same voice. Remote `chrome.tts` entries are not imported into the Windows-local fallback catalog.
 
-This produces two user-facing classes:
+This produces three user-facing classes:
 
 ```text
-[LOCAL]   Windows / OS voice
-[NATURAL] Edge Online / Natural voice
+[WIN-NATURAL] Locally exposed NaturalVoiceSAPIAdapter voice
+[WIN-LEGACY]  Windows / OS voice through Web Speech or chrome.tts
+[ONLINE]      Edge Online / Natural voice
 ```
 
-The toolbar's **Voice class** filter can show all voices, only Local Windows voices, or only Natural / Online voices. Text search composes with that class filter.
+The toolbar's **Voice class** filter can show all voices, Windows Natural, Windows Legacy, or Online. Text search composes with that class filter.
 
 A local voice already exposed by `speechSynthesis` keeps the existing Web Speech playback path. A local voice found only through `chrome.tts` is spoken by the extension-level Windows TTS backend; its start/word/end events are bridged back into the tab so the existing reader cursor and highlighter continue to work.
 
@@ -165,3 +167,34 @@ docs/
 ```
 
 See `docs/ARCHITECTURE.md` for the component boundaries.
+# Optional offline Windows Natural backend
+
+The extension can use a locally exposed Windows Natural voice through the
+optional x64 NativeVoiceSAPIAdapter arrangement. This path is deliberately
+separate from the existing `[ONLINE]` Edge/Azure Read Aloud backend and the
+`[WIN-LEGACY]` `chrome.tts`/Web Speech backend.
+
+Build the persistent helper from `native/win-natural/WinNaturalHost.csproj`:
+
+```powershell
+dotnet publish native/win-natural/WinNaturalHost.csproj -c Release -r win-x64 --self-contained false
+```
+
+On the target machine, install/register the compatible x64 adapter and
+extracted Natural voice package according to its documented rollback procedure.
+Then run `native/win-natural/install-native-host.ps1 -ExtensionId YOUR_EXTENSION_ID`
+and reload the unpacked extension.
+The install script only creates a per-user Edge Native Messaging registration;
+it does not install or alter voice packages or adapter registration. Remove it
+with `native/win-natural/uninstall-native-host.ps1`.
+
+The helper returns WAV audio and SAPI `SpeakProgress` word boundaries. Playback
+uses the same media-clock path as direct audio, so rate and volume changes do
+not resynthesize the current utterance. The compatible extracted voice remains
+an external prerequisite and is intentionally not committed to this repo.
+
+The helper advertises only adapter `Local-*` SAPI token IDs. This keeps legacy
+David/Mark/Zira voices on the existing `[WIN-LEGACY]` path and prevents them
+from being mislabeled as `[WIN-NATURAL]`. The Store Natural packages remain
+untouched; another machine needs the compatible extracted Aria v2 package,
+the x64 adapter registration, and the .NET 10 Windows Desktop Runtime.

@@ -5,6 +5,7 @@ const READER_FILES = [
   "src/content/speech-engine.js",
   "src/content/reliable-speech-engine.js",
   "src/content/direct-audio-engine.js",
+  "src/content/win-natural-engine.js",
   "src/content/local-tts-engine.js",
   "src/content/toolbar.js",
   "src/content/voice-ui.js",
@@ -24,6 +25,62 @@ let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
 let localTtsSession = null;
+let winNaturalPort = null;
+let winNaturalHandshake = null;
+const winNaturalRequests = new Map();
+
+function disconnectWinNaturalPort() {
+  const port = winNaturalPort;
+  const handshake = winNaturalHandshake;
+  winNaturalPort = null;
+  winNaturalHandshake = null;
+  handshake?.reject?.(new Error("Windows Natural voice helper disconnected."));
+  for (const request of winNaturalRequests.values()) {
+    request.reject?.(new Error("Windows Natural voice helper disconnected."));
+    if (Number.isInteger(request.tabId)) {
+      void chrome.tabs.sendMessage(request.tabId, {
+        type: "EDGE_TTS_WIN_NATURAL_EVENT",
+        requestId: request.requestId,
+        event: { type: "error", message: "Windows Natural helper disconnected." }
+      }).catch(() => {});
+    }
+  }
+  winNaturalRequests.clear();
+  try { port?.disconnect?.(); } catch (_error) {}
+}
+
+function ensureWinNaturalPort() {
+  if (winNaturalPort && winNaturalHandshake) return winNaturalHandshake.then(() => winNaturalPort);
+  let port;
+  try { port = chrome.runtime.connectNative("com.sguzman.edge_tts.win_natural"); }
+  catch (error) { return Promise.reject(error); }
+  winNaturalPort = port;
+  winNaturalHandshake = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Windows Natural helper handshake timed out.")), 5000);
+    const finish = (callback, value) => { clearTimeout(timer); callback(value); };
+    port.onMessage.addListener((message) => {
+      if (message?.type === "hello") {
+        if (message.protocol === 1 && message.architecture === "x64") finish(resolve, true);
+        else finish(reject, new Error("Windows Natural helper protocol or architecture mismatch."));
+        return;
+      }
+      winNaturalRequests.get(String(message?.requestId || ""))?.onMessage?.(message);
+    });
+  });
+  port.onDisconnect.addListener(() => { const error = chrome.runtime.lastError; disconnectWinNaturalPort(); if (error) console.warn(error.message); });
+  try { port.postMessage({ type: "hello", protocol: 1 }); } catch (error) { disconnectWinNaturalPort(); return Promise.reject(error); }
+  return winNaturalHandshake.then(() => port).catch((error) => { disconnectWinNaturalPort(); throw error; });
+}
+
+function stopWinNaturalForTab(tabId, requestId = null) {
+  if (!Number.isInteger(tabId)) return false;
+  const active = [...winNaturalRequests.entries()].find(([, request]) =>
+    request.tabId === tabId && (!requestId || request.requestId === requestId)
+  );
+  if (!active) return false;
+  try { winNaturalPort?.postMessage({ type: "cancel", requestId: active[1].requestId }); } catch (_error) {}
+  return true;
+}
 
 async function loadAudioOwner() {
   if (audioOwnerLoaded) return audioOwnerTabId;
@@ -262,12 +319,45 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_VOICES") {
+    const requestId = `voices-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    void ensureWinNaturalPort().then((port) => new Promise((resolve, reject) => {
+      winNaturalRequests.set(requestId, { resolve, reject, onMessage: (response) => {
+        if (response?.type !== "voices") return;
+        winNaturalRequests.delete(requestId); resolve(response.voices || []);
+      }});
+      port.postMessage({ type: "voices", requestId });
+    })).then((voices) => sendResponse({ voices })).catch(() => sendResponse({ voices: [] }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE") {
+    if (!Number.isInteger(tabId)) { sendResponse({ accepted: false }); return false; }
+    const requestId = String(message.requestId || "");
+    if (!requestId || !message.text) { sendResponse({ accepted: false }); return false; }
+    void ensureWinNaturalPort().then((port) => {
+      winNaturalRequests.set(requestId, { requestId, tabId, resolve: () => {}, reject: () => {}, onMessage: (response) => {
+        void chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_WIN_NATURAL_EVENT", requestId, event: response }).catch(() => {});
+        if (["synthesisEnd", "error", "cancelled"].includes(response?.type)) winNaturalRequests.delete(requestId);
+      }});
+      port.postMessage({ type: "synthesize", requestId, voiceId: String(message.voiceId || ""), text: String(message.text || ""), lang: String(message.lang || ""), rate: Number(message.rate) || 1 });
+      sendResponse({ accepted: true });
+    }).catch(() => sendResponse({ accepted: false }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_STOP") {
+    sendResponse({ stopped: stopWinNaturalForTab(tabId, message.requestId || null) });
+    return false;
+  }
+
   return false;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectionPromises.delete(tabId);
   stopLocalTtsForTab(tabId);
+  stopWinNaturalForTab(tabId);
   void queueAudioMutation(async () => {
     await loadAudioOwner();
     if (audioOwnerTabId === tabId) {

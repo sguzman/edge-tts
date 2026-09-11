@@ -39,6 +39,7 @@
     const speechModule = root.EdgeTtsExtension?.SpeechEngine;
     const firstBlockNearViewport = textModel?.firstBlockNearViewport;
     const isNaturalVoice = speechModule?.isNaturalVoice;
+    const isWinNaturalVoice = (voice) => voice?.__edgeTtsSource === "win-natural";
     const originalHandleSpeechStart = prototype.handleSpeechStart;
 
     if (typeof firstBlockNearViewport !== "function" || typeof isNaturalVoice !== "function") {
@@ -77,20 +78,21 @@
       // Speech, so wait for it before choosing/restoring the saved voice.
       const settingsReady = this.loadSettings();
       const extensionVoicesReady = this.speech.refreshExtensionVoices?.() || Promise.resolve();
+      const winNaturalVoicesReady = this.speech.refreshWinNaturalVoices?.() || Promise.resolve();
       const naturalVoicesReady = this.speech.waitForVoices(
         350,
-        (voices) => voices.some(isNaturalVoice)
+        (voices) => voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))
       );
 
       const modelStartedAt = now();
       this.rebuildModel();
       trace.modelMs = now() - modelStartedAt;
 
-      await Promise.all([settingsReady, extensionVoicesReady]);
+      await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);
       this.applySettings();
       this.refreshVoices();
 
-      if (!this.voices.some(isNaturalVoice)) {
+      if (!this.voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))) {
         this.toolbar.setStatus("Loading Natural voice…");
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
