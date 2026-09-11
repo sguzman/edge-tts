@@ -21,7 +21,7 @@ test("startup summary separates extension prep from remote speech latency", () =
   );
 });
 
-test("voice readiness starts before text modeling and catalog selection waits for local voices", () => {
+test("voice readiness starts before text modeling without blocking startup on WIN-NATURAL", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
     "utf8"
@@ -31,7 +31,10 @@ test("voice readiness starts before text modeling and catalog selection waits fo
   const nativeVoiceWait = source.indexOf("this.speech.refreshWinNaturalVoices?.()");
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
-  const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);");
+  const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady]);");
+  const forbiddenNativeAwait = source.indexOf(
+    "await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);"
+  );
   const firstRefresh = source.indexOf("this.refreshVoices();", awaitPrep);
   const awaitNaturalFallback = source.indexOf("await naturalVoicesReady;", firstRefresh);
 
@@ -40,6 +43,17 @@ test("voice readiness starts before text modeling and catalog selection waits fo
   assert.ok(naturalVoiceWait > localVoiceWait);
   assert.ok(modelBuild > naturalVoiceWait);
   assert.ok(awaitPrep > modelBuild);
+  assert.equal(forbiddenNativeAwait, -1);
   assert.ok(firstRefresh > awaitPrep);
   assert.ok(awaitNaturalFallback > firstRefresh);
+});
+
+test("startup aborts cleanly when the reader is closed or quit during async preparation", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
+    "utf8"
+  );
+
+  const guard = "if (!this.enabled || this.quitRequested)";
+  assert.ok(source.split(guard).length - 1 >= 3);
 });
