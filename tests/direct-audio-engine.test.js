@@ -148,6 +148,29 @@ test("direct playback exposes high client-side rate and gain without resynthesis
   assert.equal(engine.directAudio.volume, 1);
 });
 
+test("direct playback exposes a gesture-time preparation hook without affecting local voices", () => {
+  const previousDocument = global.document;
+  try {
+    global.document = {
+      createElement() {
+        return {
+          load() {},
+          play() {
+            return Promise.resolve();
+          },
+          pause() {},
+          removeAttribute() {}
+        };
+      }
+    };
+    const engine = new DirectAudioSpeechEngine({});
+    assert.equal(engine.prepareDirectPlayback({ name: "Microsoft David Desktop" }), false);
+    assert.equal(engine.prepareDirectPlayback({ name: "Microsoft Aria Online (Natural)" }), true);
+  } finally {
+    global.document = previousDocument;
+  }
+});
+
 test("local Windows voices still delegate to the existing Web Speech engine", () => {
   const engine = new DirectAudioSpeechEngine({});
   engine.speak(

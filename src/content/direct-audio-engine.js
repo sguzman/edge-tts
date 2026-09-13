@@ -26,6 +26,8 @@
   const MIN_PLAYBACK_RATE = 0.25;
   const MAX_PLAYBACK_RATE = 16;
   const MAX_OUTPUT_GAIN = 2;
+  const SILENT_UNLOCK_WAV =
+    "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
 
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
@@ -36,6 +38,10 @@
 
   function isDirectVoice(voice) {
     return Boolean(voice && /\b(natural|online)\b/i.test(String(voice.name || "")));
+  }
+
+  function logDirect(stage, details = "") {
+    console.debug(`Edge Natural TTS direct audio: ${stage}`, details);
   }
 
   function randomHex(byteCount = 16) {
@@ -417,6 +423,37 @@
       return true;
     }
 
+    prepareDirectPlayback(voice) {
+      if (!isDirectVoice(voice)) return false;
+      if (!root.document?.createElement && typeof root.Audio !== "function") return false;
+
+      const audio = this._ensureAudioElement();
+      audio.muted = true;
+      audio.src = SILENT_UNLOCK_WAV;
+      audio.load?.();
+      const unlockPromise = audio.play?.();
+      unlockPromise?.catch?.((error) => {
+        console.debug("Edge Natural TTS direct audio unlock was rejected.", error);
+      });
+
+      if (this.directAudioContext?.state === "suspended") {
+        const resumePromise = this.directAudioContext.resume();
+        resumePromise?.catch?.((error) => {
+          console.debug("Edge Natural TTS AudioContext unlock was rejected.", error);
+        });
+      }
+
+      audio.pause?.();
+      audio.muted = false;
+      audio.removeAttribute("src");
+      audio.load?.();
+      logDirect("prepared synchronously from the Play gesture", {
+        voice: voice?.name || "",
+        audioContextState: this.directAudioContext?.state || "unavailable"
+      });
+      return true;
+    }
+
     _ensureAudioElement() {
       if (this.directAudio) return this.directAudio;
       const audio = root.document?.createElement?.("audio") || new root.Audio();
@@ -455,6 +492,11 @@
     }
 
     speak(block, startSegmentIndex, options = {}) {
+      logDirect("selected voice and route", {
+        voice: options.voice?.name || "",
+        direct: isDirectVoice(options.voice),
+        mappedShortName: isDirectVoice(options.voice) ? edgeShortNameForVoice(options.voice) : ""
+      });
       if (!isDirectVoice(options.voice)) {
         if (this.directSessionMode) {
           this.generation += 1;
@@ -505,6 +547,7 @@
     async _runDirect(generation, segments, options) {
       const voiceShortName = edgeShortNameForVoice(options.voice);
       if (!voiceShortName) throw new Error("Could not map the selected Natural voice to a Read Aloud voice name.");
+      logDirect("mapped Edge voice to Read Aloud short name", voiceShortName);
 
       const groups = splitSegmentsForService(segments);
       if (!groups.length) throw new Error("No text was available for direct synthesis.");
@@ -534,6 +577,11 @@
       const blob = new Blob(audioChunks, { type: "audio/mpeg" });
       this._revokeObjectUrl();
       this.directObjectUrl = root.URL.createObjectURL(blob);
+      logDirect("created MP3 Blob/object URL", {
+        audioBytes: cumulativeAudioBytes,
+        boundaryCount: mappedBoundaries.length,
+        objectUrl: this.directObjectUrl
+      });
 
       const audio = this._ensureAudioElement();
       audio.src = this.directObjectUrl;
@@ -565,10 +613,24 @@
       if (this.directAudioContext?.state === "suspended") {
         try {
           await this.directAudioContext.resume();
-        } catch (_error) {}
+          logDirect("AudioContext resumed", this.directAudioContext.state);
+        } catch (error) {
+          console.warn("Edge Natural TTS could not resume its AudioContext.", error);
+        }
       }
 
-      await audio.play();
+      logDirect("calling HTMLMediaElement.play()", {
+        audioContextState: this.directAudioContext?.state || "unavailable",
+        paused: audio.paused,
+        muted: audio.muted
+      });
+      try {
+        await audio.play();
+      } catch (error) {
+        console.error("Edge Natural TTS direct HTMLMediaElement.play() rejected.", error);
+        throw error;
+      }
+      logDirect("HTMLMediaElement.play() succeeded");
       if (generation !== this.generation) return;
       const startedAt = root.performance?.now?.() ?? Date.now();
       this.onStart?.(
@@ -617,6 +679,7 @@
     async _synthesizeGroup(generation, group, voiceShortName) {
       const url = await directWebSocketUrl();
       if (generation !== this.generation) return { audioChunks: [], boundaries: [], audioBytes: 0 };
+      logDirect("opening Read Aloud WebSocket", url.replace(/([?&](?:Sec-MS-GEC|TrustedClientToken)=)[^&]+/g, "$1<redacted>"));
 
       return new Promise((resolve, reject) => {
         const socket = new WebSocket(url);
@@ -648,11 +711,16 @@
             finish(new Error("Direct synthesis was canceled."));
             return;
           }
+          logDirect("Read Aloud WebSocket opened");
           const timestamp = dateToString();
           socket.send(buildSpeechConfig(timestamp));
           socket.send(
             buildSsmlRequest(randomHex(), timestamp, voiceShortName, group.text)
           );
+          logDirect("sent synthesis request", {
+            voiceShortName,
+            textBytes: encoder.encode(group.text).length
+          });
         };
 
         socket.onmessage = (event) => {
@@ -666,8 +734,11 @@
               const parsed = parseHeaders(event.data);
               const path = parsed.headers.path;
               if (path === "audio.metadata") {
-                boundaries.push(...parseMetadata(parsed.body));
+                const parsedBoundaries = parseMetadata(parsed.body);
+                boundaries.push(...parsedBoundaries);
+                logDirect("received metadata frame", { boundaries: parsedBoundaries.length });
               } else if (path === "turn.end") {
+                logDirect("received turn.end", { audioBytes, boundaries: boundaries.length });
                 finish();
               }
               return;
@@ -680,13 +751,17 @@
               const copy = parsed.data.slice();
               audioChunks.push(copy);
               audioBytes += copy.length;
+              logDirect("received audio frame", { frameBytes: copy.length, audioBytes });
             }
           } catch (error) {
             finish(error);
           }
         };
 
-        socket.onerror = () => finish(new Error("Read Aloud websocket connection failed."));
+        socket.onerror = (error) => {
+          console.error("Edge Natural TTS Read Aloud WebSocket error.", error);
+          finish(new Error("Read Aloud websocket connection failed."));
+        };
         socket.onclose = () => {
           if (!settled) {
             finish(

@@ -310,6 +310,7 @@
         this.currentSegmentIndex = 0;
         this.stopped = false;
         this.paused = false;
+        this.speech.prepareDirectPlayback?.(this.selectedVoice);
         if (await this.claimAudioOwnership()) {
           this.speakCurrentPosition();
         } else {
@@ -324,6 +325,7 @@
         this.paused = false;
         this.toolbar.setPaused(false);
         this.toolbar.setStatus("Resuming…");
+        this.speech.prepareDirectPlayback?.(this.selectedVoice);
         if (await this.claimAudioOwnership()) {
           this.speakCurrentPosition();
         } else {
