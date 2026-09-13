@@ -75,6 +75,19 @@ Only after browser QA of the exact candidate commit may it be considered for `st
 - Keep Native Messaging requests bounded and explicitly correlated by request/session ID.
 - Treat extension IDs as profile/worktree-specific deployment data. The native-host manifest must authorize the development extension ID used by the development Edge profile.
 
+## Gate 0 observed state
+
+Manual testing in the dedicated development Edge profile established the following:
+
+- The HUD starts normally.
+- Explicitly selected Windows legacy/local voices play successfully.
+- The reader/audio-ownership/background path is therefore functioning for the local backend.
+- Online Natural voices are visible but the direct online backend does not currently produce playback in the fresh development profile.
+- WIN-NATURAL voices are intentionally absent at Gate 0 because the clean reintegration branch does not yet contain Native Messaging integration.
+- The current baseline UI still uses the older two-class `Local Windows` / `Natural / Online` taxonomy. The target taxonomy remains `Windows Legacy` / `Windows Natural` / `Online Natural`; restore that only after the online baseline playback blocker is resolved.
+
+Gate 0 is **not complete** until Online Natural playback works in the development profile. Do not begin WIN-NATURAL integration before that blocker is resolved.
+
 ## Promotion rule
 
 Unit tests, syntax checks, native-helper tests, or agent completion reports do not establish browser correctness. A stage advances only after its required browser behavior has actually been observed in the development Edge profile.
