@@ -18,6 +18,8 @@ The first WIN-NATURAL integration mixed native transport, voice discovery, speec
 
 This branch begins at the exact stable commit. Before feature work, load it in the development Edge profile and verify basic reading and Quit. No WIN-NATURAL code is present yet.
 
+**Status: PASSED.** Browser-verified candidate: `81ef5b5d9ede223be82887e768e069337f1458e0` (`Fix Online Natural playback activation`).
+
 ### Gate 1 — native host transport only
 
 Add the x64 native host and Native Messaging registration/diagnostics without changing the reader, speech-engine inheritance, toolbar, startup path, or voice selection.
@@ -75,18 +77,20 @@ Only after browser QA of the exact candidate commit may it be considered for `st
 - Keep Native Messaging requests bounded and explicitly correlated by request/session ID.
 - Treat extension IDs as profile/worktree-specific deployment data. The native-host manifest must authorize the development extension ID used by the development Edge profile.
 
-## Gate 0 observed state
+## Gate 0 accepted state
 
-Manual testing in the dedicated development Edge profile established the following:
+Manual testing in the dedicated development Edge profile established the following on commit `81ef5b5d9ede223be82887e768e069337f1458e0`:
 
 - The HUD starts normally.
-- Explicitly selected Windows legacy/local voices play successfully.
-- The reader/audio-ownership/background path is therefore functioning for the local backend.
-- Online Natural voices are visible but the direct online backend does not currently produce playback in the fresh development profile.
-- WIN-NATURAL voices are intentionally absent at Gate 0 because the clean reintegration branch does not yet contain Native Messaging integration.
-- The current baseline UI still uses the older two-class `Local Windows` / `Natural / Online` taxonomy. The target taxonomy remains `Windows Legacy` / `Windows Natural` / `Online Natural`; restore that only after the online baseline playback blocker is resolved.
+- Online Natural first playback: PASS.
+- Online Natural second playback: PASS.
+- Stop: PASS.
+- Quit: PASS.
+- Windows Legacy/local playback: PASS.
+- WIN-NATURAL voices remain intentionally absent at Gate 0 because Native Messaging has not yet been reintegrated.
+- The current baseline UI still uses the older two-class `Local Windows` / `Natural / Online` taxonomy. The target taxonomy remains `Windows Legacy` / `Windows Natural` / `Online Natural`; restore that in the catalog-visibility stage rather than mixing it into transport work.
 
-Gate 0 is **not complete** until Online Natural playback works in the development profile. Do not begin WIN-NATURAL integration before that blocker is resolved.
+The development profile showed substantial Online Natural startup latency after pause/stop. This is recorded as a performance concern, not a Gate 0 correctness failure. Do not destabilize the verified direct-online path while integrating WIN-NATURAL.
 
 ## Promotion rule
 
