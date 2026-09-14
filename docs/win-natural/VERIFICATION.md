@@ -384,17 +384,18 @@ after reloading the unpacked development extension:
 7. monotonic timing: YES;
 8. Stop stopped audio: PASS.
 
-The accepted timing contract remains `{ charIndex, charLength, audioMs }`,
-with character offsets relative to the exact synthesis text and `audioMs` in
-SAPI milliseconds. Gate 4A does not implement highlighting, live rate/volume,
-pause/resume changes, or startup-latency optimization.
+The accepted Gate 4A transport contract remains `{ charIndex, charLength,
+audioMs }`, with character offsets relative to the exact synthesis text and
+raw `audioMs` originating from SAPI milliseconds. Gate 4A does not implement
+highlighting, live rate/volume, pause/resume changes, or startup-latency
+optimization.
 
 ### Gate 4B — media-clock highlighting candidate
 
-**Candidate pending human browser QA.** SAPI timing is evidence only; the
+**ACCEPTED.** SAPI timing is boundary evidence only; the
 WIN-NATURAL `HTMLAudioElement.currentTime` is the playback clock. Existing
 reader segments and the existing Highlighter remain presentation authority.
-This candidate maps timing through `payload.starts` and emits existing
+The accepted candidate maps timing through `payload.starts` and emits existing
 `onBoundary` callbacks without changing Zira or Online routing.
 
 Gate 4B timing investigation found that the SAPI `AudioPosition` clock was
@@ -405,6 +406,21 @@ first boundary was `160.25 ms` SAPI versus `261.905 ms` PCM, and the last was
 uses validated PCM-stream timestamps derived from the WAV data offset and
 byte rate for canonical `timing[].audioMs`; raw SAPI values remain diagnostic
 only. The media-clock scheduler and segment mapping are unchanged.
+
+Human browser acceptance on fresh pages for candidate
+`eb9077122b8d18f85bf8dbd092647eeab0b56749`:
+
+1. Microsoft Aria enumerated, played audibly, and diagnostic Stop passed;
+2. timing captured with 6 monotonic boundaries and source `pcm-stream`;
+3. WAV sample rate `22050 Hz`, byte rate `44100 B/s`, PCM duration
+   `2823.537 ms`, and browser `audio.duration` `2823.537 ms`;
+4. canonical first/last timing `261.905 ms` / `2361.179 ms` PCM, versus raw
+   SAPI first/last `160.25 ms` / `2169.333 ms`;
+5. normal-reader WIN-NATURAL highlighting started synchronized, remained
+   synchronized after approximately 15 and 30+ seconds, tracked audible
+   sentence boundaries, and stopped immediately with Stop.
+
+Gate 4B is accepted. Gate 4C live rate/volume work has not started.
 
 ### Purpose
 

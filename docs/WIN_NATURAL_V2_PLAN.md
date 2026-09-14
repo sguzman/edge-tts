@@ -110,7 +110,7 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: IN PROGRESS. Gate 4A is ACCEPTED; Gate 4B is a candidate pending human browser QA.**
+**Status: IN PROGRESS. Gate 4A and Gate 4B are ACCEPTED; Gate 4C has not started.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
@@ -123,19 +123,29 @@ worked. Timing reported `YES` with 6 boundaries, first boundary
 `char 0, len 7, audio 160.25 ms`, last boundary
 `char 39, len 7, audio 2169.333 ms`, and monotonic timing `YES`.
 
-**Gate 4B: candidate / pending human browser QA.** Gate 4B maps the accepted
-SAPI timing records to existing reader segments and emits ordinary reader
-boundaries from the WIN-NATURAL audio element's `currentTime`. It does not
-change the highlighter, live controls, pause/resume, or native startup path.
+**Gate 4B: ACCEPTED.** Gate 4B maps the accepted timing records to existing
+reader segments and emits ordinary reader boundaries from the WIN-NATURAL
+audio element's `currentTime`. Canonical `timing[].audioMs` is derived from
+the rendered PCM stream; raw SAPI `AudioPosition` remains diagnostic only.
+It does not change the highlighter, live controls, pause/resume, or native
+startup path.
 
-Add word-timing synchronization, live playback rate, and volume without resynthesis.
+Gate 4B browser evidence on fresh pages: Microsoft Aria enumerated and played
+audibly; diagnostic Stop worked; timing was captured with 6 monotonic
+boundaries and source `pcm-stream`; WAV PCM duration and browser
+`audio.duration` were both `2823.537 ms`; canonical timing was `261.905 ms`
+first and `2361.179 ms` last. In the normal reader, highlighting remained
+synchronized at the start and after 15 and 30+ seconds, sentence highlighting
+tracked the audible sentence, and Stop halted highlight movement immediately.
 
-Acceptance:
+Gate 4C remains the future live-control work, including rate and volume
+without resynthesis.
+
+Gate 4B acceptance:
 
 - Highlighting follows SAPI timing data.
-- Speed and volume changes are live.
-- Consecutive requests reuse the persistent helper.
-- No orphan audio remains after Stop/Quit.
+- Highlighting follows the actual PCM/browser media timeline.
+- Existing Stop/Quit teardown remains intact.
 
 ### Gate 5 — promotion candidate
 
