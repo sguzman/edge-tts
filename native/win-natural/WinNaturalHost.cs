@@ -18,6 +18,9 @@ internal static class WinNaturalHost
     private sealed record EnumeratorSnapshot(
         [property: JsonPropertyName("exists")] bool Exists,
         [property: JsonPropertyName("values")] Dictionary<string, string?> Values);
+    private sealed record RawRegistryOpen(
+        [property: JsonPropertyName("status")] int Status,
+        [property: JsonPropertyName("statusName")] string StatusName);
 
     private const int MaxMessageBytes = 16 * 1024 * 1024;
     private static readonly object OutputGate = new();
@@ -100,6 +103,8 @@ internal static class WinNaturalHost
                 user = WindowsIdentity.GetCurrent().Name,
                 userSid = WindowsIdentity.GetCurrent().User?.Value,
                 integrityLevel = IntegrityLevel(),
+                token = TokenDiagnostics(),
+                parentProcess = ParentProcessDiagnostics(),
                 is64BitProcess = Environment.Is64BitProcess,
                 osArchitecture = RuntimeInformation.OSArchitecture.ToString(),
                 installedVoiceCount = installed.Count,
@@ -145,7 +150,9 @@ internal static class WinNaturalHost
             narratorVoicePathExists = narratorPath != null && Directory.Exists(narratorPath),
             views = new[] { RegistryView.Registry64, RegistryView.Registry32 }
                 .Select(view => RegistryViewDiagnostics(view))
-                .ToArray()
+                .ToArray(),
+            raw = RawRegistryDiagnostics(sid),
+            summary = RawRegistrySummary(sid)
         };
     }
 
@@ -172,6 +179,143 @@ internal static class WinNaturalHost
             userSapiTokenCount = userTokens.total,
             userLocalTokenCount = userTokens.local
         };
+    }
+
+    private static object RawRegistryDiagnostics(string? sid)
+    {
+        var views = new[] { ("Registry64", 0x0100u), ("Registry32", 0x0200u) }
+            .Select(item => new
+            {
+                view = item.Item1,
+                currentUser = RawOpen(HkeyCurrentUser, AdapterEnumeratorPath, KeyRead | item.Item2),
+                usersSid = sid == null
+                    ? new RawRegistryOpen(-1, "no SID")
+                    : RawOpen(HkeyUsers, $@"{sid}\{AdapterEnumeratorPath}", KeyRead | item.Item2),
+                regOpenCurrentUser = RawOpenCurrentUser(KeyRead | item.Item2)
+            })
+            .ToArray();
+        return new { views };
+    }
+
+    private static string RawRegistrySummary(string? sid)
+    {
+        var parts = new List<string>();
+        foreach (var (label, view) in new[] { ("64", 0x0100u), ("32", 0x0200u) })
+        {
+            var hkcu = RawOpen(HkeyCurrentUser, AdapterEnumeratorPath, KeyRead | view);
+            var users = sid == null
+                ? new RawRegistryOpen(-1, "no SID")
+                : RawOpen(HkeyUsers, $@"{sid}\{AdapterEnumeratorPath}", KeyRead | view);
+            var current = RawOpenCurrentUser(KeyRead | view);
+            parts.Add($"{label}:HKCU={hkcu.StatusName};HKEY_USERS={users.StatusName};RegOpenCurrentUser={current.StatusName}");
+        }
+        return string.Join(" | ", parts);
+    }
+
+    private static RawRegistryOpen RawOpen(IntPtr root, string path, uint access)
+    {
+        var status = RegOpenKeyEx(root, path, 0, access, out var handle);
+        if (status == 0) RegCloseKey(handle);
+        return new RawRegistryOpen(status, Win32Status(status));
+    }
+
+    private static RawRegistryOpen RawOpenCurrentUser(uint access)
+    {
+        var status = RegOpenCurrentUser(access, out var handle);
+        if (status == 0) RegCloseKey(handle);
+        return new RawRegistryOpen(status, Win32Status(status));
+    }
+
+    private static string Win32Status(int status) => status switch
+    {
+        0 => "ERROR_SUCCESS",
+        2 => "ERROR_FILE_NOT_FOUND",
+        3 => "ERROR_PATH_NOT_FOUND",
+        5 => "ERROR_ACCESS_DENIED",
+        6 => "ERROR_INVALID_HANDLE",
+        _ => $"WIN32_{status}"
+    };
+
+    private static object TokenDiagnostics()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var token = identity.Token;
+        var elevationType = TokenUInt32(token, 18);
+        return new
+        {
+            isAppContainer = TokenBool(token, 29),
+            isRestricted = TokenBool(token, 40),
+            elevationType = elevationType switch
+            {
+                1 => "Default",
+                2 => "Full",
+                3 => "Limited",
+                _ => $"Unknown({elevationType})"
+            },
+            virtualizationAllowed = TokenBool(token, 23),
+            virtualizationEnabled = TokenBool(token, 24),
+            packageSid = TokenSid(token, 41),
+            restrictedSids = TokenSidCount(token, 11)
+        };
+    }
+
+    private static bool TokenBool(IntPtr token, int informationClass) => TokenUInt32(token, informationClass) != 0;
+
+    private static uint TokenUInt32(IntPtr token, int informationClass)
+    {
+        GetTokenInformation(token, informationClass, IntPtr.Zero, 0, out var length);
+        if (length < 4) return 0;
+        var buffer = Marshal.AllocHGlobal(length);
+        try
+        {
+            return GetTokenInformation(token, informationClass, buffer, length, out _)
+                ? (uint)Marshal.ReadInt32(buffer)
+                : 0;
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static string? TokenSid(IntPtr token, int informationClass)
+    {
+        GetTokenInformation(token, informationClass, IntPtr.Zero, 0, out var length);
+        if (length <= 0) return null;
+        var buffer = Marshal.AllocHGlobal(length);
+        try
+        {
+            if (!GetTokenInformation(token, informationClass, buffer, length, out _)) return null;
+            var sid = Marshal.ReadIntPtr(buffer);
+            return sid == IntPtr.Zero ? null : new SecurityIdentifier(sid).Value;
+        }
+        catch { return null; }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static int TokenSidCount(IntPtr token, int informationClass)
+    {
+        GetTokenInformation(token, informationClass, IntPtr.Zero, 0, out var length);
+        if (length <= 0) return 0;
+        var buffer = Marshal.AllocHGlobal(length);
+        try
+        {
+            if (!GetTokenInformation(token, informationClass, buffer, length, out _)) return 0;
+            return Marshal.ReadInt32(buffer);
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    private static object ParentProcessDiagnostics()
+    {
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var basic = new ProcessBasicInformation();
+            var status = NtQueryInformationProcess(process.Handle, 0, ref basic, Marshal.SizeOf<ProcessBasicInformation>(), out _);
+            if (status != 0) return new { pid = (int?)null, name = (string?)null, status };
+            var parentPid = basic.InheritedFromUniqueProcessId.ToInt32();
+            using var parent = Process.GetProcessById(parentPid);
+            return new { pid = (int?)parentPid, name = parent.ProcessName, status = 0 };
+        }
+        catch (Exception error) { return new { pid = (int?)null, name = (string?)null, status = error.Message }; }
     }
 
     private static EnumeratorSnapshot ReadEnumerator(RegistryKey? key)
@@ -215,11 +359,40 @@ internal static class WinNaturalHost
     private static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass,
         IntPtr tokenInformation, int tokenInformationLength, out int returnLength);
 
+    [DllImport("advapi32.dll", CharSet = CharSet.Unicode)]
+    private static extern int RegOpenKeyEx(IntPtr hKey, string subKey, uint options, uint samDesired, out IntPtr result);
+
+    [DllImport("advapi32.dll")]
+    private static extern int RegOpenCurrentUser(uint samDesired, out IntPtr result);
+
+    [DllImport("advapi32.dll")]
+    private static extern int RegCloseKey(IntPtr hKey);
+
+    [DllImport("ntdll.dll")]
+    private static extern int NtQueryInformationProcess(IntPtr processHandle, int processInformationClass,
+        ref ProcessBasicInformation processInformation, int processInformationLength, out int returnLength);
+
     [DllImport("advapi32.dll")]
     private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
 
     [DllImport("advapi32.dll")]
     private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthorityIndex);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessBasicInformation
+    {
+        public IntPtr ExitStatus;
+        public IntPtr PebBaseAddress;
+        public IntPtr AffinityMask;
+        public IntPtr BasePriority;
+        public IntPtr UniqueProcessId;
+        public IntPtr InheritedFromUniqueProcessId;
+    }
+
+    private static readonly IntPtr HkeyCurrentUser = new(unchecked((long)0x80000001));
+    private static readonly IntPtr HkeyUsers = new(unchecked((long)0x80000003));
+    private const uint KeyRead = 0x20019;
+    private const string AdapterEnumeratorPath = @"Software\NaturalVoiceSAPIAdapter\Enumerator";
 
     private static string[] FindAdapterPaths(RegistryKey? clsids)
     {
