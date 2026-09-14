@@ -20,6 +20,9 @@ test("diagnostics page is an extension-origin page with no ReaderApp dependency"
   assert.match(html, /id="timing"/);
   assert.match(page, /Timing captured: YES/);
   assert.match(page, /Monotonic timing/);
+  assert.match(page, /WAV sample rate/);
+  assert.match(page, /Browser audio\.duration/);
+  assert.match(html, /id="wave"/);
 });
 
 test("diagnostics page uses the actual Local-* Aria token and owns audio cleanup", () => {
@@ -51,7 +54,11 @@ test("helper synthesis validates the actual Local token and SAPI selection", () 
   assert.match(host, /charIndex/);
   assert.match(host, /charLength/);
   assert.match(host, /audioMs/);
-  assert.match(host, /timing \}/);
+  assert.match(host, /timing,/);
+  assert.match(host, /TryParseWaveDiagnostics/);
+  assert.match(host, /dataChunkOffset/);
+  assert.match(host, /pcmDurationMs/);
+  assert.match(host, /timingDiagnostics/);
 });
 
 test("diagnostic Stop invalidates a late synthesis response and URLs revoke on end", async () => {
@@ -62,6 +69,7 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
     "#speak": { disabled: false, addEventListener(type, handler) { handlers.speak = handler; } },
     "#stop": { addEventListener(type, handler) { handlers.stop = handler; } },
     "#timing": { textContent: "" },
+    "#wave": { textContent: "" },
     "#status": { textContent: "" }
   };
   const audio = {

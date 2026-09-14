@@ -35,6 +35,24 @@ internal static class WinNaturalHost
         [property: JsonPropertyName("charLength")] int CharLength,
         [property: JsonPropertyName("audioMs")] double AudioMs);
 
+    private sealed record TimingObservation(
+        [property: JsonPropertyName("charIndex")] int CharIndex,
+        [property: JsonPropertyName("charLength")] int CharLength,
+        [property: JsonPropertyName("sapiAudioMs")] double SapiAudioMs,
+        [property: JsonPropertyName("streamPosition")] long StreamPosition,
+        [property: JsonPropertyName("streamAudioMs")] double? StreamAudioMs);
+
+    private sealed record WaveDiagnostics(
+        [property: JsonPropertyName("formatTag")] int FormatTag,
+        [property: JsonPropertyName("sampleRate")] long SampleRate,
+        [property: JsonPropertyName("channels")] int Channels,
+        [property: JsonPropertyName("bitsPerSample")] int BitsPerSample,
+        [property: JsonPropertyName("blockAlign")] int BlockAlign,
+        [property: JsonPropertyName("byteRate")] long ByteRate,
+        [property: JsonPropertyName("dataChunkOffset")] long DataChunkOffset,
+        [property: JsonPropertyName("dataBytes")] long DataBytes,
+        [property: JsonPropertyName("pcmDurationMs")] double PcmDurationMs);
+
     private static SpeechSynthesizer GetSynthesizer() => Synthesizer ??= new SpeechSynthesizer();
 
     private static void Send(object message)
@@ -146,6 +164,7 @@ internal static class WinNaturalHost
         using var audio = new MemoryStream();
         synthesizer.SetOutputToWaveStream(audio);
         var timing = new List<TimingBoundary>();
+        var observations = new List<(int CharIndex, int CharLength, double SapiAudioMs, long StreamPosition)>();
         EventHandler<SpeakProgressEventArgs> progressHandler = (_, progress) =>
         {
             var charIndex = progress.CharacterPosition;
@@ -155,6 +174,7 @@ internal static class WinNaturalHost
             if (charIndex < 0 || charLength <= 0 || charIndex > text.Length - charLength ||
                 !double.IsFinite(audioMs) || audioMs < 0 || audioMs < previousAudioMs) return;
             timing.Add(new TimingBoundary(charIndex, charLength, Math.Round(audioMs, 3, MidpointRounding.AwayFromZero)));
+            observations.Add((charIndex, charLength, audioMs, audio.Position));
         };
         synthesizer.SpeakProgress += progressHandler;
         try
@@ -170,6 +190,27 @@ internal static class WinNaturalHost
         if (wav.Length == 0 || wav.Length > MaxSynthesisBytes)
             throw new InvalidOperationException("Native synthesis returned an invalid WAV size.");
 
+        var waveDiagnostics = TryParseWaveDiagnostics(wav, out var waveError);
+        var timingDiagnostics = observations.Select(observation =>
+        {
+            double? streamAudioMs = null;
+            if (waveDiagnostics is not null && waveDiagnostics.ByteRate > 0)
+            {
+                var bytesIntoData = Math.Clamp(
+                    observation.StreamPosition - waveDiagnostics.DataChunkOffset,
+                    0,
+                    waveDiagnostics.DataBytes);
+                streamAudioMs = Math.Round(bytesIntoData * 1000d / waveDiagnostics.ByteRate, 3,
+                    MidpointRounding.AwayFromZero);
+            }
+            return new TimingObservation(
+                observation.CharIndex,
+                observation.CharLength,
+                Math.Round(observation.SapiAudioMs, 3, MidpointRounding.AwayFromZero),
+                observation.StreamPosition,
+                streamAudioMs);
+        }).ToArray();
+
         var chunkCount = (wav.Length + SynthesisChunkBytes - 1) / SynthesisChunkBytes;
         Send(new { type = "synth-start", requestId, voiceId, totalBytes = wav.Length, chunkBytes = SynthesisChunkBytes, chunkCount });
         for (var index = 0; index < chunkCount; index++)
@@ -178,8 +219,85 @@ internal static class WinNaturalHost
             var count = Math.Min(SynthesisChunkBytes, wav.Length - offset);
             Send(new { type = "synth-chunk", requestId, index, data = Convert.ToBase64String(wav, offset, count) });
         }
-        Send(new { type = "synth-end", requestId, totalBytes = wav.Length, chunkCount, timing });
+        Send(new
+        {
+            type = "synth-end",
+            requestId,
+            totalBytes = wav.Length,
+            chunkCount,
+            timing,
+            waveDiagnostics,
+            waveDiagnosticError = waveError,
+            timingDiagnostics
+        });
     }
+
+    private static WaveDiagnostics? TryParseWaveDiagnostics(byte[] wav, out string? error)
+    {
+        try
+        {
+            if (wav.Length < 12 || ReadFourCc(wav, 0) != "RIFF" || ReadFourCc(wav, 8) != "WAVE")
+                throw new InvalidDataException("WAV is missing a RIFF/WAVE header.");
+
+            ushort formatTag = 0;
+            ushort channels = 0;
+            uint sampleRate = 0;
+            uint byteRate = 0;
+            ushort blockAlign = 0;
+            ushort bitsPerSample = 0;
+            long dataOffset = -1;
+            long dataBytes = -1;
+            var offset = 12;
+            while (offset <= wav.Length - 8)
+            {
+                var chunkId = ReadFourCc(wav, offset);
+                var chunkBytes = BinaryPrimitives.ReadUInt32LittleEndian(wav.AsSpan(offset + 4, 4));
+                var chunkData = offset + 8L;
+                var chunkEnd = checked(chunkData + chunkBytes);
+                if (chunkEnd > wav.Length) throw new InvalidDataException("WAV chunk exceeds the stream.");
+                if (chunkId == "fmt ")
+                {
+                    if (chunkBytes < 16) throw new InvalidDataException("WAV fmt chunk is too small.");
+                    formatTag = BinaryPrimitives.ReadUInt16LittleEndian(wav.AsSpan((int)chunkData, 2));
+                    channels = BinaryPrimitives.ReadUInt16LittleEndian(wav.AsSpan((int)chunkData + 2, 2));
+                    sampleRate = BinaryPrimitives.ReadUInt32LittleEndian(wav.AsSpan((int)chunkData + 4, 4));
+                    byteRate = BinaryPrimitives.ReadUInt32LittleEndian(wav.AsSpan((int)chunkData + 8, 4));
+                    blockAlign = BinaryPrimitives.ReadUInt16LittleEndian(wav.AsSpan((int)chunkData + 12, 2));
+                    bitsPerSample = BinaryPrimitives.ReadUInt16LittleEndian(wav.AsSpan((int)chunkData + 14, 2));
+                }
+                else if (chunkId == "data" && dataOffset < 0)
+                {
+                    dataOffset = chunkData;
+                    dataBytes = chunkBytes;
+                }
+                offset = checked((int)(chunkEnd + (chunkBytes & 1)));
+            }
+
+            if (formatTag == 0 || channels == 0 || sampleRate == 0 || byteRate == 0 ||
+                blockAlign == 0 || dataOffset < 0 || dataBytes < 0)
+                throw new InvalidDataException("WAV is missing required fmt/data information.");
+
+            error = null;
+            return new WaveDiagnostics(
+                formatTag,
+                sampleRate,
+                channels,
+                bitsPerSample,
+                blockAlign,
+                byteRate,
+                dataOffset,
+                dataBytes,
+                Math.Round(dataBytes * 1000d / byteRate, 3, MidpointRounding.AwayFromZero));
+        }
+        catch (Exception exception) when (exception is InvalidDataException or OverflowException or ArgumentOutOfRangeException)
+        {
+            error = exception.Message;
+            return null;
+        }
+    }
+
+    private static string ReadFourCc(byte[] bytes, int offset) =>
+        System.Text.Encoding.ASCII.GetString(bytes, offset, 4);
 
     private static Dictionary<string, string?> RelevantEnvironment() => new()
     {

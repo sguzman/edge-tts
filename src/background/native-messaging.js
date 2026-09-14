@@ -147,7 +147,16 @@
               }
               pending.delete(requestId);
               clearTimeout(request.timeout);
-              request.resolve({ type: "synthesize", requestId, wavBase64: base64FromBytes(bytes), totalBytes: request.receivedBytes, timing });
+              request.resolve({
+                type: "synthesize",
+                requestId,
+                wavBase64: base64FromBytes(bytes),
+                totalBytes: request.receivedBytes,
+                timing,
+                waveDiagnostics: message.waveDiagnostics,
+                waveDiagnosticError: message.waveDiagnosticError,
+                timingDiagnostics: message.timingDiagnostics
+              });
               return;
             }
             throw new Error("Unexpected Native Messaging multipart response.");
