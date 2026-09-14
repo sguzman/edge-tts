@@ -18,6 +18,20 @@
     return /\b(natural|online)\b/i.test(voice.name || "");
   }
 
+  function isCatalogOnlyVoice(voice) {
+    return voice?.catalogOnly === true || voice?.__edgeTtsSource === "win-natural";
+  }
+
+  function selectPlayableVoice(voices, savedName) {
+    const playable = (voices || []).filter((voice) => !isCatalogOnlyVoice(voice));
+    return (
+      playable.find((voice) => voice.name === savedName) ||
+      playable.find(isNaturalVoice) ||
+      playable[0] ||
+      null
+    );
+  }
+
   function preferredLanguage(documentLanguage) {
     const candidate = documentLanguage || root.navigator?.language || "en-US";
     return candidate.replace("_", "-");
@@ -596,6 +610,8 @@
     createUtteranceChunks,
     createUtterancePayload,
     isNaturalVoice,
+    isCatalogOnlyVoice,
+    selectPlayableVoice,
     preferredLanguage,
     recoveryKeyForSegment,
     scoreVoice,

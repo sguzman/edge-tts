@@ -24,6 +24,7 @@ const READER_FILES = [
 
 const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
+const nativeMessagingApi = globalThis.EdgeTtsNativeMessaging;
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
@@ -105,6 +106,23 @@ async function getExtensionTtsVoices() {
     extensionId: voice.extensionId || null,
     eventTypes: Array.isArray(voice.eventTypes) ? [...voice.eventTypes] : []
   }));
+}
+
+async function getWinNaturalVoices() {
+  if (!nativeMessagingApi?.createTransport) return [];
+  try {
+    const response = await nativeMessagingApi.createTransport().request("voices");
+    return (Array.isArray(response?.voices) ? response.voices : [])
+      .filter((voice) => String(voice?.id || "").toLowerCase().startsWith("local-"))
+      .map((voice) => ({
+        id: String(voice.id),
+        name: String(voice.name || ""),
+        lang: String(voice.lang || "")
+      }));
+  } catch (error) {
+    console.warn("Edge Natural TTS could not enumerate Windows Natural voices.", error);
+    return [];
+  }
 }
 
 function localTtsEventPayload(event) {
@@ -244,6 +262,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         console.warn("Edge Natural TTS could not enumerate extension TTS voices.", error);
         sendResponse({ voices: [] });
       });
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_VOICES") {
+    void getWinNaturalVoices().then((voices) => sendResponse({ voices }));
     return true;
   }
 

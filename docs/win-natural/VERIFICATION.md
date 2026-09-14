@@ -168,6 +168,28 @@ Selecting Aria does not yet need to produce Windows Natural speech unless Gate 3
 
 Pending.
 
+### Gate 2 implementation notes
+
+The catalog representation preserves the runtime SAPI token and marks the
+entry as catalog-only:
+
+```text
+__edgeTtsSource: win-natural
+nativeVoiceId: Local-NarratorVoices
+catalogOnly: true
+```
+
+The content side requests native voices asynchronously after construction and
+notifies the existing voice-change listeners when the result arrives. The
+background side handles the request in the existing single runtime dispatcher;
+native absence, timeout, or malformed results resolve to an empty list.
+
+The three UI labels are `[WIN-LEGACY]`, `[WIN-NATURAL]`, and `[ONLINE]` under
+the filters `Windows Legacy`, `Windows Natural`, and `Online Natural`.
+Windows Natural options are disabled during Gate 2. Reader selection filters
+catalog-only voices and rejects them again in the local speech engine, so a
+stale saved `Microsoft Aria` setting cannot route through an existing backend.
+
 ## Gate 3 — isolated Windows Natural playback
 
 ### Purpose

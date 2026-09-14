@@ -11,15 +11,23 @@
   }
 })(globalThis, function createVoiceUiApi(root) {
   function voiceClass(voice) {
-    if (voice?.__edgeTtsSource === "chrome-tts") return "local";
-    if (voice?.localService === true) return "local";
-    if (voice?.remote === true || voice?.localService === false) return "natural";
-    if (/\b(natural|online)\b/i.test(String(voice?.name || ""))) return "natural";
-    return "local";
+    if (voice?.__edgeTtsSource === "win-natural") return "win-natural";
+    if (voice?.__edgeTtsSource === "chrome-tts") return "win-legacy";
+    if (voice?.localService === true) return "win-legacy";
+    if (voice?.remote === true || voice?.localService === false) return "online-natural";
+    if (/\b(natural|online)\b/i.test(String(voice?.name || ""))) return "online-natural";
+    return "win-legacy";
   }
 
   function voicePrefix(voice) {
-    return voiceClass(voice) === "natural" ? "[NATURAL]" : "[LOCAL]";
+    switch (voiceClass(voice)) {
+      case "win-natural":
+        return "[WIN-NATURAL]";
+      case "online-natural":
+        return "[ONLINE]";
+      default:
+        return "[WIN-LEGACY]";
+    }
   }
 
   function voiceLabel(voice) {
@@ -28,9 +36,13 @@
   }
 
   function filterVoicesByClass(voices, query, selectedClass = "all") {
-    const normalizedClass = selectedClass === "local" || selectedClass === "natural"
-      ? selectedClass
-      : "all";
+    const normalizedClass = selectedClass === "local"
+      ? "win-legacy"
+      : selectedClass === "natural"
+        ? "online-natural"
+        : ["win-legacy", "win-natural", "online-natural"].includes(selectedClass)
+          ? selectedClass
+          : "all";
     const terms = String(query || "")
       .trim()
       .toLocaleLowerCase()
@@ -73,8 +85,9 @@
             Voice class
             <select data-edge-tts-voice-class aria-label="Filter voice class">
               <option value="all">All voices</option>
-              <option value="local">Local Windows</option>
-              <option value="natural">Natural / Online</option>
+              <option value="win-legacy">Windows Legacy</option>
+              <option value="win-natural">Windows Natural</option>
+              <option value="online-natural">Online Natural</option>
             </select>
           </label>
         `;
@@ -128,6 +141,8 @@
         const option = document.createElement("option");
         option.value = voice.name;
         option.textContent = voiceLabel(voice);
+        option.disabled = voice?.catalogOnly === true;
+        if (option.disabled) option.title = "Catalog only until Windows Natural playback is implemented.";
         option.selected = voice.name === this.selectedVoiceName;
         this.voiceSelect.appendChild(option);
       }

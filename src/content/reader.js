@@ -7,7 +7,12 @@
     Highlighter,
     normalizeColor
   } = extension.Highlighter;
-  const { SpeechEngine, createSpeechBatch, isNaturalVoice } = extension.SpeechEngine;
+  const {
+    SpeechEngine,
+    createSpeechBatch,
+    isNaturalVoice,
+    selectPlayableVoice
+  } = extension.SpeechEngine;
   const { Toolbar } = extension.Toolbar;
 
   const EDITABLE_SELECTOR = [
@@ -433,11 +438,7 @@
       const documentLanguage = document.documentElement.lang || navigator.language;
       const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
       this.voices = voices;
-      this.selectedVoice =
-        voices.find((voice) => voice.name === this.settings.voiceName) ||
-        voices.find(isNaturalVoice) ||
-        voices[0] ||
-        null;
+      this.selectedVoice = selectPlayableVoice(voices, this.settings.voiceName);
 
       if (this.selectedVoice) {
         this.settings.voiceName = this.selectedVoice.name;
@@ -623,7 +624,7 @@
 
     async changeVoice(name) {
       const voice = this.voices.find((candidate) => candidate.name === name);
-      if (!voice) return;
+      if (!voice || isCatalogOnlyVoice(voice)) return;
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
       await this.saveSettings();

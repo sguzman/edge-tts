@@ -158,4 +158,8 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.equal(listenerCount, 1);
   assert.equal(background.slice(openStart).includes("nativeMessaging.diagnostics()"), false);
   assert.equal(background.includes("installDiagnosticsListener"), false);
+  assert.match(background, /EDGE_TTS_WIN_NATURAL_VOICES/);
+  assert.match(background, /createTransport\(\)\.request\("voices"\)/);
+  const startup = fs.readFileSync(path.join(__dirname, "..", "src", "content", "startup-fastpath.js"), "utf8");
+  assert.equal(startup.includes("refreshWinNaturalVoices"), false);
 });

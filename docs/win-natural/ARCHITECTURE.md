@@ -335,6 +335,26 @@ Gate 5: promotion candidate
 
 Each gate is a compatibility firewall. Do not combine future gates because implementation looks easy in isolation.
 
+## 15.1 Gate 2 catalog-only decisions
+
+Gate 2 represents each native voice as a catalog object with the actual token
+preserved separately from its logical identity:
+
+```text
+__edgeTtsSource: "win-natural"
+nativeVoiceId: "Local-NarratorVoices"   # runtime data, never rewritten
+catalogOnly: true
+name: "Microsoft Aria"
+lang: "en-US"
+```
+
+Native enumeration is requested asynchronously through the existing single
+background runtime dispatcher. It is not awaited by reader startup. A native
+failure returns an empty catalog and leaves the existing Online Natural and
+Windows Legacy paths unchanged. Gate 2 UI entries are visibly labeled
+`[WIN-NATURAL]` and disabled; stale saved settings cannot select them, and a
+defense-in-depth playback guard rejects them until Gate 3.
+
 ## 16. Architectural lessons already paid for
 
 The current design is intentionally conservative because the project has already observed all of these failures in practice:

@@ -39,7 +39,7 @@
     };
   }
 
-  function mergeVoiceCatalogs(webVoices, extensionVoices) {
+  function mergeVoiceCatalogs(webVoices, extensionVoices, nativeVoices = []) {
     const merged = [...(webVoices || [])];
     const keys = new Set(merged.map(voiceKey));
     for (const rawVoice of extensionVoices || []) {
@@ -52,11 +52,42 @@
       keys.add(key);
       merged.push(voice);
     }
+    for (const rawVoice of nativeVoices || []) {
+      const voice = rawVoice?.__edgeTtsSource === "win-natural"
+        ? rawVoice
+        : nativeVoiceToCatalogVoice(rawVoice);
+      if (!voice) continue;
+      const key = `win-natural:${voiceKey(voice)}`;
+      if (keys.has(key)) continue;
+      keys.add(key);
+      merged.push(voice);
+    }
     return merged;
   }
 
   function isChromeTtsVoice(voice) {
     return voice?.__edgeTtsSource === "chrome-tts";
+  }
+
+  function nativeVoiceToCatalogVoice(voice) {
+    const nativeVoiceId = String(voice?.id || "").trim();
+    const name = String(voice?.name || "").trim();
+    if (!nativeVoiceId.toLowerCase().startsWith("local-") || !name) return null;
+    return {
+      name,
+      lang: String(voice?.lang || ""),
+      localService: false,
+      remote: false,
+      default: false,
+      voiceURI: `win-natural:${nativeVoiceId}`,
+      __edgeTtsSource: "win-natural",
+      nativeVoiceId,
+      catalogOnly: true
+    };
+  }
+
+  function isWinNaturalVoice(voice) {
+    return voice?.__edgeTtsSource === "win-natural";
   }
 
   function localRequestId(generation, chunkIndex) {
@@ -68,6 +99,8 @@
       LocalTtsSpeechEngine: null,
       chromeVoiceToCatalogVoice,
       isChromeTtsVoice,
+      isWinNaturalVoice,
+      nativeVoiceToCatalogVoice,
       mergeVoiceCatalogs,
       voiceKey
     };
@@ -77,17 +110,25 @@
     constructor(options) {
       super(options);
       this.extensionLocalVoices = [];
+      this.winNaturalVoices = [];
       this.extensionVoiceListeners = new Set();
       this.extensionVoicesLoaded = false;
+      this.winNaturalVoicesLoaded = false;
       this.extensionVoiceRequest = null;
+      this.winNaturalVoiceRequest = null;
       this.localSessionMode = false;
       this.localActive = false;
       this.localRequest = null;
       void this.refreshExtensionVoices();
+      void this.refreshWinNaturalVoices();
     }
 
     getVoices() {
-      return mergeVoiceCatalogs(super.getVoices?.() || [], this.extensionLocalVoices);
+      return mergeVoiceCatalogs(
+        super.getVoices?.() || [],
+        this.extensionLocalVoices,
+        this.winNaturalVoices
+      );
     }
 
     async refreshExtensionVoices() {
@@ -119,10 +160,39 @@
       return this.extensionVoiceRequest;
     }
 
+    async refreshWinNaturalVoices() {
+      if (this.winNaturalVoiceRequest) return this.winNaturalVoiceRequest;
+      if (!root.chrome?.runtime?.sendMessage) return this.winNaturalVoices;
+
+      this.winNaturalVoiceRequest = Promise.resolve(
+        root.chrome.runtime.sendMessage({ type: "EDGE_TTS_WIN_NATURAL_VOICES" })
+      )
+        .then((response) => {
+          this.winNaturalVoices = (response?.voices || [])
+            .map(nativeVoiceToCatalogVoice)
+            .filter(Boolean);
+          this.winNaturalVoicesLoaded = true;
+          for (const listener of this.extensionVoiceListeners) {
+            try {
+              listener(this.getVoices());
+            } catch (_error) {}
+          }
+          return this.winNaturalVoices;
+        })
+        .catch((error) => {
+          console.warn("Edge Natural TTS could not load Windows Natural voices.", error);
+          return this.winNaturalVoices;
+        })
+        .finally(() => {
+          this.winNaturalVoiceRequest = null;
+        });
+      return this.winNaturalVoiceRequest;
+    }
+
     onVoicesChanged(callback) {
       const unsubscribeBase = super.onVoicesChanged?.(callback) || (() => {});
       this.extensionVoiceListeners.add(callback);
-      if (this.extensionVoicesLoaded) {
+      if (this.extensionVoicesLoaded || this.winNaturalVoicesLoaded) {
         root.queueMicrotask?.(() => callback(this.getVoices()));
       }
       return () => {
@@ -187,6 +257,10 @@
     }
 
     speak(block, startSegmentIndex, options = {}) {
+      if (isWinNaturalVoice(options.voice)) {
+        this.onError?.(new Error("Windows Natural voices are catalog-only until Gate 3."));
+        return;
+      }
       if (!isChromeTtsVoice(options.voice)) {
         if (this.localSessionMode) {
           this.generation += 1;
@@ -353,6 +427,8 @@
     LocalTtsSpeechEngine,
     chromeVoiceToCatalogVoice,
     isChromeTtsVoice,
+    isWinNaturalVoice,
+    nativeVoiceToCatalogVoice,
     mergeVoiceCatalogs,
     voiceKey
   };
