@@ -105,6 +105,7 @@
         voices,
         ariaFound: ariaVoice !== null,
         ariaVoice,
+        helperDiagnostics: voiceResponse?.diagnostics || null,
         elapsedMs: Math.max(0, now() - startedAt)
       };
       console.info("Edge Natural TTS Native Messaging diagnostics", result);
