@@ -32,6 +32,7 @@ test("Reader owns Quit directly so no lifecycle subclass can perturb startup", (
   assert.match(readerSource, /onQuit: \(\) => this\.quit\(\)/);
   assert.match(readerSource, /quit\(\) \{/);
   assert.match(readerSource, /this\.stop\(\)/);
+  assert.match(readerSource, /this\.speech\?\.dispose\?\.\(\)/);
   assert.match(readerSource, /this\.unsubscribeVoiceChanges\?\.\(\)/);
   assert.match(readerSource, /this\.toolbar\.destroy\?\.\(\)/);
   assert.match(readerSource, /root\.__EDGE_TTS_READER__\?\.detach\?\.\(this\)/);

@@ -51,17 +51,22 @@ function loadStack({ webAudio = false } = {}) {
       audioContexts.push(this);
     }
     createMediaElementSource(element) {
-      const source = { element, connect() {} };
+      const source = { element, disconnected: false, connect() {}, disconnect() { this.disconnected = true; } };
       this.sources.push(source);
       return source;
     }
     createGain() {
-      const gain = { gain: { value: 1 }, connect() {} };
+      const gain = { gain: { value: 1 }, disconnected: false, connect() {}, disconnect() { this.disconnected = true; } };
       this.gains.push(gain);
       return gain;
     }
     resume() {
       this.state = "running";
+      return Promise.resolve();
+    }
+    close() {
+      this.state = "closed";
+      this.closed = true;
       return Promise.resolve();
     }
   }
@@ -369,6 +374,62 @@ test("native output gain persists across chunks and reset silences the persisten
   assert.equal(api.audioContexts.length, 1);
 });
 
+test("native dispose finalizes old resources while Stop keeps reusable state", async () => {
+  const api = loadStack({ webAudio: true });
+  const first = new api.LocalTtsSpeechEngine({});
+  first.speak({ segments: [{ text: "first native", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  const oldAudio = api.audio;
+  const oldContext = api.audioContexts[0];
+  const oldSource = oldContext.sources[0];
+  const oldGain = oldContext.gains[0];
+  first.cancel();
+  assert.equal(first.winNaturalAudio, oldAudio, "Stop/cancel must preserve same-engine reusable audio");
+  assert.equal(api.audioContexts.length, 1);
+
+  first.speak({ segments: [{ text: "restart native", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  first.dispose();
+  first.dispose();
+  assert.equal(first.disposed, true);
+  assert.equal(first.winNaturalAudio, null);
+  assert.equal(oldAudio.paused, true);
+  assert.equal(oldAudio.src, "");
+  assert.equal(oldAudio.onended, null);
+  assert.equal(oldAudio.onerror, null);
+  assert.equal(oldContext.closed, true);
+  assert.equal(oldSource.disconnected, true);
+  assert.equal(oldGain.disconnected, true);
+  assert.equal(api.frames.size, 0);
+
+  const oldDocumentCreate = global.document.createElement;
+  global.document.createElement = () => {
+    const next = Object.assign({}, api.audio, {
+      paused: true,
+      currentTime: 0,
+      playbackRate: 1,
+      volume: 1,
+      src: "",
+      onended: null,
+      onerror: null
+    });
+    next.play = api.audio.play;
+    next.pause = api.audio.pause;
+    next.load = api.audio.load;
+    next.removeAttribute = api.audio.removeAttribute;
+    return next;
+  };
+  const second = new api.LocalTtsSpeechEngine({});
+  assert.equal(second.prepareDirectPlayback(nativeVoice(api)), true);
+  assert.notEqual(second.winNaturalAudio, oldAudio);
+  assert.equal(api.audioContexts.length, 2);
+  assert.notEqual(api.audioContexts[1], oldContext);
+  global.document.createElement = oldDocumentCreate;
+});
+
 test("native controls delegate to Online and do not intercept Legacy routing", () => {
   const api = loadStack({ webAudio: true });
   const engine = new api.LocalTtsSpeechEngine({});
@@ -396,6 +457,11 @@ test("native controls delegate to Online and do not intercept Legacy routing", (
   legacyEngine.speak({ segments: [{ text: "legacy", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: legacy });
   assert.equal(legacyEngine.setPlaybackRate(1.5), false);
   assert.equal(legacyEngine.setOutputVolume(1.8), false);
+
+  const directContext = engine.directAudioContext;
+  engine.dispose();
+  assert.equal(engine.directAudio, null);
+  assert.equal(directContext.closed, true);
 });
 
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {

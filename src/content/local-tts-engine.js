@@ -175,6 +175,7 @@
       this.winNaturalObjectUrl = "";
       this.winNaturalPlaybackRate = 1;
       this.winNaturalOutputGain = 1;
+      this.disposed = false;
       void this.refreshExtensionVoices();
       void this.refreshWinNaturalVoices();
     }
@@ -338,6 +339,32 @@
       this.winNaturalObjectUrl = "";
     }
 
+    _disposeInheritedDirectAudio() {
+      this._clearBoundaryClock?.();
+      this._closeSocket?.();
+      if (this.directAudio) {
+        try {
+          this.directAudio.pause?.();
+          this.directAudio.removeAttribute?.("src");
+          this.directAudio.load?.();
+        } catch (_error) {}
+        this.directAudio.onended = null;
+        this.directAudio.onerror = null;
+      }
+      this._revokeObjectUrl?.();
+      try { this.directMediaSource?.disconnect?.(); } catch (_error) {}
+      try { this.directGain?.disconnect?.(); } catch (_error) {}
+      try { void this.directAudioContext?.close?.(); } catch (_error) {}
+      this.directAudio = null;
+      this.directAudioContext = null;
+      this.directMediaSource = null;
+      this.directGain = null;
+      this.directBoundaries = [];
+      this.directBoundaryIndex = 0;
+      this.directSessionMode = false;
+      this.directActive = false;
+    }
+
     _clearWinNaturalBoundaryClock() {
       if (this.winNaturalBoundaryFrame !== null) {
         root.cancelAnimationFrame?.(this.winNaturalBoundaryFrame);
@@ -410,6 +437,7 @@
     }
 
     setPlaybackRate(rate) {
+      if (this.disposed) return false;
       if (!this.winNaturalSessionMode) {
         return super.setPlaybackRate?.(rate) ?? false;
       }
@@ -422,6 +450,7 @@
     }
 
     setOutputVolume(volume) {
+      if (this.disposed) return false;
       if (!this.winNaturalSessionMode) {
         return super.setOutputVolume?.(volume) ?? false;
       }
@@ -489,6 +518,7 @@
     }
 
     speak(block, startSegmentIndex, options = {}) {
+      if (this.disposed) return;
       if (isWinNaturalVoice(options.voice)) {
         this._speakWinNatural(block, startSegmentIndex, options);
         return;
@@ -530,6 +560,7 @@
     }
 
     prepareDirectPlayback(voice) {
+      if (this.disposed) return false;
       if (!isWinNaturalVoice(voice)) {
         return super.prepareDirectPlayback?.(voice) || false;
       }
@@ -587,7 +618,30 @@
       return bytes;
     }
 
+    dispose() {
+      if (this.disposed) return;
+      this.generation += 1;
+      this._resetWinNaturalState({ keepMode: false, reason: "dispose" });
+      if (this.winNaturalAudio) {
+        this.winNaturalAudio.onended = null;
+        this.winNaturalAudio.onerror = null;
+      }
+      try { this.winNaturalMediaSource?.disconnect?.(); } catch (_error) {}
+      try { this.winNaturalGain?.disconnect?.(); } catch (_error) {}
+      try { void this.winNaturalAudioContext?.close?.(); } catch (_error) {}
+      this.winNaturalAudio = null;
+      this.winNaturalAudioContext = null;
+      this.winNaturalMediaSource = null;
+      this.winNaturalGain = null;
+      this.winNaturalAudioGraphAttempted = false;
+      this.winNaturalSessionMode = false;
+      this.winNaturalActive = false;
+      this._disposeInheritedDirectAudio();
+      this.disposed = true;
+    }
+
     _speakWinNatural(block, startSegmentIndex, options) {
+      if (this.disposed) return;
       const chunks = createUtteranceChunks(block, startSegmentIndex, options?.chunkOptions);
       if (!chunks.length) {
         this.onEnd?.();

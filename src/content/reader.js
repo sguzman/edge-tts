@@ -179,6 +179,7 @@
       // Run the normal stop chain first. ReliableReader/FailSafeReader override
       // stop(), so this also clears every speech/recovery/liveness timer.
       this.stop();
+      this.speech?.dispose?.();
       this.enabled = false;
       this.syncPageClickListener();
 
