@@ -166,7 +166,7 @@ Selecting Aria does not yet need to produce Windows Natural speech unless Gate 3
 
 ### Status
 
-Pending.
+**PASSED.** Browser-accepted implementation is `c5b3675` plus the selection-identity fix `18faba1`.
 
 ### Gate 2 implementation notes
 
@@ -189,6 +189,44 @@ the filters `Windows Legacy`, `Windows Natural`, and `Online Natural`.
 Windows Natural options are disabled during Gate 2. Reader selection filters
 catalog-only voices and rejects them again in the local speech engine, so a
 stale saved `Microsoft Aria` setting cannot route through an existing backend.
+
+Gate 2 initially failed browser QA because toolbar/persistence identity used
+`voice.name`. Online Aria and Windows Natural Aria therefore collided, and
+asynchronous catalog refresh could replace a selected Windows Legacy voice.
+The corrective commit `18faba1` introduced backend-aware selection keys,
+persisted `voiceKey`, preserved an already selected playable voice across
+refreshes, and kept catalog-only voices excluded from playback.
+
+### Accepted browser evidence
+
+```text
+Three-way filter: PASS
+[WIN-NATURAL] Microsoft Aria visible: PASS
+[WIN-NATURAL] Microsoft Aria disabled/catalog-only: PASS
+Windows Legacy Zira playback: PASS
+Windows Legacy Mark playback: PASS
+Online Aria playback: PASS
+Switch Online -> Zira and retain Zira: PASS
+Stop: PASS
+Quit: PASS
+```
+
+### Separate Online-catalog observation
+
+During Gate 2 QA, some other Online voices such as William failed while Aria
+worked. Diagnostic comparison found no Gate 2 synthesis regression:
+
+```text
+direct-audio-engine.js unchanged from pre-Gate-2 baseline
+reliable-speech-engine.js unchanged from pre-Gate-2 baseline
+William satisfies the same existing isDirectVoice() heuristic
+William maps to en-US-WilliamNeural via the unchanged mapper
+pre-Gate-2 manual QA did not establish William playback
+```
+
+The UI's `[ONLINE]` classification is broader than the direct backend's notion
+of known routability, so broader Online voice capability remains a separate
+backlog concern. Do not expand Gate 2 to rewrite the Online synthesis backend.
 
 ## Gate 3 — isolated Windows Natural playback
 
@@ -357,5 +395,19 @@ Accepted after:
 5. temporary Edge direct-launch policy was removed;
 6. Aria still enumerated under normal Edge launch;
 7. Online Natural, Windows Legacy, Stop, and Quit all passed manual regression QA.
+
+### Gate 2
+
+Accepted after:
+
+1. Windows Natural appeared as a distinct catalog class;
+2. Aria appeared with the real `Local-NarratorVoices` token and remained disabled/catalog-only;
+3. an initial name-collision regression was found in browser QA;
+4. backend-aware selection keys replaced name-only identity;
+5. Zira and Mark playback worked again;
+6. Online Aria playback worked;
+7. switching back to Zira retained and played Zira correctly;
+8. Stop and Quit passed;
+9. non-Aria Online failures were diagnosed as not demonstrably introduced by Gate 2 and were kept out of Gate 2 scope.
 
 Future gates should append similarly explicit acceptance histories rather than overwriting earlier evidence.
