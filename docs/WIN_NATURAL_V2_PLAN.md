@@ -110,7 +110,7 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: IN PROGRESS. Gate 4A is ACCEPTED; Gate 4B has not started.**
+**Status: IN PROGRESS. Gate 4A is ACCEPTED; Gate 4B is a candidate pending human browser QA.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
