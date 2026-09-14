@@ -110,6 +110,19 @@ test("normal-reader native tracing covers synthesis, media, and reset stages wit
   assert.match(localSource, /if \(!isWinNaturalVoice\(voice\)\)/);
 });
 
+test("native reader accepts the large flattened response payload returned by background synthesis", () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  const totalBytes = 5537520;
+  const wavBase64 = Buffer.alloc(totalBytes, 0x52).toString("base64");
+  const response = { accepted: true, wavBase64, totalBytes };
+
+  assert.equal(response.accepted, true);
+  assert.equal(response.wavBase64.length, 7383360);
+  assert.equal(engine._nativeBytesFromBase64(response.wavBase64).length, totalBytes);
+  assert.throws(() => engine._nativeBytesFromBase64("not-base64"), /invalid WAV data/);
+});
+
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
   const api = loadStack();
   const engine = new api.LocalTtsSpeechEngine({});

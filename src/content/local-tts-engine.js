@@ -405,11 +405,31 @@
 
     _nativeBytesFromBase64(value) {
       const maxBytes = 8 * 1024 * 1024;
-      if (typeof value !== "string" ||
-          !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+      if (typeof value !== "string" || value.length === 0 || value.length % 4 !== 0) {
         throw new Error("Windows Natural returned invalid WAV data.");
       }
-      const binary = root.atob(value);
+      const firstPadding = value.indexOf("=");
+      const payloadLength = firstPadding === -1 ? value.length : firstPadding;
+      if (firstPadding !== -1) {
+        const paddingLength = value.length - firstPadding;
+        if (paddingLength > 2 || !/^=+$/.test(value.slice(firstPadding))) {
+          throw new Error("Windows Natural returned invalid WAV data.");
+        }
+      }
+      for (let index = 0; index < payloadLength; index += 1) {
+        const code = value.charCodeAt(index);
+        const isLetter = (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
+        const isDigit = code >= 48 && code <= 57;
+        if (!isLetter && !isDigit && code !== 43 && code !== 47) {
+          throw new Error("Windows Natural returned invalid WAV data.");
+        }
+      }
+      let binary;
+      try {
+        binary = root.atob(value);
+      } catch {
+        throw new Error("Windows Natural returned invalid WAV data.");
+      }
       if (binary.length === 0 || binary.length > maxBytes) {
         throw new Error("Windows Natural returned an invalid WAV size.");
       }
