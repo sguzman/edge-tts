@@ -16,6 +16,11 @@
   <h1>Windows Natural diagnostic</h1>
   <p id="connection">Connecting…</p>
   <ul id="voices"><li>Loading voices…</li></ul>
+  <label for="probe">Probe text:</label>
+  <select id="probe">
+    <option value="short">Short (~80 chars)</option>
+    <option value="normal">Normal first chunk (~900 chars)</option>
+  </select>
   <button id="speak" type="button" disabled>Speak Aria diagnostic</button>
   <button id="stop" type="button">Stop</button>
   <p id="timing" role="status">Timing captured: NO</p>

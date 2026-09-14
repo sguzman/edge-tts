@@ -27,6 +27,9 @@ test("diagnostics page is an extension-origin page with no ReaderApp dependency"
   assert.match(page, /Browser audio\.duration/);
   assert.match(html, /id="wave"/);
   assert.match(html, /id="latency"/);
+  assert.match(html, /value="normal"/);
+  assert.match(page, /probeTexts/);
+  assert.match(page, /slice\(0, 900\)/);
   assert.match(page, /Latency diagnostics/);
   assert.match(page, /Native port/);
   assert.match(page, /currentTime > 0/);
@@ -39,7 +42,7 @@ test("diagnostics page uses the actual Local-* Aria token and owns audio cleanup
   assert.match(page, /audio\.pause\(\)/);
   assert.match(page, /URL\.revokeObjectURL/);
   assert.match(page, /requestGeneration !== generation/);
-  assert.match(page, /Windows Natural diagnostic playback is working\./);
+  assert.match(page, /Windows Natural latency probe is working locally\./);
 });
 
 test("helper synthesis validates the actual Local token and SAPI selection", () => {

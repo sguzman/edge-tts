@@ -1,6 +1,7 @@
 (() => {
   const connection = document.querySelector("#connection");
   const voices = document.querySelector("#voices");
+  const probeSelect = document.querySelector("#probe");
   const speakButton = document.querySelector("#speak");
   const stopButton = document.querySelector("#stop");
   const timingStatus = document.querySelector("#timing");
@@ -15,6 +16,11 @@
   let generation = 0;
   let lastWaveResponse = null;
   const now = () => globalThis.performance?.now?.() ?? Date.now();
+  const probeTexts = {
+    short: "Windows Natural latency probe is working locally.",
+    normal: ("Windows Natural latency probe sentence. This deterministic normal first-chunk " +
+      "workload measures the complete synthesis path before browser playback begins. ").repeat(20).slice(0, 900)
+  };
 
   audio.onloadedmetadata = () => {
     if (lastWaveResponse) renderWaveDiagnostics(lastWaveResponse);
@@ -200,7 +206,7 @@
       const response = await chrome.runtime.sendMessage({
         type: "EDGE_TTS_WIN_NATURAL_SYNTHESIZE",
         voiceId: ariaVoice.id,
-        text: "Windows Natural diagnostic playback is working."
+        text: probeTexts[probeSelect?.value] || probeTexts.short
       });
       const responseReceivedAt = now();
       if (!response?.accepted) throw new Error(response?.error || "Background synthesis failed.");
