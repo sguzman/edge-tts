@@ -244,16 +244,12 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.equal(startup.includes("refreshWinNaturalVoices"), false);
 });
 
-test("Gate 3A remains outside normal reader injection and playback files", () => {
+test("Gate 3C keeps native playback isolated to the existing local engine and watchdog boundary", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   assert.equal(background.includes("win-natural-speech-engine.js"), false);
   for (const file of [
     "reader.js",
-    "reliable-reader.js",
-    "failsafe-reader.js",
     "direct-audio-engine.js",
-    "local-tts-engine.js",
-    "speech-engine.js",
     "reliable-speech-engine.js",
     "voice-ui.js",
     "toolbar.js",
@@ -265,6 +261,14 @@ test("Gate 3A remains outside normal reader injection and playback files", () =>
     const baseline = require("node:child_process").execFileSync("git", ["show", `8c4025e:src/content/${file}`], { encoding: "utf8" });
     assert.equal(current, baseline, `${file} must remain Gate-2 identical`);
   }
+  const local = fs.readFileSync(path.join(__dirname, "..", "src", "content", "local-tts-engine.js"), "utf8");
+  assert.match(local, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
+  const speechEngine = fs.readFileSync(path.join(__dirname, "..", "src", "content", "speech-engine.js"), "utf8");
+  assert.match(speechEngine, /return voice\?\.catalogOnly === true;/);
+  const reliableReader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "reliable-reader.js"), "utf8");
+  assert.match(reliableReader, /ownsCompletionWithoutBoundaries/);
+  const failsafeReader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "failsafe-reader.js"), "utf8");
+  assert.match(failsafeReader, /ownsCompletionWithoutBoundaries/);
 });
 
 test("Gate 3B diagnostics are background-owned and extension-page synthesis needs no tab", () => {

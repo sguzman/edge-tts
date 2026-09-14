@@ -330,8 +330,33 @@ integration gate.
 
 ## Gate 3C — minimal normal-reader WIN-NATURAL routing
 
-Pending. This gate is the first point at which a native voice may be routed from
-the normal reader, and must be designed from the accepted Gate 2 baseline.
+The Gate 3C candidate makes the enumerated WIN-NATURAL voice selectable and
+routes it through the existing `LocalTtsSpeechEngine` rather than adding
+another speech-engine wrapper:
+
+```text
+LocalTtsSpeechEngine
+  -> chrome.runtime.sendMessage
+  -> background-owned Native Messaging transport
+  -> x64 helper / SAPI
+  -> bounded WAV response
+  -> page-owned HTMLAudioElement
+```
+
+Native playback has separate session/audio/object-URL state from Chrome TTS and
+the Online direct MP3 backend. Switching backends clears the native state
+before delegating to the existing route. Native Stop, Pause/cancel, Quit,
+preemption, and voice changes invalidate generations and clean up audio and
+object URLs. The existing reader owns audio leasing and normal batch
+progression.
+
+Gate 3C deliberately does not provide native word boundaries, live native rate
+control, or warm-latency optimization. The native session explicitly owns
+completion without boundaries, so the ReliableReader and failsafe liveness
+watchdogs do not retry healthy native audio; those watchdogs remain active for
+the backends they protect. Gate 4 owns timing, highlighting, and live controls.
+
+**Candidate pending human browser acceptance.**
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
@@ -508,5 +533,15 @@ Accepted after human browser QA confirmed:
 6. WIN-NATURAL remained visible but disabled/catalog-only.
 
 Gate 3C was not started.
+
+### Gate 3C
+
+Candidate prepared; human browser acceptance pending. Automated coverage
+exercises native routing through the stacked local/direct speech engine,
+exact-token synthesis requests, generation-safe Stop cleanup, backend
+switching, single completion, and the boundaryless-completion watchdog
+exemption. Normal reader integration is limited to the existing local engine,
+the catalog-playability classification, and the narrowly scoped watchdog
+capability.
 
 Future gates should append similarly explicit acceptance histories rather than overwriting earlier evidence.

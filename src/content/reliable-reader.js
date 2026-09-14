@@ -161,7 +161,10 @@
       // accepting an utterance without producing audio/boundaries; applying it
       // while an MP3 is legitimately being synthesized would cancel slow but
       // healthy direct requests and recreate the old Start/Retry loop.
-      if (this.speech?.directSessionMode) {
+      if (
+        this.speech?.directSessionMode ||
+        this.speech?.ownsCompletionWithoutBoundaries?.() === true
+      ) {
         return;
       }
 

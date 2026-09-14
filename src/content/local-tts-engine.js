@@ -82,7 +82,7 @@
       voiceURI: `win-natural:${nativeVoiceId}`,
       __edgeTtsSource: "win-natural",
       nativeVoiceId,
-      catalogOnly: true
+      catalogOnly: false
     };
   }
 
@@ -119,6 +119,11 @@
       this.localSessionMode = false;
       this.localActive = false;
       this.localRequest = null;
+      this.winNaturalSessionMode = false;
+      this.winNaturalActive = false;
+      this.winNaturalRequest = null;
+      this.winNaturalAudio = null;
+      this.winNaturalObjectUrl = "";
       void this.refreshExtensionVoices();
       void this.refreshWinNaturalVoices();
     }
@@ -228,7 +233,55 @@
       if (!keepMode) this.localSessionMode = false;
     }
 
+    _ensureWinNaturalAudio() {
+      if (this.winNaturalAudio) return this.winNaturalAudio;
+      const audio = root.document?.createElement?.("audio") ||
+        (typeof root.Audio === "function" ? new root.Audio() : null);
+      if (!audio) return null;
+      audio.preload = "auto";
+      this.winNaturalAudio = audio;
+      return audio;
+    }
+
+    _revokeWinNaturalObjectUrl() {
+      if (!this.winNaturalObjectUrl) return;
+      try { root.URL?.revokeObjectURL?.(this.winNaturalObjectUrl); } catch (_error) {}
+      this.winNaturalObjectUrl = "";
+    }
+
+    _resetWinNaturalState({ keepMode = true } = {}) {
+      const audio = this.winNaturalAudio;
+      if (audio) {
+        try {
+          audio.pause?.();
+          audio.removeAttribute?.("src");
+          audio.load?.();
+        } catch (_error) {}
+      }
+      this._revokeWinNaturalObjectUrl();
+      this.winNaturalRequest = null;
+      this.winNaturalActive = false;
+      if (!keepMode) this.winNaturalSessionMode = false;
+      this.clearPlaybackTimers?.();
+      this.currentUtterance = null;
+      this.currentChunks = [];
+      this.currentChunkIndex = -1;
+      this.currentChunkBoundaryIndex = -1;
+      this.currentOptions = null;
+      this.recoveryKey = "";
+      this.recoveryAttempts = 0;
+    }
+
+    ownsCompletionWithoutBoundaries() {
+      return Boolean(this.winNaturalSessionMode && this.winNaturalRequest);
+    }
+
     cancel() {
+      if (this.winNaturalSessionMode) {
+        this.generation += 1;
+        this._resetWinNaturalState({ keepMode: true });
+        return;
+      }
       if (this.localSessionMode) {
         this.generation += 1;
         this._resetLocalState({ keepMode: true, stopTransport: true });
@@ -238,6 +291,11 @@
     }
 
     abandon() {
+      if (this.winNaturalSessionMode) {
+        this.generation += 1;
+        this._resetWinNaturalState({ keepMode: true });
+        return;
+      }
       if (this.localSessionMode) {
         this.generation += 1;
         this._resetLocalState({ keepMode: true, stopTransport: true });
@@ -246,20 +304,41 @@
       return super.abandon?.();
     }
 
+    pause() {
+      if (this.winNaturalSessionMode) {
+        this.cancel();
+        return;
+      }
+      return super.pause?.();
+    }
+
+    resume() {
+      if (this.winNaturalSessionMode) return;
+      return super.resume?.();
+    }
+
     isPaused() {
+      if (this.winNaturalSessionMode) return Boolean(this.winNaturalAudio?.paused && !this.winNaturalActive);
       if (this.localSessionMode) return false;
       return super.isPaused?.() || false;
     }
 
     isSpeaking() {
+      if (this.winNaturalSessionMode) {
+        return Boolean(this.winNaturalActive && this.winNaturalAudio && !this.winNaturalAudio.paused);
+      }
       if (this.localSessionMode) return this.localActive;
       return super.isSpeaking?.() || false;
     }
 
     speak(block, startSegmentIndex, options = {}) {
       if (isWinNaturalVoice(options.voice)) {
-        this.onError?.(new Error("Windows Natural voices are catalog-only until Gate 3."));
+        this._speakWinNatural(block, startSegmentIndex, options);
         return;
+      }
+      if (this.winNaturalSessionMode) {
+        this.generation += 1;
+        this._resetWinNaturalState({ keepMode: false });
       }
       if (!isChromeTtsVoice(options.voice)) {
         if (this.localSessionMode) {
@@ -291,6 +370,160 @@
       this.currentOptions = options;
       this.requestedAt = root.performance?.now?.() ?? Date.now();
       this._speakLocalChunk(generation);
+    }
+
+    prepareDirectPlayback(voice) {
+      if (!isWinNaturalVoice(voice)) {
+        return super.prepareDirectPlayback?.(voice) || false;
+      }
+      const audio = this._ensureWinNaturalAudio();
+      if (!audio) return false;
+      audio.muted = true;
+      audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
+      audio.load?.();
+      const unlockPromise = audio.play?.();
+      unlockPromise?.catch?.(() => {});
+      audio.pause?.();
+      audio.muted = false;
+      audio.removeAttribute?.("src");
+      audio.load?.();
+      return true;
+    }
+
+    _nativeBytesFromBase64(value) {
+      const maxBytes = 8 * 1024 * 1024;
+      if (typeof value !== "string" ||
+          !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+        throw new Error("Windows Natural returned invalid WAV data.");
+      }
+      const binary = root.atob(value);
+      if (binary.length === 0 || binary.length > maxBytes) {
+        throw new Error("Windows Natural returned an invalid WAV size.");
+      }
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return bytes;
+    }
+
+    _speakWinNatural(block, startSegmentIndex, options) {
+      const chunks = createUtteranceChunks(block, startSegmentIndex, options?.chunkOptions);
+      if (!chunks.length) {
+        this.onEnd?.();
+        return;
+      }
+
+      if (this.winNaturalSessionMode) {
+        this.cancel();
+      } else if (this.localSessionMode) {
+        this.cancel();
+      } else if (this.directSessionMode || typeof this.synth?.cancel === "function") {
+        super.cancel?.();
+      }
+
+      this.winNaturalSessionMode = true;
+      this.winNaturalActive = false;
+      this.generation += 1;
+      const generation = this.generation;
+      this.currentChunks = chunks;
+      this.currentChunkIndex = 0;
+      this.currentChunkBoundaryIndex = -1;
+      this.currentOptions = options;
+      this.requestedAt = root.performance?.now?.() ?? Date.now();
+      this._speakWinNaturalChunk(generation);
+    }
+
+    _speakWinNaturalChunk(generation) {
+      if (generation !== this.generation || !this.winNaturalSessionMode) return;
+      const payload = this.currentChunks?.[this.currentChunkIndex];
+      if (!payload) {
+        this._resetWinNaturalState({ keepMode: true });
+        this.onEnd?.();
+        return;
+      }
+
+      const voiceId = this.currentOptions?.voice?.nativeVoiceId;
+      const requestId = localRequestId(generation, this.currentChunkIndex);
+      this.winNaturalRequest = { requestId, generation, chunkIndex: this.currentChunkIndex, payload };
+      Promise.resolve(root.chrome?.runtime?.sendMessage?.({
+        type: "EDGE_TTS_WIN_NATURAL_SYNTHESIZE",
+        requestId,
+        voiceId,
+        text: payload.text
+      }))
+        .then((response) => this._handleWinNaturalResponse(generation, requestId, response))
+        .catch((error) => {
+          if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+          this._resetWinNaturalState({ keepMode: true });
+          this.onError?.(new Error(`Windows Natural synthesis failed: ${error?.message || String(error)}`));
+        });
+    }
+
+    async _handleWinNaturalResponse(generation, requestId, response) {
+      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) {
+        return;
+      }
+      if (!response?.accepted) throw new Error(response?.error || "Windows Natural synthesis was refused.");
+      if (response.totalBytes !== undefined && Number(response.totalBytes) < 1) {
+        throw new Error("Windows Natural returned an invalid byte count.");
+      }
+      let bytes;
+      try {
+        bytes = this._nativeBytesFromBase64(response.wavBase64);
+      } catch (error) {
+        this._resetWinNaturalState({ keepMode: true });
+        this.onError?.(error);
+        return;
+      }
+      if (response.totalBytes !== undefined && Number(response.totalBytes) !== bytes.length) {
+        this._resetWinNaturalState({ keepMode: true });
+        this.onError?.(new Error("Windows Natural returned a WAV size mismatch."));
+        return;
+      }
+      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+
+      const audio = this._ensureWinNaturalAudio();
+      if (!audio) {
+        this._resetWinNaturalState({ keepMode: true });
+        this.onError?.(new Error("Windows Natural audio is unavailable."));
+        return;
+      }
+      this._revokeWinNaturalObjectUrl();
+      this.winNaturalObjectUrl = root.URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+      audio.src = this.winNaturalObjectUrl;
+      audio.onended = () => {
+        if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+        this.winNaturalActive = false;
+        this.winNaturalRequest = null;
+        this._revokeWinNaturalObjectUrl();
+        this.currentChunkIndex += 1;
+        if (this.currentChunkIndex >= this.currentChunks.length) {
+          this.currentChunks = [];
+          this.currentChunkIndex = -1;
+          this.currentOptions = null;
+          this.onEnd?.();
+        } else {
+          root.setTimeout(() => this._speakWinNaturalChunk(this.generation), 0);
+        }
+      };
+      audio.onerror = () => {
+        if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+        this.generation += 1;
+        this._resetWinNaturalState({ keepMode: true });
+        this.onError?.(new Error("Windows Natural audio playback failed."));
+      };
+      try {
+        await audio.play();
+      } catch (error) {
+        if (generation !== this.generation) return;
+        this._resetWinNaturalState({ keepMode: true });
+        this.onError?.(new Error(`Windows Natural audio playback failed: ${error?.message || String(error)}`));
+        return;
+      }
+      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+      this.winNaturalActive = true;
+      const payload = this.winNaturalRequest.payload;
+      const startedAt = root.performance?.now?.() ?? Date.now();
+      this.onStart?.(payload.segments?.[0], Math.max(0, startedAt - this.requestedAt));
     }
 
     _speakLocalChunk(generation) {

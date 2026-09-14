@@ -509,3 +509,31 @@ unpacked extension. The diagnostics page reported
 and Stop worked. A fresh normal reader page preserved audible Windows Legacy
 Zira and Online Aria, while WIN-NATURAL remained visible but
 disabled/catalog-only. Gate 3C was deliberately not started.
+
+## Gate 3C candidate: minimal normal-reader native routing
+
+Gate 3C integrates Windows Natural into the existing `LocalTtsSpeechEngine`.
+It does not add another wrapper to the speech-engine inheritance chain. The
+normal reader sends the exact `nativeVoiceId` and batch text through the
+accepted Gate 3B background request path; the service worker remains the sole
+Native Messaging owner. The page-side local engine reconstructs the bounded
+WAV, owns its HTMLAudioElement and object URL, and reports start/end through
+the existing reader callbacks.
+
+Native state is separate from Chrome TTS and Online direct MP3 state. Backend
+switches clear native audio, pending generation, and object URLs before
+delegating to the existing Windows Legacy or Online route. Stop, destructive
+Pause/resume, Quit, and audio-owner preemption therefore invalidate pending
+native responses and cannot leave native audio playing.
+
+Gate 3C has no native word boundaries, native live speed control, or warm
+performance optimization. A native request advertises completion ownership
+without boundaries; ReliableReader and the failsafe liveness watchdog skip
+their legacy no-boundary retry/continuation timers only for that active native
+session. Ordinary Web Speech and direct Online safeguards remain enabled.
+Gate 4 owns native timing/highlighting and live controls.
+
+The Gate 3C candidate is pending fresh-page human browser QA. Preserve the
+fresh-page rule above after every extension reload: verify Zira and Online Aria
+first, then selectable/audible Windows Natural Aria, backend switching,
+Stop/Pause/Quit, and finally the background-owned diagnostics page.

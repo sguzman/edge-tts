@@ -131,3 +131,21 @@ test("final batch finishes the document instead of scheduling another batch", ()
   assert.equal(app.finished, true);
   assert.equal(app.baseSpeakCalls, 0);
 });
+
+test("native completion ownership disables the legacy no-boundary retry watchdog", () => {
+  const app = new ReliableReaderApp();
+  app.speech = {
+    ownsCompletionWithoutBoundaries: () => true,
+    cancel: () => { throw new Error("native watchdog must not cancel"); }
+  };
+  app.speakCurrentPosition();
+  assert.equal(app.batchStartWatchdog, null);
+});
+
+test("legacy no-boundary watchdog remains armed for ordinary speech", () => {
+  const app = new ReliableReaderApp();
+  app.speech = { ownsCompletionWithoutBoundaries: () => false, cancel: () => {} };
+  app.speakCurrentPosition();
+  assert.notEqual(app.batchStartWatchdog, null);
+  app.stop();
+});

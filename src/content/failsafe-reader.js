@@ -217,7 +217,10 @@
       // the reader-level 'no playback progress' timer until the MP3 is actually
       // playing; otherwise a healthy but slow synthesis/download can be killed
       // by a watchdog designed for Web Speech's dead-utterance failure mode.
-      if (this.speech?.directSessionMode && !this.speech?.isSpeaking?.()) {
+      if (
+        (this.speech?.directSessionMode && !this.speech?.isSpeaking?.()) ||
+        this.speech?.ownsCompletionWithoutBoundaries?.() === true
+      ) {
         return;
       }
 
