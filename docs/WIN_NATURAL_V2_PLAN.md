@@ -2,6 +2,15 @@
 
 This branch starts from the browser-verified `stable` runtime and is the clean reintegration line for Windows Natural voices.
 
+For the complete operational and historical record, see the Windows Natural dossier:
+
+- [`win-natural/README.md`](win-natural/README.md) — documentation hub and current state.
+- [`win-natural/SETUP.md`](win-natural/SETUP.md) — reproducible machine/browser setup.
+- [`win-natural/ARCHITECTURE.md`](win-natural/ARCHITECTURE.md) — backend boundaries and invariants.
+- [`win-natural/FORENSICS.md`](win-natural/FORENSICS.md) — full investigation history and falsified hypotheses.
+- [`win-natural/TROUBLESHOOTING.md`](win-natural/TROUBLESHOOTING.md) — symptom-driven recovery.
+- [`win-natural/VERIFICATION.md`](win-natural/VERIFICATION.md) — gate acceptance matrix and browser evidence.
+
 ## Non-negotiable invariant
 
 Existing reading behavior is the control. Every integration stage must preserve the previously working online/direct and Windows-local reader behavior before the next stage begins.
