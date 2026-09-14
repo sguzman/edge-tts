@@ -14,6 +14,7 @@ const {
   mergeVoiceCatalogs,
   nativeVoiceToCatalogVoice
 } = require("../src/content/local-tts-engine.js");
+const { selectPlayableVoice, voiceSelectionKey } = speechApi;
 
 test("native voice conversion preserves the actual Local-* token and marks it catalog-only", () => {
   const voice = nativeVoiceToCatalogVoice({
@@ -79,6 +80,76 @@ test("stale saved Microsoft Aria cannot select a catalog-only voice", () => {
   ];
   const selected = speechApi.selectPlayableVoice(voices, "Microsoft Aria");
   assert.equal(selected.name, "Microsoft David");
+});
+
+test("legacy Zira remains selected when the native catalog refreshes", () => {
+  const zira = { name: "Microsoft Zira", lang: "en-US", localService: true };
+  const refreshed = [
+    zira,
+    { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true },
+    nativeVoiceToCatalogVoice({ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" })
+  ];
+  assert.equal(
+    selectPlayableVoice(refreshed, zira.name, voiceSelectionKey(zira)),
+    zira
+  );
+});
+
+test("legacy Mark remains selected after asynchronous native arrival", () => {
+  const mark = {
+    name: "Microsoft Mark",
+    lang: "en-US",
+    __edgeTtsSource: "chrome-tts",
+    chromeVoiceName: "Microsoft Mark",
+    localService: true
+  };
+  const refreshed = [
+    mark,
+    nativeVoiceToCatalogVoice({ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" })
+  ];
+  assert.equal(
+    selectPlayableVoice(refreshed, mark.name, voiceSelectionKey(mark)),
+    mark
+  );
+});
+
+test("the selected Online voice survives native catalog arrival", () => {
+  const online = {
+    name: "Microsoft Aria Online (Natural)",
+    lang: "en-US",
+    remote: true,
+    voiceURI: "https://speech.platform.bing.com/aria"
+  };
+  const refreshed = [
+    online,
+    nativeVoiceToCatalogVoice({ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" })
+  ];
+  assert.equal(
+    selectPlayableVoice(refreshed, online.name, voiceSelectionKey(online)),
+    online
+  );
+});
+
+test("Online Aria and Windows Natural Aria have distinct selection identities", () => {
+  const online = { name: "Microsoft Aria", lang: "en-US", remote: true };
+  const native = nativeVoiceToCatalogVoice({
+    id: "Local-NarratorVoices",
+    name: "Microsoft Aria",
+    lang: "en-US"
+  });
+  assert.notEqual(voiceSelectionKey(online), voiceSelectionKey(native));
+  assert.equal(selectPlayableVoice([online, native], "Microsoft Aria", voiceSelectionKey(online)), online);
+  assert.notEqual(selectPlayableVoice([online, native], "Microsoft Aria", voiceSelectionKey(native)), native);
+});
+
+test("catalog-only Aria stays out of the active selection during refresh", () => {
+  const native = nativeVoiceToCatalogVoice({
+    id: "Local-NarratorVoices",
+    name: "Microsoft Aria",
+    lang: "en-US"
+  });
+  const david = { name: "Microsoft David", lang: "en-US", localService: true };
+  assert.equal(selectPlayableVoice([native, david], native.name, voiceSelectionKey(native)), david);
 });
 
 test("catalog-only Windows Natural voices cannot fall through to playback", () => {

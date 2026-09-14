@@ -22,6 +22,11 @@
     });
   }
 
+  function voiceSelectionKey(voice) {
+    return extension.SpeechEngine?.voiceSelectionKey?.(voice) ||
+      `${voice?.name || ""}\u0000${voice?.lang || ""}`;
+  }
+
   class Toolbar {
     constructor(handlers) {
       this.handlers = handlers;
@@ -34,7 +39,7 @@
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
       this.voices = [];
-      this.selectedVoiceName = "";
+      this.selectedVoiceKey = "";
       this.rateInput = null;
       this.rateValue = null;
       this.batchCharsInput = null;
@@ -157,8 +162,8 @@
       this.quitButton.addEventListener("click", () => this.handlers.onQuit?.());
       this.voiceSelect.addEventListener("change", () => {
         if (this.voiceSelect.value) {
-          this.selectedVoiceName = this.voiceSelect.value;
-          this.handlers.onVoice(this.selectedVoiceName);
+          this.selectedVoiceKey = this.voiceSelect.value;
+          this.handlers.onVoice(this.selectedVoiceKey);
         }
       });
       this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
@@ -264,9 +269,9 @@
       this.batchCharsValue.value = String(numeric);
     }
 
-    setVoices(voices, selectedName) {
+    setVoices(voices, selectedKey) {
       this.voices = [...voices];
-      this.selectedVoiceName = selectedName || "";
+      this.selectedVoiceKey = selectedKey || "";
       this.renderVoiceOptions();
     }
 
@@ -276,7 +281,7 @@
       const query = this.voiceFilterInput?.value || "";
       const filteredVoices = filterVoices(this.voices, query);
       const selectedIsVisible = filteredVoices.some(
-        (voice) => voice.name === this.selectedVoiceName
+        (voice) => voiceSelectionKey(voice) === this.selectedVoiceKey
       );
 
       this.voiceSelect.replaceChildren();
@@ -299,9 +304,9 @@
 
       for (const voice of filteredVoices) {
         const option = document.createElement("option");
-        option.value = voice.name;
+        option.value = voiceSelectionKey(voice);
         option.textContent = `${voice.name} — ${voice.lang}`;
-        option.selected = voice.name === this.selectedVoiceName;
+        option.selected = voiceSelectionKey(voice) === this.selectedVoiceKey;
         this.voiceSelect.appendChild(option);
       }
 

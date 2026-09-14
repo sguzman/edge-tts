@@ -22,9 +22,23 @@
     return voice?.catalogOnly === true || voice?.__edgeTtsSource === "win-natural";
   }
 
-  function selectPlayableVoice(voices, savedName) {
+  function voiceSelectionKey(voice) {
+    if (!voice) return "";
+    const name = String(voice.name || "").trim();
+    const lang = String(voice.lang || "").trim().toLowerCase();
+    if (voice.__edgeTtsSource === "win-natural") {
+      return `win-natural:${voice.nativeVoiceId || voice.voiceURI || name}|${lang}`;
+    }
+    if (voice.__edgeTtsSource === "chrome-tts" || voice.localService === true) {
+      return `win-legacy:${voice.chromeVoiceName || voice.voiceURI || name}|${lang}`;
+    }
+    return `online-natural:${voice.voiceURI || name}|${lang}`;
+  }
+
+  function selectPlayableVoice(voices, savedName, savedKey = "") {
     const playable = (voices || []).filter((voice) => !isCatalogOnlyVoice(voice));
     return (
+      playable.find((voice) => savedKey && voiceSelectionKey(voice) === savedKey) ||
       playable.find((voice) => voice.name === savedName) ||
       playable.find(isNaturalVoice) ||
       playable[0] ||
@@ -611,6 +625,7 @@
     createUtterancePayload,
     isNaturalVoice,
     isCatalogOnlyVoice,
+    voiceSelectionKey,
     selectPlayableVoice,
     preferredLanguage,
     recoveryKeyForSegment,

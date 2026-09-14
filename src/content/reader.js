@@ -10,8 +10,10 @@
   const {
     SpeechEngine,
     createSpeechBatch,
+    isCatalogOnlyVoice,
     isNaturalVoice,
-    selectPlayableVoice
+    selectPlayableVoice,
+    voiceSelectionKey
   } = extension.SpeechEngine;
   const { Toolbar } = extension.Toolbar;
 
@@ -39,6 +41,7 @@
     settingsVersion: 2,
     rate: 1,
     voiceName: "",
+    voiceKey: "",
     minBatchChars: DEFAULT_BATCH_CHARS,
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
@@ -437,14 +440,19 @@
     refreshVoices() {
       const documentLanguage = document.documentElement.lang || navigator.language;
       const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
+      const currentKey = voiceSelectionKey(this.selectedVoice) || this.settings.voiceKey;
       this.voices = voices;
-      this.selectedVoice = selectPlayableVoice(voices, this.settings.voiceName);
+      this.selectedVoice =
+        voices.find((voice) =>
+          !isCatalogOnlyVoice(voice) && currentKey && voiceSelectionKey(voice) === currentKey
+        ) || selectPlayableVoice(voices, this.settings.voiceName, this.settings.voiceKey);
 
       if (this.selectedVoice) {
         this.settings.voiceName = this.selectedVoice.name;
+        this.settings.voiceKey = voiceSelectionKey(this.selectedVoice);
       }
 
-      this.toolbar.setVoices(voices, this.settings.voiceName);
+      this.toolbar.setVoices(voices, this.settings.voiceKey);
       this.toolbar.setRate(this.settings.rate);
     }
 
@@ -622,11 +630,13 @@
       return null;
     }
 
-    async changeVoice(name) {
-      const voice = this.voices.find((candidate) => candidate.name === name);
+    async changeVoice(selectionKey) {
+      const voice = this.voices.find((candidate) => voiceSelectionKey(candidate) === selectionKey) ||
+        this.voices.find((candidate) => candidate.name === selectionKey);
       if (!voice || isCatalogOnlyVoice(voice)) return;
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
+      this.settings.voiceKey = voiceSelectionKey(voice);
       await this.saveSettings();
       if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
@@ -693,6 +703,7 @@
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
           voiceName: stored.voiceName || "",
+          voiceKey: stored.voiceKey || "",
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),

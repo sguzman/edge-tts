@@ -35,6 +35,11 @@
     return `${voicePrefix(voice)} ${voice?.name || "Unnamed voice"}${locale}`;
   }
 
+  function voiceSelectionKey(voice) {
+    return root.EdgeTtsExtension?.SpeechEngine?.voiceSelectionKey?.(voice) ||
+      `${voice?.name || ""}\u0000${voice?.lang || ""}`;
+  }
+
   function filterVoicesByClass(voices, query, selectedClass = "all") {
     const normalizedClass = selectedClass === "local"
       ? "win-legacy"
@@ -117,7 +122,7 @@
         this.voiceClassFilter || "all"
       );
       const selectedIsVisible = filteredVoices.some(
-        (voice) => voice.name === this.selectedVoiceName
+        (voice) => voiceSelectionKey(voice) === this.selectedVoiceKey
       );
 
       this.voiceSelect.replaceChildren();
@@ -139,11 +144,11 @@
 
       for (const voice of filteredVoices) {
         const option = document.createElement("option");
-        option.value = voice.name;
+        option.value = voiceSelectionKey(voice);
         option.textContent = voiceLabel(voice);
         option.disabled = voice?.catalogOnly === true;
         if (option.disabled) option.title = "Catalog only until Windows Natural playback is implemented.";
-        option.selected = voice.name === this.selectedVoiceName;
+        option.selected = voiceSelectionKey(voice) === this.selectedVoiceKey;
         this.voiceSelect.appendChild(option);
       }
 
