@@ -43,7 +43,8 @@ As of the completion of Gate 1 on the `development/win-natural-v2` line:
 - no Edge enterprise policy is required for the working solution;
 - the stable reader remains isolated on the `stable` branch/worktree and is not modified during development.
 
-Gate 2 and later are intentionally documented as incomplete until they pass their own browser acceptance steps. When the integration is finished, this dossier should be updated rather than replaced.
+Gate 3C is now accepted on fresh-page browser QA. Gate 4 remains unstarted and
+owns native timing/highlighting, live controls, and performance work.
 
 ## The short version of the hard part
 
@@ -81,6 +82,10 @@ The following rules are not optional implementation preferences:
 - The actual adapter token ID is transport data, not canonical product identity.
 - Stable remains a separately loaded, browser-verified runtime. Experimental integration happens on development branches/worktrees and is promoted only after explicit manual browser acceptance.
 - Automated tests are necessary but cannot substitute for Edge runtime verification.
+
+Gate 3C deliberately leaves three limitations for Gate 4/backlog: native
+startup/synthesis latency, native word/sentence highlight synchronization, and
+intra-sentence Pause/Resume position fidelity.
 
 ## Updating this dossier
 

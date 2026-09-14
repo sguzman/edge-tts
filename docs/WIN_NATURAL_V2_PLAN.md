@@ -96,6 +96,18 @@ Acceptance:
 - Stop and Quit terminate native playback.
 - Existing ONLINE and WIN-LEGACY playback are unchanged.
 
+**Status: PASSED.** Gate 3C was accepted by human browser QA on fresh pages.
+
+Accepted behavior:
+
+- Windows Natural Microsoft Aria speaks through the normal reader.
+- Sustained native playback progresses without repeated batches or ghost audio.
+- Native Stop, Pause, Resume, Quit, and backend switching work.
+- Windows Legacy Zira and Online Aria remain audible and routable.
+
+Deferred to Gate 4/backlog: native startup latency, native word/sentence
+highlight synchronization, and precise intra-sentence Pause/Resume position.
+
 ### Gate 4 — highlighting and controls
 
 Add word-timing synchronization, live playback rate, and volume without resynthesis.

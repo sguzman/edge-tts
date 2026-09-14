@@ -533,7 +533,13 @@ their legacy no-boundary retry/continuation timers only for that active native
 session. Ordinary Web Speech and direct Online safeguards remain enabled.
 Gate 4 owns native timing/highlighting and live controls.
 
-The Gate 3C candidate is pending fresh-page human browser QA. Preserve the
-fresh-page rule above after every extension reload: verify Zira and Online Aria
-first, then selectable/audible Windows Natural Aria, backend switching,
-Stop/Pause/Quit, and finally the background-owned diagnostics page.
+Gate 3C was accepted by human browser QA on fresh pages. Windows Legacy Zira,
+Online Aria, and selectable WIN-NATURAL Microsoft Aria were audible; sustained
+native playback progressed without repeated batches; native Stop, Pause,
+Resume, Quit, and all backend switches passed; and no ghost audio remained.
+
+The following remain deliberately deferred to Gate 4/backlog: native
+startup/synthesis latency, native word/sentence highlight synchronization, and
+intra-sentence Pause/Resume position fidelity. Preserve the fresh-page rule
+after every extension reload, but do not treat these known limitations as Gate
+3C failures.

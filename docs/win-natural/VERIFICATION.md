@@ -356,7 +356,14 @@ completion without boundaries, so the ReliableReader and failsafe liveness
 watchdogs do not retry healthy native audio; those watchdogs remain active for
 the backends they protect. Gate 4 owns timing, highlighting, and live controls.
 
-**Candidate pending human browser acceptance.**
+**ACCEPTED.** Fresh-page human browser QA confirmed Windows Legacy Zira,
+Online Aria, and WIN-NATURAL Microsoft Aria playback; sustained native
+progression; native Stop/Pause/Resume/Quit; and clean switching among all three
+backends without repeated batches or ghost audio.
+
+Deferred limitations, not Gate 3C blockers: native startup/synthesis latency,
+native word/sentence highlight synchronization, and Pause/Resume restarting at
+the current sentence instead of preserving an intra-sentence audio position.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
@@ -536,12 +543,21 @@ Gate 3C was not started.
 
 ### Gate 3C
 
-Candidate prepared; human browser acceptance pending. Automated coverage
-exercises native routing through the stacked local/direct speech engine,
-exact-token synthesis requests, generation-safe Stop cleanup, backend
-switching, single completion, and the boundaryless-completion watchdog
-exemption. Normal reader integration is limited to the existing local engine,
-the catalog-playability classification, and the narrowly scoped watchdog
-capability.
+Accepted after fresh-page human browser QA confirmed:
+
+1. Windows Legacy Zira playback;
+2. Online Aria playback and highlighting;
+3. selectable and audible WIN-NATURAL Microsoft Aria;
+4. sustained native progression without repeated sentence/chunk loops;
+5. native Stop, Pause, Resume, and Quit;
+6. clean switching among WIN-NATURAL, Windows Legacy, and Online Natural;
+7. no overlapping or ghost audio.
+
+Automated coverage exercises native routing through the stacked local/direct
+speech engine, exact-token synthesis requests, large-response validation,
+generation-safe Stop cleanup, backend switching, single completion, and the
+boundaryless-completion watchdog exemption. Native latency, native timing/
+highlight synchronization, and intra-sentence Pause/Resume fidelity remain
+explicit Gate 4/backlog work.
 
 Future gates should append similarly explicit acceptance histories rather than overwriting earlier evidence.
