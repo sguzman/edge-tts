@@ -20,7 +20,10 @@ test("diagnostics page is an extension-origin page with no ReaderApp dependency"
   assert.match(html, /id="timing"/);
   assert.match(page, /Timing captured: YES/);
   assert.match(page, /Monotonic timing/);
+  assert.match(page, /Timing source: pcm-stream/);
   assert.match(page, /WAV sample rate/);
+  assert.match(page, /Canonical first/);
+  assert.match(page, /Raw SAPI first/);
   assert.match(page, /Browser audio\.duration/);
   assert.match(html, /id="wave"/);
 });
@@ -54,11 +57,28 @@ test("helper synthesis validates the actual Local token and SAPI selection", () 
   assert.match(host, /charIndex/);
   assert.match(host, /charLength/);
   assert.match(host, /audioMs/);
-  assert.match(host, /timing,/);
+  assert.match(host, /timing = canonicalTiming/);
   assert.match(host, /TryParseWaveDiagnostics/);
   assert.match(host, /dataChunkOffset/);
   assert.match(host, /pcmDurationMs/);
   assert.match(host, /timingDiagnostics/);
+  assert.match(host, /observation\.StreamPosition - waveDiagnostics\.DataChunkOffset/);
+  assert.match(host, /canonicalTiming/);
+  assert.match(host, /timing = canonicalTiming/);
+  assert.match(host, /streamAudioMs > waveDiagnostics\.PcmDurationMs/);
+});
+
+test("PCM stream timing uses the WAV byte clock and contains invalid positions", () => {
+  const derive = (streamPosition, dataOffset, byteRate, dataBytes) => {
+    const bytesIntoData = streamPosition - dataOffset;
+    if (!Number.isFinite(bytesIntoData) || bytesIntoData < 0 || bytesIntoData > dataBytes) return null;
+    return bytesIntoData * 1000 / byteRate;
+  };
+  assert.equal(derive(44 + 11550, 44, 44100, 200000), 261.9047619047619);
+  assert.equal(derive(44 + 104100, 44, 44100, 200000), 2360.5442176870747);
+  assert.equal(derive(43, 44, 44100, 200000), null);
+  assert.equal(derive(44 + 200001, 44, 44100, 200000), null);
+  assert.notEqual(derive(44 + 104100, 44, 44100, 200000), 2169.333);
 });
 
 test("diagnostic Stop invalidates a late synthesis response and URLs revoke on end", async () => {

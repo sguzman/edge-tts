@@ -397,6 +397,15 @@ reader segments and the existing Highlighter remain presentation authority.
 This candidate maps timing through `payload.starts` and emits existing
 `onBoundary` callbacks without changing Zira or Online routing.
 
+Gate 4B timing investigation found that the SAPI `AudioPosition` clock was
+not the rendered-media clock. Fresh diagnostics measured a 22050 Hz WAV with
+PCM duration `2823.537 ms`, exactly matching browser `audio.duration`; the
+first boundary was `160.25 ms` SAPI versus `261.905 ms` PCM, and the last was
+`2169.333 ms` SAPI versus `2361.179 ms` PCM. The correction candidate now
+uses validated PCM-stream timestamps derived from the WAV data offset and
+byte rate for canonical `timing[].audioMs`; raw SAPI values remain diagnostic
+only. The media-clock scheduler and segment mapping are unchanged.
+
 ### Purpose
 
 Complete the high-quality user experience around the Windows Natural backend.

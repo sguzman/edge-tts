@@ -196,12 +196,13 @@ internal static class WinNaturalHost
             double? streamAudioMs = null;
             if (waveDiagnostics is not null && waveDiagnostics.ByteRate > 0)
             {
-                var bytesIntoData = Math.Clamp(
-                    observation.StreamPosition - waveDiagnostics.DataChunkOffset,
-                    0,
-                    waveDiagnostics.DataBytes);
-                streamAudioMs = Math.Round(bytesIntoData * 1000d / waveDiagnostics.ByteRate, 3,
-                    MidpointRounding.AwayFromZero);
+                var bytesIntoData = observation.StreamPosition - waveDiagnostics.DataChunkOffset;
+                var dataEnd = waveDiagnostics.DataChunkOffset + waveDiagnostics.DataBytes;
+                if (bytesIntoData >= 0 && observation.StreamPosition <= dataEnd)
+                {
+                    streamAudioMs = Math.Round(bytesIntoData * 1000d / waveDiagnostics.ByteRate, 3,
+                        MidpointRounding.AwayFromZero);
+                }
             }
             return new TimingObservation(
                 observation.CharIndex,
@@ -210,6 +211,24 @@ internal static class WinNaturalHost
                 observation.StreamPosition,
                 streamAudioMs);
         }).ToArray();
+
+        var canonicalTiming = new List<TimingBoundary>();
+        var previousStreamPosition = -1L;
+        var previousStreamAudioMs = 0d;
+        foreach (var observation in timingDiagnostics)
+        {
+            if (waveDiagnostics is null || observation.StreamAudioMs is not double streamAudioMs ||
+                !double.IsFinite(streamAudioMs) || streamAudioMs < previousStreamAudioMs ||
+                observation.StreamPosition < previousStreamPosition ||
+                streamAudioMs > waveDiagnostics.PcmDurationMs)
+                continue;
+            canonicalTiming.Add(new TimingBoundary(
+                observation.CharIndex,
+                observation.CharLength,
+                streamAudioMs));
+            previousStreamPosition = observation.StreamPosition;
+            previousStreamAudioMs = streamAudioMs;
+        }
 
         var chunkCount = (wav.Length + SynthesisChunkBytes - 1) / SynthesisChunkBytes;
         Send(new { type = "synth-start", requestId, voiceId, totalBytes = wav.Length, chunkBytes = SynthesisChunkBytes, chunkCount });
@@ -225,7 +244,7 @@ internal static class WinNaturalHost
             requestId,
             totalBytes = wav.Length,
             chunkCount,
-            timing,
+            timing = canonicalTiming,
             waveDiagnostics,
             waveDiagnosticError = waveError,
             timingDiagnostics

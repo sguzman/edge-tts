@@ -107,13 +107,17 @@
     const browserDuration = Number.isFinite(Number(audio.duration)) && Number(audio.duration) >= 0
       ? Math.round(Number(audio.duration) * 1000 * 1000) / 1000
       : "pending";
-    waveStatus.textContent = `WAV sample rate: ${wave.sampleRate} Hz\n` +
+    const canonical = Array.isArray(response.timing) ? response.timing : [];
+    waveStatus.textContent = `Timing source: pcm-stream\n` +
+      `WAV sample rate: ${wave.sampleRate} Hz\n` +
       `WAV byte rate: ${wave.byteRate} B/s\n` +
       `WAV PCM duration: ${wave.pcmDurationMs} ms\n` +
       `Browser audio.duration: ${browserDuration} ms\n` +
-      `Timing first: ${observations[0]?.sapiAudioMs ?? "n/a"} ms SAPI / ${observations[0]?.streamAudioMs ?? "n/a"} ms stream\n` +
-      `Timing last: ${observations.at(-1)?.sapiAudioMs ?? "n/a"} ms SAPI / ${observations.at(-1)?.streamAudioMs ?? "n/a"} ms stream\n` +
-      `SAPI → stream ratio (last comparable): ${ratio === null ? "n/a" : ratio.toFixed(4)}`;
+      `Canonical first: ${canonical[0]?.audioMs ?? "n/a"} ms PCM\n` +
+      `Canonical last: ${canonical.at(-1)?.audioMs ?? "n/a"} ms PCM\n` +
+      `Raw SAPI first: ${observations[0]?.sapiAudioMs ?? "n/a"} ms\n` +
+      `Raw SAPI last: ${observations.at(-1)?.sapiAudioMs ?? "n/a"} ms\n` +
+      `Raw SAPI → PCM ratio (last comparable): ${ratio === null ? "n/a" : ratio.toFixed(4)}`;
   }
 
   async function loadDiagnostics() {
