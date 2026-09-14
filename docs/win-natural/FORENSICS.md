@@ -484,3 +484,11 @@ Gate 3A proves only the diagnostic-page path: HTMLAudioElement unlock,
 Native Messaging, SAPI token validation, in-memory WAV synthesis, multipart
 transport, and page-owned playback. It must not alter normal reader injection,
 catalog selection, audio ownership, or any existing playback backend.
+
+Gate 3A was accepted by human browser QA on a fresh diagnostics page and a fresh
+normal reader page. The diagnostic page reported protocol 1/x64, enumerated
+`Local-NarratorVoices / Microsoft Aria`, played audible local Aria speech, and
+stopped immediately. The fresh reader page preserved audible Windows Legacy Zira
+and Online Aria, with WIN-NATURAL still visible but disabled/catalog-only.
+Online William remained non-audible as the previously known Online voice issue;
+that observation was not attributed to Gate 3A.

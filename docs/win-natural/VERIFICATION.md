@@ -290,8 +290,14 @@ late synthesis response cannot restart playback after Stop
 
 ### Status
 
-Implementation pending human browser acceptance. Gate 3A is not passed until
-the human hears the fixed diagnostic phrase from the isolated page.
+**PASSED.** Human browser acceptance confirmed the isolated page connects with
+protocol 1/x64, enumerates `Local-NarratorVoices / Microsoft Aria`, produces
+audible local Aria speech, and stops immediately. A fresh normal reader page
+also preserved audible Windows Legacy Zira and Online Aria playback while
+WIN-NATURAL remained visible but disabled/catalog-only.
+
+Online William remained non-audible, consistent with the previously known
+Online voice limitation and not attributable to Gate 3A.
 
 ## Gate 3B — background-owned native synthesis outside ReaderApp
 
@@ -452,5 +458,17 @@ Accepted after:
 7. switching back to Zira retained and played Zira correctly;
 8. Stop and Quit passed;
 9. non-Aria Online failures were diagnosed as not demonstrably introduced by Gate 2 and were kept out of Gate 2 scope.
+
+### Gate 3A
+
+Accepted after human browser QA confirmed:
+
+1. the isolated diagnostics page connected with protocol 1 and x64 helper;
+2. Microsoft Aria enumerated as `Local-NarratorVoices`;
+3. the diagnostic phrase played audibly through local Aria;
+4. diagnostic Stop worked immediately;
+5. a fresh normal reader page preserved Windows Legacy Zira and Online Aria;
+6. WIN-NATURAL remained visible but disabled/catalog-only;
+7. Online William's known limitation was not treated as a Gate 3A regression.
 
 Future gates should append similarly explicit acceptance histories rather than overwriting earlier evidence.
