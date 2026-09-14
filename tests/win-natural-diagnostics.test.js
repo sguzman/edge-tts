@@ -26,6 +26,10 @@ test("diagnostics page is an extension-origin page with no ReaderApp dependency"
   assert.match(page, /Raw SAPI first/);
   assert.match(page, /Browser audio\.duration/);
   assert.match(html, /id="wave"/);
+  assert.match(html, /id="latency"/);
+  assert.match(page, /Latency diagnostics/);
+  assert.match(page, /Native port/);
+  assert.match(page, /currentTime > 0/);
 });
 
 test("diagnostics page uses the actual Local-* Aria token and owns audio cleanup", () => {
@@ -53,6 +57,10 @@ test("helper synthesis validates the actual Local token and SAPI selection", () 
   assert.match(host, /SpeakProgressEventArgs/);
   assert.match(host, /synthesizer\.SpeakProgress \+= progressHandler/);
   assert.match(host, /synthesizer\.SpeakProgress -= progressHandler/);
+  assert.match(host, /SynthesisLatencyDiagnostics/);
+  assert.match(host, /getInstalledVoicesMs/);
+  assert.match(host, /synthesisRealtimeFactor/);
+  assert.match(host, /latencyDiagnostics/);
   assert.match(host, /finally/);
   assert.match(host, /charIndex/);
   assert.match(host, /charLength/);
@@ -90,6 +98,7 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
     "#stop": { addEventListener(type, handler) { handlers.stop = handler; } },
     "#timing": { textContent: "" },
     "#wave": { textContent: "" },
+    "#latency": { textContent: "" },
     "#status": { textContent: "" }
   };
   const audio = {

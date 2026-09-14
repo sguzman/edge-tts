@@ -112,6 +112,7 @@
                 throw new Error("Invalid native synthesis chunk count.");
               }
               request.started = true;
+              request.nativeStartAt = now();
               request.totalBytes = totalBytes;
               request.chunkCount = chunkCount;
               return;
@@ -123,6 +124,7 @@
                 throw new Error("Native synthesis chunks arrived out of order.");
               }
               const bytes = bytesFromBase64(message.data);
+              if (request.firstChunkAt === 0) request.firstChunkAt = now();
               request.receivedBytes += bytes.length;
               if (request.receivedBytes > request.totalBytes || request.receivedBytes > MAX_SYNTHESIS_BYTES) {
                 throw new Error("Native synthesis payload exceeds its declared size.");
@@ -139,23 +141,49 @@
                 throw new Error("Native synthesis payload is incomplete.");
               }
               const timing = validateTiming(message.timing, request.textLength);
+              const assemblyStartedAt = now();
               const bytes = new Uint8Array(request.receivedBytes);
               let offset = 0;
               for (const chunk of request.chunks) {
                 bytes.set(chunk, offset);
                 offset += chunk.length;
               }
+              const byteAssemblyMs = Math.max(0, now() - assemblyStartedAt);
+              const base64StartedAt = now();
+              const wavBase64 = base64FromBytes(bytes);
+              const base64EncodeMs = Math.max(0, now() - base64StartedAt);
+              const completedAt = now();
               pending.delete(requestId);
               clearTimeout(request.timeout);
               request.resolve({
                 type: "synthesize",
                 requestId,
-                wavBase64: base64FromBytes(bytes),
+                wavBase64,
                 totalBytes: request.receivedBytes,
                 timing,
                 waveDiagnostics: message.waveDiagnostics,
                 waveDiagnosticError: message.waveDiagnosticError,
-                timingDiagnostics: message.timingDiagnostics
+                timingDiagnostics: message.timingDiagnostics,
+                latencyDiagnostics: {
+                  ...(message.latencyDiagnostics || {}),
+                  nativePort: request.nativePort,
+                  requestDispatchMs: Math.max(0, completedAt - request.startedAt),
+                  nativeToSynthStartMs: request.nativeStartAt
+                    ? Math.max(0, request.nativeStartAt - request.startedAt)
+                    : null,
+                  nativeReceiveMs: request.nativeStartAt
+                    ? Math.max(0, completedAt - request.nativeStartAt)
+                    : null,
+                  firstChunkMs: request.firstChunkAt
+                    ? Math.max(0, request.firstChunkAt - request.startedAt)
+                    : null,
+                  multipartReceiveMs: request.nativeStartAt
+                    ? Math.max(0, completedAt - request.nativeStartAt)
+                    : null,
+                  byteAssemblyMs,
+                  base64EncodeMs,
+                  backgroundTotalMs: Math.max(0, completedAt - request.startedAt)
+                }
               });
               return;
             }
@@ -210,6 +238,8 @@
       return new Promise((resolve, reject) => {
         let activePort;
         let timeout = null;
+        const startedAt = now();
+        const portWasOpen = Boolean(port);
         try {
           activePort = ensurePort();
           timeout = root.setTimeout(() => {
@@ -227,7 +257,11 @@
             chunkCount: 0,
             nextIndex: 0,
             chunks: [],
-            textLength: typeof payload.text === "string" ? payload.text.length : null
+            textLength: typeof payload.text === "string" ? payload.text.length : null,
+            startedAt,
+            nativePort: portWasOpen ? "reused" : "new",
+            nativeStartAt: 0,
+            firstChunkAt: 0
           });
           activePort.postMessage({ type, requestId, ...payload });
         } catch (error) {

@@ -5,6 +5,7 @@
   const stopButton = document.querySelector("#stop");
   const timingStatus = document.querySelector("#timing");
   const waveStatus = document.querySelector("#wave");
+  const latencyStatus = document.querySelector("#latency");
   const status = document.querySelector("#status");
   const audio = document.createElement("audio");
   const unlockWav = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
@@ -13,6 +14,7 @@
   let objectUrl = "";
   let generation = 0;
   let lastWaveResponse = null;
+  const now = () => globalThis.performance?.now?.() ?? Date.now();
 
   audio.onloadedmetadata = () => {
     if (lastWaveResponse) renderWaveDiagnostics(lastWaveResponse);
@@ -120,6 +122,63 @@
       `Raw SAPI → PCM ratio (last comparable): ${ratio === null ? "n/a" : ratio.toFixed(4)}`;
   }
 
+  function renderLatencyDiagnostics(response) {
+    const latency = response.latencyDiagnostics;
+    if (!latency) {
+      latencyStatus.textContent = "Latency diagnostics: unavailable";
+      return;
+    }
+    const format = (value) => Number.isFinite(Number(value)) ? `${Number(value).toFixed(1)} ms` : "n/a";
+    const factor = Number.isFinite(Number(latency.synthesisRealtimeFactor))
+      ? Number(latency.synthesisRealtimeFactor).toFixed(3)
+      : "n/a";
+    latencyStatus.textContent = `Latency diagnostics\n` +
+      `Text: ${latency.textChars ?? "n/a"} chars\n` +
+      `Native port: ${latency.nativePort || "unknown"}\n` +
+      `SpeechSynthesizer: ${latency.synthesizerWarm === true ? "warm/reused" : latency.synthesizerWarm === false ? "cold/new" : "unknown"}\n` +
+      `Content → background/native response: ${format(latency.responseReceivedMs ?? latency.requestDispatchMs)}\n` +
+      `  Native total: ${format(latency.totalNativeMs)}\n` +
+      `    synthesizer acquisition: ${format(latency.getSynthesizerMs)}\n` +
+      `    installed voice lookup: ${format(latency.getInstalledVoicesMs)}\n` +
+      `    SelectVoice: ${format(latency.selectVoiceMs)}\n` +
+      `    SetOutputToWaveStream: ${format(latency.setWaveOutputMs)}\n` +
+      `    Speak/render: ${format(latency.speakMs)}\n` +
+      `    WAV materialization: ${format(latency.wavMaterializeMs)}\n` +
+      `    WAV diagnostics: ${format(latency.waveDiagnosticsMs)}\n` +
+      `    native send: ${format(latency.nativeSendMs)}\n` +
+      `  Background assembly: ${format(latency.byteAssemblyMs)}\n` +
+      `  Background base64 encode: ${format(latency.base64EncodeMs)}\n` +
+      `  Content base64 decode: ${format(latency.contentBase64DecodeMs)}\n` +
+      `  Blob/src preparation: ${format(latency.blobPreparationMs)}\n` +
+      `  play() resolution: ${format(latency.playResolutionMs)}\n` +
+      `  play() → currentTime > 0: ${format(latency.firstMediaClockMs)}\n` +
+      `Total dispatch → media movement: ${format(latency.totalDispatchToMediaMs)}\n` +
+      `PCM duration: ${format(latency.pcmDurationMs)}\n` +
+      `Synthesis realtime factor (speak / PCM): ${factor}`;
+  }
+
+  function waitForFirstMediaMovement(requestGeneration, startedAt) {
+    return new Promise((resolve) => {
+      let frame = null;
+      const deadline = now() + 5000;
+      const schedule = globalThis.requestAnimationFrame ||
+        ((callback) => globalThis.setTimeout?.(callback, 16) ?? callback());
+      const cancel = globalThis.cancelAnimationFrame || globalThis.clearTimeout || (() => {});
+      const finish = (value) => {
+        if (frame !== null) cancel(frame);
+        resolve(value);
+      };
+      const tick = () => {
+        if (requestGeneration !== generation) return finish(null);
+        if (!Number.isFinite(Number(audio.currentTime))) return finish(null);
+        if (Number(audio.currentTime) > 0) return finish(now() - startedAt);
+        if (now() >= deadline) return finish(null);
+        frame = schedule(tick);
+      };
+      frame = schedule(tick);
+    });
+  }
+
   async function loadDiagnostics() {
     try {
       const response = await chrome.runtime.sendMessage({ type: "EDGE_TTS_WIN_NATURAL_DIAGNOSTICS" });
@@ -135,6 +194,7 @@
     if (!ariaVoice) return;
     stopPlayback("Synthesizing diagnostic phrase…");
     const requestGeneration = ++generation;
+    const dispatchStartedAt = now();
     prepareAudio();
     try {
       const response = await chrome.runtime.sendMessage({
@@ -142,26 +202,46 @@
         voiceId: ariaVoice.id,
         text: "Windows Natural diagnostic playback is working."
       });
+      const responseReceivedAt = now();
       if (!response?.accepted) throw new Error(response?.error || "Background synthesis failed.");
       if (requestGeneration !== generation) return;
+      const decodeStartedAt = now();
       const bytes = bytesFromBase64(response.wavBase64);
+      const contentBase64DecodeMs = now() - decodeStartedAt;
       if (response.totalBytes !== undefined && response.totalBytes !== bytes.length) {
         throw new Error("Background returned a WAV size mismatch.");
       }
       renderTiming(response.timing);
       lastWaveResponse = response;
       renderWaveDiagnostics(response);
+      const blobPreparationStartedAt = now();
       revokeAudio();
       objectUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
       audio.src = objectUrl;
+      const blobPreparationMs = now() - blobPreparationStartedAt;
       audio.onended = () => {
         if (requestGeneration === generation) {
           revokeAudio();
           setStatus("Playback complete.");
         }
       };
+      const playStartedAt = now();
       await audio.play();
+      const playResolutionMs = now() - playStartedAt;
       if (requestGeneration === generation) setStatus("Playing Microsoft Aria.");
+      const firstMediaClockMs = await waitForFirstMediaMovement(requestGeneration, now());
+      const latencyDiagnostics = {
+        ...(response.latencyDiagnostics || {}),
+        responseReceivedMs: responseReceivedAt - dispatchStartedAt,
+        contentBase64DecodeMs,
+        blobPreparationMs,
+        playResolutionMs,
+        firstMediaClockMs,
+        totalDispatchToMediaMs: firstMediaClockMs === null
+          ? null
+          : now() - dispatchStartedAt
+      };
+      renderLatencyDiagnostics({ ...response, latencyDiagnostics });
     } catch (error) {
       if (requestGeneration === generation) setStatus(String(error?.message || error));
     }

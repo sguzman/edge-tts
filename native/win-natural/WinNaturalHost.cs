@@ -53,7 +53,26 @@ internal static class WinNaturalHost
         [property: JsonPropertyName("dataBytes")] long DataBytes,
         [property: JsonPropertyName("pcmDurationMs")] double PcmDurationMs);
 
+    private sealed record SynthesisLatencyDiagnostics(
+        [property: JsonPropertyName("textChars")] int TextChars,
+        [property: JsonPropertyName("synthesizerWarm")] bool SynthesizerWarm,
+        [property: JsonPropertyName("getSynthesizerMs")] double GetSynthesizerMs,
+        [property: JsonPropertyName("getInstalledVoicesMs")] double GetInstalledVoicesMs,
+        [property: JsonPropertyName("selectVoiceMs")] double SelectVoiceMs,
+        [property: JsonPropertyName("setWaveOutputMs")] double SetWaveOutputMs,
+        [property: JsonPropertyName("speakMs")] double SpeakMs,
+        [property: JsonPropertyName("wavMaterializeMs")] double WavMaterializeMs,
+        [property: JsonPropertyName("waveDiagnosticsMs")] double WaveDiagnosticsMs,
+        [property: JsonPropertyName("nativeSendMs")] double NativeSendMs,
+        [property: JsonPropertyName("totalNativeMs")] double TotalNativeMs,
+        [property: JsonPropertyName("wavBytes")] int WavBytes,
+        [property: JsonPropertyName("pcmDurationMs")] double? PcmDurationMs,
+        [property: JsonPropertyName("synthesisRealtimeFactor")] double? SynthesisRealtimeFactor);
+
     private static SpeechSynthesizer GetSynthesizer() => Synthesizer ??= new SpeechSynthesizer();
+
+    private static double ElapsedMilliseconds(long startedAt) =>
+        Stopwatch.GetElapsedTime(startedAt).TotalMilliseconds;
 
     private static void Send(object message)
     {
@@ -143,26 +162,37 @@ internal static class WinNaturalHost
 
     private static void Synthesize(string requestId, string voiceId, string text)
     {
+        var totalStartedAt = Stopwatch.GetTimestamp();
         if (string.IsNullOrWhiteSpace(requestId)) throw new InvalidOperationException("Missing synthesis request ID.");
         if (!voiceId.StartsWith("Local-", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("Windows Natural synthesis requires a Local-* voice ID.");
         if (string.IsNullOrWhiteSpace(text) || text.Length > MaxSynthesisTextCharacters)
             throw new InvalidOperationException("Windows Natural synthesis text is empty or too large.");
 
+        var synthesizerWasWarm = Synthesizer is not null;
+        var getSynthesizerStartedAt = Stopwatch.GetTimestamp();
         var synthesizer = GetSynthesizer();
-        var matches = synthesizer.GetInstalledVoices()
+        var getSynthesizerMs = ElapsedMilliseconds(getSynthesizerStartedAt);
+        var getInstalledVoicesStartedAt = Stopwatch.GetTimestamp();
+        var installedVoices = synthesizer.GetInstalledVoices();
+        var getInstalledVoicesMs = ElapsedMilliseconds(getInstalledVoicesStartedAt);
+        var matches = installedVoices
             .Where(voice => string.Equals(voice.VoiceInfo.Id, voiceId, StringComparison.Ordinal))
             .ToArray();
         if (matches.Length != 1 || !matches[0].Enabled)
             throw new InvalidOperationException($"Enabled SAPI voice token was not found: {voiceId}");
 
         var selectedName = matches[0].VoiceInfo.Name;
+        var selectVoiceStartedAt = Stopwatch.GetTimestamp();
         synthesizer.SelectVoice(selectedName);
+        var selectVoiceMs = ElapsedMilliseconds(selectVoiceStartedAt);
         if (!string.Equals(synthesizer.Voice?.Id, voiceId, StringComparison.Ordinal))
             throw new InvalidOperationException("SAPI selected a different voice token than requested.");
 
         using var audio = new MemoryStream();
+        var setWaveOutputStartedAt = Stopwatch.GetTimestamp();
         synthesizer.SetOutputToWaveStream(audio);
+        var setWaveOutputMs = ElapsedMilliseconds(setWaveOutputStartedAt);
         var timing = new List<TimingBoundary>();
         var observations = new List<(int CharIndex, int CharLength, double SapiAudioMs, long StreamPosition)>();
         EventHandler<SpeakProgressEventArgs> progressHandler = (_, progress) =>
@@ -177,6 +207,7 @@ internal static class WinNaturalHost
             observations.Add((charIndex, charLength, audioMs, audio.Position));
         };
         synthesizer.SpeakProgress += progressHandler;
+        var speakStartedAt = Stopwatch.GetTimestamp();
         try
         {
             synthesizer.Speak(text);
@@ -186,11 +217,16 @@ internal static class WinNaturalHost
             synthesizer.SpeakProgress -= progressHandler;
             synthesizer.SetOutputToNull();
         }
+        var speakMs = ElapsedMilliseconds(speakStartedAt);
+        var wavMaterializeStartedAt = Stopwatch.GetTimestamp();
         var wav = audio.ToArray();
+        var wavMaterializeMs = ElapsedMilliseconds(wavMaterializeStartedAt);
         if (wav.Length == 0 || wav.Length > MaxSynthesisBytes)
             throw new InvalidOperationException("Native synthesis returned an invalid WAV size.");
 
+        var waveDiagnosticsStartedAt = Stopwatch.GetTimestamp();
         var waveDiagnostics = TryParseWaveDiagnostics(wav, out var waveError);
+        var waveDiagnosticsMs = ElapsedMilliseconds(waveDiagnosticsStartedAt);
         var timingDiagnostics = observations.Select(observation =>
         {
             double? streamAudioMs = null;
@@ -231,6 +267,7 @@ internal static class WinNaturalHost
         }
 
         var chunkCount = (wav.Length + SynthesisChunkBytes - 1) / SynthesisChunkBytes;
+        var nativeSendStartedAt = Stopwatch.GetTimestamp();
         Send(new { type = "synth-start", requestId, voiceId, totalBytes = wav.Length, chunkBytes = SynthesisChunkBytes, chunkCount });
         for (var index = 0; index < chunkCount; index++)
         {
@@ -238,6 +275,24 @@ internal static class WinNaturalHost
             var count = Math.Min(SynthesisChunkBytes, wav.Length - offset);
             Send(new { type = "synth-chunk", requestId, index, data = Convert.ToBase64String(wav, offset, count) });
         }
+        var synthesisRealtimeFactor = waveDiagnostics is { PcmDurationMs: > 0 }
+            ? speakMs / waveDiagnostics.PcmDurationMs
+            : (double?)null;
+        var latencyDiagnostics = new SynthesisLatencyDiagnostics(
+            text.Length,
+            synthesizerWasWarm,
+            getSynthesizerMs,
+            getInstalledVoicesMs,
+            selectVoiceMs,
+            setWaveOutputMs,
+            speakMs,
+            wavMaterializeMs,
+            waveDiagnosticsMs,
+            ElapsedMilliseconds(nativeSendStartedAt),
+            ElapsedMilliseconds(totalStartedAt),
+            wav.Length,
+            waveDiagnostics?.PcmDurationMs,
+            synthesisRealtimeFactor);
         Send(new
         {
             type = "synth-end",
@@ -247,7 +302,8 @@ internal static class WinNaturalHost
             timing = canonicalTiming,
             waveDiagnostics,
             waveDiagnosticError = waveError,
-            timingDiagnostics
+            timingDiagnostics,
+            latencyDiagnostics
         });
     }
 

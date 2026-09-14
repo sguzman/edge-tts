@@ -112,6 +112,11 @@ test("multipart synthesis reconstructs start/chunk/end in order", async () => {
     requestId: request.requestId,
     totalBytes: 5,
     chunkCount: 2,
+    latencyDiagnostics: {
+      textChars: 4,
+      speakMs: 12.5,
+      pcmDurationMs: 500
+    },
     timing: [
       { charIndex: 0, charLength: 2, audioMs: 0 },
       { charIndex: 2, charLength: 2, audioMs: 143.25 }
@@ -124,6 +129,34 @@ test("multipart synthesis reconstructs start/chunk/end in order", async () => {
     { charIndex: 0, charLength: 2, audioMs: 0 },
     { charIndex: 2, charLength: 2, audioMs: 143.25 }
   ]);
+  assert.equal(result.latencyDiagnostics.nativePort, "new");
+  assert.equal(result.latencyDiagnostics.textChars, 4);
+  assert.equal(result.latencyDiagnostics.speakMs, 12.5);
+  assert.equal(typeof result.latencyDiagnostics.backgroundTotalMs, "number");
+});
+
+test("multipart latency diagnostics distinguish a new port from a reused warm port", async () => {
+  const port = fakePort();
+  const transport = createTransport({ connectNative: () => port, now: () => 400 });
+  const complete = async (text, value) => {
+    const pending = transport.requestMultipart("synthesize", { text });
+    const request = port.sent.at(-1);
+    port.emit({ type: "synth-start", requestId: request.requestId, totalBytes: 1, chunkCount: 1 });
+    port.emit({ type: "synth-chunk", requestId: request.requestId, index: 0, data: Buffer.from(value).toString("base64") });
+    port.emit({
+      type: "synth-end",
+      requestId: request.requestId,
+      totalBytes: 1,
+      chunkCount: 1,
+      latencyDiagnostics: { synthesizerWarm: true }
+    });
+    return pending;
+  };
+  const first = await complete("first", "a");
+  const second = await complete("second", "b");
+  assert.equal(first.latencyDiagnostics.nativePort, "new");
+  assert.equal(second.latencyDiagnostics.nativePort, "reused");
+  assert.equal(second.latencyDiagnostics.synthesizerWarm, true);
 });
 
 test("multipart synthesis contains malformed timing without weakening WAV validation", async () => {
