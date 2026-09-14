@@ -110,13 +110,18 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: IN PROGRESS. Gate 4A is the current timing-substrate candidate;
-human browser QA is pending.**
+**Status: IN PROGRESS. Gate 4A is ACCEPTED; Gate 4B has not started.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
 changes, or startup-latency optimization. Gate 4B will own timing-to-reader
 mapping and highlighting after Gate 4A is accepted.
+
+Gate 4A acceptance evidence: on the reloaded development diagnostics page,
+Microsoft Aria enumerated through the background, played audibly, and Stop
+worked. Timing reported `YES` with 6 boundaries, first boundary
+`char 0, len 7, audio 160.25 ms`, last boundary
+`char 39, len 7, audio 2169.333 ms`, and monotonic timing `YES`.
 
 Add word-timing synchronization, live playback rate, and volume without resynthesis.
 

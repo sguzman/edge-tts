@@ -367,10 +367,27 @@ the current sentence instead of preserving an intra-sentence audio position.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
-**IN PROGRESS — Gate 4A timing substrate pending human browser QA.** Gate 4A
-captures request-relative SAPI `SpeakProgress` records and transports them with
-the completed WAV. It stops before visual mapping/highlighting and live control
-changes; Gate 4B must not begin until this candidate is accepted.
+**IN PROGRESS — Gate 4A ACCEPTED; Gate 4B has not started.** Gate 4A captures
+request-relative SAPI `SpeakProgress` records and transports them with the
+completed WAV. It stops before visual mapping/highlighting and live control
+changes.
+
+Human browser evidence on candidate `8914d4a75a5e1f52e50d95e079206a428878d9f3`
+after reloading the unpacked development extension:
+
+1. Microsoft Aria enumerated through the background: PASS;
+2. Aria playback was audible: PASS;
+3. timing captured: YES;
+4. boundary count: 6;
+5. first boundary: `char 0, len 7, audio 160.25 ms`;
+6. last boundary: `char 39, len 7, audio 2169.333 ms`;
+7. monotonic timing: YES;
+8. Stop stopped audio: PASS.
+
+The accepted timing contract remains `{ charIndex, charLength, audioMs }`,
+with character offsets relative to the exact synthesis text and `audioMs` in
+SAPI milliseconds. Gate 4A does not implement highlighting, live rate/volume,
+pause/resume changes, or startup-latency optimization.
 
 ### Purpose
 

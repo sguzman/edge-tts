@@ -543,3 +543,17 @@ startup/synthesis latency, native word/sentence highlight synchronization, and
 intra-sentence Pause/Resume position fidelity. Preserve the fresh-page rule
 after every extension reload, but do not treat these known limitations as Gate
 3C failures.
+
+## Gate 4A acceptance: native timing substrate
+
+Gate 4A was accepted after browser QA on the reloaded development diagnostics
+page. Microsoft Aria enumerated through the background, played audibly, and
+Stop stopped playback. The diagnostic reported timing captured `YES`, 6
+boundaries, first boundary `char 0, len 7, audio 160.25 ms`, last boundary
+`char 39, len 7, audio 2169.333 ms`, and monotonic timing `YES`.
+
+The preserved contract is `{ charIndex, charLength, audioMs }`, where offsets
+are relative to the exact synthesis-request text and `audioMs` is the SAPI
+audio position in milliseconds. Gate 4A deliberately stops before mapping
+timing to reader segments or changing presentation behavior. Gate 4B remains
+unstarted.
