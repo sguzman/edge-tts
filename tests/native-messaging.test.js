@@ -248,7 +248,6 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   assert.equal(background.includes("win-natural-speech-engine.js"), false);
   for (const file of [
-    "reader.js",
     "direct-audio-engine.js",
     "reliable-speech-engine.js",
     "voice-ui.js",
@@ -269,6 +268,9 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
   assert.match(reliableReader, /ownsCompletionWithoutBoundaries/);
   const failsafeReader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "failsafe-reader.js"), "utf8");
   assert.match(failsafeReader, /ownsCompletionWithoutBoundaries/);
+  const reader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "reader.js"), "utf8");
+  assert.match(reader, /voice\.__edgeTtsSource === "win-natural"/);
+  assert.match(reader, /prepareDirectPlayback\?\.\(voice\)/);
 });
 
 test("Gate 3B diagnostics are background-owned and extension-page synthesis needs no tab", () => {

@@ -637,6 +637,12 @@
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
       this.settings.voiceKey = voiceSelectionKey(voice);
+      // Voice selection is the trusted user gesture. Prepare only the native
+      // audio element here; Online playback must keep its existing direct
+      // element untouched until its own gesture preparation path runs.
+      if (voice.__edgeTtsSource === "win-natural") {
+        this.speech.prepareDirectPlayback?.(voice);
+      }
       await this.saveSettings();
       if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();

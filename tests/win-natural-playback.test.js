@@ -1,5 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const path = require("node:path");
+
+const readerSource = fs.readFileSync(path.join(__dirname, "..", "src", "content", "reader.js"), "utf8");
 
 function loadStack() {
   global.EdgeTtsExtension = {};
@@ -71,6 +75,34 @@ function nativeVoice(api) {
 function waitForTurn() {
   return new Promise((resolve) => setImmediate(resolve));
 }
+
+test("ReaderApp prepares only WIN-NATURAL during changeVoice before persistence", () => {
+  const changeVoiceStart = readerSource.indexOf("    async changeVoice(selectionKey)");
+  const changeVoiceEnd = readerSource.indexOf("    async changeRate", changeVoiceStart);
+  const changeVoice = readerSource.slice(changeVoiceStart, changeVoiceEnd);
+  const nativeCondition = changeVoice.indexOf('voice.__edgeTtsSource === "win-natural"');
+  const prepare = changeVoice.indexOf("this.speech.prepareDirectPlayback?.(voice)");
+  const save = changeVoice.indexOf("await this.saveSettings()");
+  assert.ok(nativeCondition >= 0);
+  assert.ok(prepare > nativeCondition);
+  assert.ok(save > prepare);
+  assert.equal((changeVoice.match(/prepareDirectPlayback/g) || []).length, 1);
+  assert.equal(changeVoice.includes("isDirectVoice"), false);
+});
+
+test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  let nativePreparationCalls = 0;
+  const original = engine._ensureWinNaturalAudio.bind(engine);
+  engine._ensureWinNaturalAudio = () => {
+    nativePreparationCalls += 1;
+    return original();
+  };
+  assert.equal(engine.prepareDirectPlayback({ name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true }), true);
+  assert.equal(engine.prepareDirectPlayback({ name: "Microsoft Zira", lang: "en-US", localService: true }), false);
+  assert.equal(nativePreparationCalls, 0);
+});
 
 test("stacked LocalTtsSpeechEngine routes native Aria through background with the exact token", async () => {
   const api = loadStack();
