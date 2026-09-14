@@ -23,9 +23,6 @@ internal static class WinNaturalHost
         [property: JsonPropertyName("statusName")] string StatusName);
 
     private const int MaxMessageBytes = 16 * 1024 * 1024;
-    private const int MaxSynthesisTextCharacters = 100_000;
-    private const int SynthesisChunkBytes = 48 * 1024;
-    private const int MaxSynthesisBytes = 8 * 1024 * 1024;
     private static readonly object OutputGate = new();
     private static readonly Stream Output = Console.OpenStandardOutput();
     private static SpeechSynthesizer? Synthesizer;
@@ -116,59 +113,6 @@ internal static class WinNaturalHost
                 registry = RegistryDiagnostics()
             }
         };
-    }
-
-    private static void Synthesize(string requestId, string voiceId, string text)
-    {
-        if (string.IsNullOrWhiteSpace(requestId)) throw new InvalidOperationException("Missing synthesis request ID.");
-        if (!voiceId.StartsWith("Local-", StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("Windows Natural synthesis requires a Local-* voice ID.");
-        if (string.IsNullOrWhiteSpace(text) || text.Length > MaxSynthesisTextCharacters)
-            throw new InvalidOperationException("Windows Natural synthesis text is empty or too large.");
-
-        var synthesizer = GetSynthesizer();
-        var matches = synthesizer.GetInstalledVoices()
-            .Where(voice => string.Equals(voice.VoiceInfo.Id, voiceId, StringComparison.Ordinal))
-            .ToArray();
-        if (matches.Length != 1 || !matches[0].Enabled)
-            throw new InvalidOperationException($"Enabled SAPI voice token was not found: {voiceId}");
-
-        var selectedName = matches[0].VoiceInfo.Name;
-        synthesizer.SelectVoice(selectedName);
-        if (!string.Equals(synthesizer.Voice?.Id, voiceId, StringComparison.Ordinal))
-            throw new InvalidOperationException("SAPI selected a different voice token than requested.");
-
-        using var audio = new MemoryStream();
-        synthesizer.SetOutputToWaveStream(audio);
-        synthesizer.Speak(text);
-        var wav = audio.ToArray();
-        synthesizer.SetOutputToNull();
-        if (wav.Length == 0 || wav.Length > MaxSynthesisBytes)
-            throw new InvalidOperationException("Native synthesis returned an invalid WAV size.");
-
-        var chunkCount = (wav.Length + SynthesisChunkBytes - 1) / SynthesisChunkBytes;
-        Send(new
-        {
-            type = "synth-start",
-            requestId,
-            voiceId,
-            totalBytes = wav.Length,
-            chunkBytes = SynthesisChunkBytes,
-            chunkCount
-        });
-        for (var index = 0; index < chunkCount; index++)
-        {
-            var offset = index * SynthesisChunkBytes;
-            var count = Math.Min(SynthesisChunkBytes, wav.Length - offset);
-            Send(new
-            {
-                type = "synth-chunk",
-                requestId,
-                index,
-                data = Convert.ToBase64String(wav, offset, count)
-            });
-        }
-        Send(new { type = "synth-end", requestId, totalBytes = wav.Length, chunkCount });
     }
 
     private static Dictionary<string, string?> RelevantEnvironment() => new()
@@ -484,15 +428,6 @@ internal static class WinNaturalHost
                 break;
             case "voices":
                 Send(EnumerateVoices(requestId));
-                break;
-            case "synthesize":
-                var voiceId = message.TryGetProperty("voiceId", out var voiceValue)
-                    ? voiceValue.GetString() ?? ""
-                    : "";
-                var text = message.TryGetProperty("text", out var textValue)
-                    ? textValue.GetString() ?? ""
-                    : "";
-                Synthesize(requestId, voiceId, text);
                 break;
             default:
                 Send(new { type = "error", requestId, message = $"Unsupported request type: {type}" });

@@ -82,7 +82,7 @@
       voiceURI: `win-natural:${nativeVoiceId}`,
       __edgeTtsSource: "win-natural",
       nativeVoiceId,
-      catalogOnly: root.EdgeTtsExtension?.WinNaturalPlaybackAvailable !== true
+      catalogOnly: true
     };
   }
 

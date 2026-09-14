@@ -256,17 +256,9 @@ cancel cannot accidentally target Online Natural
 no reader-startup dependency introduced
 ```
 
-### Implementation candidate status
+### Status
 
-Implementation complete; browser acceptance pending.
-
-The candidate adds an isolated content-side Windows Natural speech engine and
-extends the persistent helper with bounded in-memory WAV synthesis. Native
-responses use correlated `synth-start` / `synth-chunk` / `synth-end` frames;
-the helper's 48 KiB binary chunks remain safely below Edge's 1 MB host-response
-limit. The browser reassembles and validates the response before creating an
-audio object URL. Stop, Quit, voice switches, and late responses are guarded by
-the native playback generation and revoke extension-owned object URLs.
+Pending.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 

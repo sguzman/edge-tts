@@ -11,26 +11,14 @@ For the complete setup, architecture, investigation history, troubleshooting, an
 
 This README stays intentionally implementation-focused.
 
-## Current helper behavior
+## Current Gate 1 behavior
 
-The helper is a persistent x64 Native Messaging process. The transport exposes:
+The helper is a persistent x64 Native Messaging process. At Gate 1 it exposes only:
 
 ```text
 hello
 voices
-synthesize
 ```
-
-`synthesize` requires an exact enabled `Local-*` token and returns an in-memory
-WAV as correlated multipart frames:
-
-```text
-synth-start -> synth-chunk (48 KiB binary chunks) -> synth-end
-```
-
-The helper never writes audio files or plays through a native audio device.
-The extension reassembles and owns browser playback. Each base64 chunk remains
-well below Edge's 1 MB Native Messaging response limit.
 
 Enumeration is filtered to SAPI voice IDs beginning with `Local-`, so ordinary Windows legacy voices are not advertised as Windows Natural voices.
 

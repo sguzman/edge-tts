@@ -19,7 +19,7 @@
   }
 
   function isCatalogOnlyVoice(voice) {
-    return voice?.catalogOnly === true;
+    return voice?.catalogOnly === true || voice?.__edgeTtsSource === "win-natural";
   }
 
   function voiceSelectionKey(voice) {

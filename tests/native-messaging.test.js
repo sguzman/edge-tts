@@ -150,74 +150,6 @@ test("Native host errors and disconnects reject the matching request", async () 
   await assert.rejects(disconnected, /disconnected/);
 });
 
-test("multipart synthesis responses reassemble in order", async () => {
-  const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 400 });
-  const pending = transport.requestMultipart("synthesize", { voiceId: "Local-NarratorVoices", text: "hello" });
-  const requestId = port.sent[0].requestId;
-  port.emit({ type: "synth-start", requestId, totalBytes: 5, chunkCount: 2 });
-  port.emit({ type: "synth-chunk", requestId, index: 0, data: Buffer.from("he").toString("base64") });
-  port.emit({ type: "synth-chunk", requestId, index: 1, data: Buffer.from("llo").toString("base64") });
-  port.emit({ type: "synth-end", requestId, totalBytes: 5, chunkCount: 2 });
-  const result = await pending;
-  assert.equal(Buffer.from(result.wavBase64, "base64").toString(), "hello");
-});
-
-test("multipart synthesis rejects malformed, duplicate, and out-of-order chunks", async () => {
-  const emitInvalid = (port, requestId) => {
-    port.emit({ type: "synth-start", requestId, totalBytes: 2, chunkCount: 1 });
-    port.emit({ type: "synth-chunk", requestId, index: 1, data: "@@@" });
-  };
-  const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 500 });
-  const pending = transport.requestMultipart("synthesize");
-  emitInvalid(port, port.sent[0].requestId);
-  await assert.rejects(pending, /Native synthesis chunks arrived out of order/);
-
-  const duplicatePort = fakePort();
-  const duplicateTransport = createTransport({ connectNative: () => duplicatePort, now: () => 501 });
-  const duplicate = duplicateTransport.requestMultipart("synthesize");
-  const duplicateId = duplicatePort.sent[0].requestId;
-  duplicatePort.emit({ type: "synth-start", requestId: duplicateId, totalBytes: 1, chunkCount: 1 });
-  duplicatePort.emit({ type: "synth-start", requestId: duplicateId, totalBytes: 1, chunkCount: 1 });
-  await assert.rejects(duplicate, /Duplicate native synthesis start/);
-
-  const malformedPort = fakePort();
-  const malformedTransport = createTransport({ connectNative: () => malformedPort, now: () => 502 });
-  const malformed = malformedTransport.requestMultipart("synthesize");
-  const malformedId = malformedPort.sent[0].requestId;
-  malformedPort.emit({ type: "synth-start", requestId: malformedId, totalBytes: 1, chunkCount: 1 });
-  malformedPort.emit({ type: "synth-chunk", requestId: malformedId, index: 0, data: "@@@" });
-  await assert.rejects(malformed, /Malformed Native Messaging audio chunk/);
-});
-
-test("multipart synthesis times out and removes its pending request", async () => {
-  const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 503 });
-  const pending = transport.requestMultipart("synthesize", {}, 10);
-  await assert.rejects(pending, /timed out: synthesize/);
-  port.emit({
-    type: "synth-start",
-    requestId: port.sent[0].requestId,
-    totalBytes: 1,
-    chunkCount: 1
-  });
-});
-
-test("native synthesis frame sizing stays comfortably below Edge's 1 MB limit", () => {
-  const host = fs.readFileSync(path.join(__dirname, "..", "native", "win-natural", "WinNaturalHost.cs"), "utf8");
-  const match = host.match(/SynthesisChunkBytes\s*=\s*(\d+)/);
-  assert.ok(match);
-  const chunkBytes = Number(match[1]);
-  const base64Bytes = Math.ceil(chunkBytes / 3) * 4;
-  assert.ok(chunkBytes <= 48 * 1024);
-  assert.ok(base64Bytes + 512 < 1_000_000);
-  assert.match(host, /voiceId\.StartsWith\("Local-"/);
-  assert.match(host, /GetInstalledVoices\(\)/);
-  assert.match(host, /SelectVoice\(selectedName\)/);
-  assert.match(host, /synthesizer\.Voice\?\.Id, voiceId/);
-});
-
 test("native discovery is not part of reader startup or the runtime dispatcher", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   const openStart = background.indexOf("chrome.action.onClicked");
@@ -227,7 +159,7 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.equal(background.slice(openStart).includes("nativeMessaging.diagnostics()"), false);
   assert.equal(background.includes("installDiagnosticsListener"), false);
   assert.match(background, /EDGE_TTS_WIN_NATURAL_VOICES/);
-  assert.match(background, /getNativeTransport\(\)\.request\("voices"\)/);
+  assert.match(background, /createTransport\(\)\.request\("voices"\)/);
   const startup = fs.readFileSync(path.join(__dirname, "..", "src", "content", "startup-fastpath.js"), "utf8");
   assert.equal(startup.includes("refreshWinNaturalVoices"), false);
 });

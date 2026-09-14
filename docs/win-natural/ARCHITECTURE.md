@@ -355,36 +355,6 @@ Windows Legacy paths unchanged. Gate 2 UI entries are visibly labeled
 `[WIN-NATURAL]` and disabled; stale saved settings cannot select them, and a
 defense-in-depth playback guard rejects them until Gate 3.
 
-## 15.2 Gate 3 isolated playback candidate
-
-The Gate 3 candidate adds `win-natural-speech-engine.js` after the existing
-Windows Legacy/local engine. It intercepts only `__edgeTtsSource:
-"win-natural"`; Online Natural and Windows Legacy continue through the
-existing engine chain unchanged.
-
-The helper resolves the exact enabled `Local-*` ID through
-`GetInstalledVoices()`, selects its associated display name, and verifies
-`SpeechSynthesizer.Voice.Id` matches the requested ID before synthesizing.
-It writes WAV data to memory only; the helper never uses a native audio device.
-
-Because Edge limits a Native Messaging host response to 1 MB, WAV data uses
-correlated `synth-start`, `synth-chunk`, and `synth-end` frames. The helper
-uses 48 KiB binary chunks (about 64 KiB base64), leaving substantial margin
-below 1 MB. The browser requires contiguous chunk indexes and exact declared
-byte/chunk totals before resolving the request; the complete response is
-bounded at 8 MiB and malformed, missing, duplicate, or out-of-order frames
-reject cleanly.
-
-The extension owns playback: it decodes the complete WAV, creates an object
-URL and HTML audio element after synchronous gesture preparation, and revokes
-the URL on completion, cancellation, voice switch, Stop, or Quit. Generation
-and request checks discard late synthesis responses. Native synthesis has no
-network dependency and no word-boundary/highlighting behavior in Gate 3.
-
-Browser acceptance remains pending. Required checks include Aria playback
-with network disabled, Windows Legacy and Online regression playback, Stop,
-Quit, voice switching, and native-helper error containment.
-
 ## 16. Architectural lessons already paid for
 
 The current design is intentionally conservative because the project has already observed all of these failures in practice:

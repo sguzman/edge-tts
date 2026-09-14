@@ -163,17 +163,6 @@ test("catalog-only Windows Natural voices cannot fall through to playback", () =
   assert.match(error, /catalog-only/);
 });
 
-test("Gate 3 engine availability removes the Gate 2 catalog-only marker", () => {
-  global.EdgeTtsExtension.WinNaturalPlaybackAvailable = true;
-  const voice = nativeVoiceToCatalogVoice({
-    id: "Local-NarratorVoices",
-    name: "Microsoft Aria",
-    lang: "en-US"
-  });
-  assert.equal(voice.catalogOnly, false);
-  global.EdgeTtsExtension.WinNaturalPlaybackAvailable = false;
-});
-
 test("native enumeration failure leaves the existing catalog usable", async () => {
   global.speechSynthesis.getVoices = () => [
     { name: "Microsoft David", lang: "en-US", localService: true }
