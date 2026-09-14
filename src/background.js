@@ -12,6 +12,7 @@ const READER_FILES = [
   "src/content/reliable-speech-engine.js",
   "src/content/direct-audio-engine.js",
   "src/content/local-tts-engine.js",
+  "src/content/win-natural-speech-engine.js",
   "src/content/toolbar.js",
   "src/content/voice-ui.js",
   "src/content/reader.js",
@@ -25,6 +26,7 @@ const READER_FILES = [
 const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 const nativeMessagingApi = globalThis.EdgeTtsNativeMessaging;
+let nativeTransport = null;
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
@@ -111,7 +113,7 @@ async function getExtensionTtsVoices() {
 async function getWinNaturalVoices() {
   if (!nativeMessagingApi?.createTransport) return [];
   try {
-    const response = await nativeMessagingApi.createTransport().request("voices");
+    const response = await getNativeTransport().request("voices");
     return (Array.isArray(response?.voices) ? response.voices : [])
       .filter((voice) => String(voice?.id || "").toLowerCase().startsWith("local-"))
       .map((voice) => ({
@@ -123,6 +125,36 @@ async function getWinNaturalVoices() {
     console.warn("Edge Natural TTS could not enumerate Windows Natural voices.", error);
     return [];
   }
+}
+
+function getNativeTransport() {
+  if (!nativeMessagingApi?.createTransport) {
+    throw new Error("Native Messaging is unavailable.");
+  }
+  if (!nativeTransport) nativeTransport = nativeMessagingApi.createTransport();
+  return nativeTransport;
+}
+
+async function synthesizeWinNaturalForTab(tabId, message) {
+  await loadAudioOwner();
+  if (audioOwnerTabId !== tabId) {
+    throw new Error("This tab does not own browser audio.");
+  }
+
+  const voiceId = String(message?.voiceId || "").trim();
+  const text = String(message?.text || "");
+  if (!/^Local-/i.test(voiceId)) throw new Error("Invalid Windows Natural voice ID.");
+  if (!text) throw new Error("Windows Natural synthesis text is empty.");
+
+  const transport = getNativeTransport();
+  if (typeof transport.requestMultipart !== "function") {
+    throw new Error("Native helper does not support streamed synthesis.");
+  }
+  return transport.requestMultipart(
+    "synthesize",
+    { voiceId, text },
+    nativeMessagingApi.SYNTHESIS_TIMEOUT_MS || 30_000
+  );
 }
 
 function localTtsEventPayload(event) {
@@ -267,6 +299,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "EDGE_TTS_WIN_NATURAL_VOICES") {
     void getWinNaturalVoices().then((voices) => sendResponse({ voices }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ accepted: false, error: "No content tab was provided." });
+      return false;
+    }
+    void synthesizeWinNaturalForTab(tabId, message)
+      .then((result) => sendResponse({ accepted: true, ...result }))
+      .catch((error) => {
+        console.warn("Edge Natural TTS Windows Natural synthesis failed.", error);
+        sendResponse({ accepted: false, error: String(error?.message || error) });
+      });
     return true;
   }
 
