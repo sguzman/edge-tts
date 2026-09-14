@@ -94,6 +94,12 @@
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
 
+  function traceWinNatural(stage, details = {}) {
+    try {
+      root.console?.debug?.("Edge Natural TTS WIN-NATURAL", stage, details);
+    } catch (_error) {}
+  }
+
   if (!BaseSpeechEngine || typeof createUtteranceChunks !== "function") {
     return {
       LocalTtsSpeechEngine: null,
@@ -249,7 +255,13 @@
       this.winNaturalObjectUrl = "";
     }
 
-    _resetWinNaturalState({ keepMode = true } = {}) {
+    _resetWinNaturalState({ keepMode = true, reason = "reset" } = {}) {
+      traceWinNatural("reset", {
+        reason,
+        requestId: this.winNaturalRequest?.requestId || null,
+        active: this.winNaturalActive,
+        objectUrl: Boolean(this.winNaturalObjectUrl)
+      });
       const audio = this.winNaturalAudio;
       if (audio) {
         try {
@@ -279,7 +291,7 @@
     cancel() {
       if (this.winNaturalSessionMode) {
         this.generation += 1;
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "cancel" });
         return;
       }
       if (this.localSessionMode) {
@@ -293,7 +305,7 @@
     abandon() {
       if (this.winNaturalSessionMode) {
         this.generation += 1;
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "abandon" });
         return;
       }
       if (this.localSessionMode) {
@@ -338,7 +350,7 @@
       }
       if (this.winNaturalSessionMode) {
         this.generation += 1;
-        this._resetWinNaturalState({ keepMode: false });
+        this._resetWinNaturalState({ keepMode: false, reason: "voice-switch" });
       }
       if (!isChromeTtsVoice(options.voice)) {
         if (this.localSessionMode) {
@@ -387,6 +399,7 @@
       audio.muted = false;
       audio.removeAttribute?.("src");
       audio.load?.();
+      traceWinNatural("prepared", { hasAudio: true, srcCleared: true });
       return true;
     }
 
@@ -444,6 +457,12 @@
       const voiceId = this.currentOptions?.voice?.nativeVoiceId;
       const requestId = localRequestId(generation, this.currentChunkIndex);
       this.winNaturalRequest = { requestId, generation, chunkIndex: this.currentChunkIndex, payload };
+      traceWinNatural("synthesis-request", {
+        requestId,
+        generation,
+        voiceId,
+        textLength: payload.text.length
+      });
       Promise.resolve(root.chrome?.runtime?.sendMessage?.({
         type: "EDGE_TTS_WIN_NATURAL_SYNTHESIZE",
         requestId,
@@ -453,7 +472,8 @@
         .then((response) => this._handleWinNaturalResponse(generation, requestId, response))
         .catch((error) => {
           if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
-          this._resetWinNaturalState({ keepMode: true });
+          traceWinNatural("synthesis-error", { requestId, generation, message: error?.message || String(error) });
+          this._resetWinNaturalState({ keepMode: true, reason: "synthesis-error" });
           this.onError?.(new Error(`Windows Natural synthesis failed: ${error?.message || String(error)}`));
         });
     }
@@ -462,6 +482,13 @@
       if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) {
         return;
       }
+      traceWinNatural("synthesis-response-received", {
+        requestId,
+        generation,
+        accepted: response?.accepted === true,
+        base64Length: typeof response?.wavBase64 === "string" ? response.wavBase64.length : 0,
+        totalBytes: response?.totalBytes ?? null
+      });
       if (!response?.accepted) throw new Error(response?.error || "Windows Natural synthesis was refused.");
       if (response.totalBytes !== undefined && Number(response.totalBytes) < 1) {
         throw new Error("Windows Natural returned an invalid byte count.");
@@ -470,28 +497,39 @@
       try {
         bytes = this._nativeBytesFromBase64(response.wavBase64);
       } catch (error) {
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "invalid-response" });
         this.onError?.(error);
         return;
       }
       if (response.totalBytes !== undefined && Number(response.totalBytes) !== bytes.length) {
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "byte-count-mismatch" });
         this.onError?.(new Error("Windows Natural returned a WAV size mismatch."));
         return;
       }
       if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+      traceWinNatural("synthesis-response", {
+        requestId,
+        generation,
+        bytes: bytes.length,
+        totalBytes: response.totalBytes ?? null
+      });
 
       const audio = this._ensureWinNaturalAudio();
       if (!audio) {
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "audio-unavailable" });
         this.onError?.(new Error("Windows Natural audio is unavailable."));
         return;
       }
       this._revokeWinNaturalObjectUrl();
       this.winNaturalObjectUrl = root.URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
       audio.src = this.winNaturalObjectUrl;
+      traceWinNatural("src-assigned", { requestId, generation, objectUrl: true });
+      audio.onplay = () => traceWinNatural("event-play", { requestId, generation });
+      audio.onplaying = () => traceWinNatural("event-playing", { requestId, generation });
+      audio.onpause = () => traceWinNatural("event-pause", { requestId, generation });
       audio.onended = () => {
         if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+        traceWinNatural("event-ended", { requestId, generation });
         this.winNaturalActive = false;
         this.winNaturalRequest = null;
         this._revokeWinNaturalObjectUrl();
@@ -507,15 +545,19 @@
       };
       audio.onerror = () => {
         if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+        traceWinNatural("event-error", { requestId, generation, mediaError: audio.error?.message || audio.error?.code || null });
         this.generation += 1;
-        this._resetWinNaturalState({ keepMode: true });
+        this._resetWinNaturalState({ keepMode: true, reason: "audio-error" });
         this.onError?.(new Error("Windows Natural audio playback failed."));
       };
       try {
+        traceWinNatural("play-call", { requestId, generation, paused: audio.paused, srcPresent: Boolean(audio.src) });
         await audio.play();
+        traceWinNatural("play-resolved", { requestId, generation, paused: audio.paused });
       } catch (error) {
         if (generation !== this.generation) return;
-        this._resetWinNaturalState({ keepMode: true });
+        traceWinNatural("play-rejected", { requestId, generation, name: error?.name || "", message: error?.message || String(error) });
+        this._resetWinNaturalState({ keepMode: true, reason: "play-rejected" });
         this.onError?.(new Error(`Windows Natural audio playback failed: ${error?.message || String(error)}`));
         return;
       }

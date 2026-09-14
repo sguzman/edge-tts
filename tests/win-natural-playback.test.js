@@ -90,6 +90,26 @@ test("ReaderApp prepares only WIN-NATURAL during changeVoice before persistence"
   assert.equal(changeVoice.includes("isDirectVoice"), false);
 });
 
+test("normal-reader native tracing covers synthesis, media, and reset stages without touching other routes", () => {
+  const localSource = fs.readFileSync(path.join(__dirname, "..", "src", "content", "local-tts-engine.js"), "utf8");
+  for (const stage of [
+    "synthesis-request",
+    "synthesis-response-received",
+    "src-assigned",
+    "play-call",
+    "play-resolved",
+    "play-rejected",
+    "event-playing",
+    "event-pause",
+    "event-ended",
+    "event-error",
+    "reset"
+  ]) {
+    assert.match(localSource, new RegExp(`traceWinNatural\\(\\"${stage}\\"`));
+  }
+  assert.match(localSource, /if \(!isWinNaturalVoice\(voice\)\)/);
+});
+
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
   const api = loadStack();
   const engine = new api.LocalTtsSpeechEngine({});
