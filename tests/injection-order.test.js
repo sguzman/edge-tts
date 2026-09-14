@@ -5,6 +5,25 @@ const path = require("node:path");
 
 const backgroundPath = path.join(__dirname, "..", "src", "background.js");
 const source = fs.readFileSync(backgroundPath, "utf8");
+const installerPath = path.join(
+  __dirname,
+  "..",
+  "native",
+  "win-natural",
+  "install-native-host.ps1"
+);
+const installerSource = fs.readFileSync(installerPath, "utf8");
+
+test("service worker resolves the native messaging import from the extension root", () => {
+  assert.match(source, /importScripts\("\/src\/background\/native-messaging\.js"\)/);
+  assert.doesNotMatch(source, /importScripts\("src\/background\/native-messaging\.js"\)/);
+});
+
+test("native host installer computes its default publish path after parameter binding", () => {
+  assert.match(installerSource, /\[string\]\$PublishDir\s*=\s*""/);
+  assert.match(installerSource, /\$PublishDir\s*=\s*Join-Path\s+\$scriptRoot/);
+  assert.doesNotMatch(installerSource, /\[string\]\$PublishDir\s*=\s*\(Join-Path/);
+});
 
 test("speech backends, voice UI, controls, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');

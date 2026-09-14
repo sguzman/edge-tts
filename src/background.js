@@ -1,3 +1,9 @@
+if (typeof importScripts === "function") {
+  importScripts("/src/background/native-messaging.js");
+} else if (typeof require === "function") {
+  require("./background/native-messaging.js");
+}
+
 const READER_FILES = [
   "src/content/namespace.js",
   "src/content/text-model.js",
@@ -18,6 +24,12 @@ const READER_FILES = [
 
 const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
+const nativeMessagingApi = globalThis.EdgeTtsNativeMessaging;
+let nativeMessaging = null;
+function getNativeMessaging() {
+  if (!nativeMessaging) nativeMessaging = nativeMessagingApi.createTransport();
+  return nativeMessaging;
+}
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 let audioOwnerTabId = null;
@@ -202,6 +214,8 @@ async function speakLocalTtsForTab(tabId, message) {
   }
 }
 
+// The optional Native Messaging listener is installed separately from
+// this reader/audio dispatcher. Unrelated messages retain this original path.
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
@@ -264,6 +278,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   return false;
 });
+
+// Register diagnostics after the existing dispatcher so unrelated messages
+// always encounter the established audio/local response path first.
+nativeMessagingApi.installDiagnosticsListener(chrome.runtime, getNativeMessaging);
 
 chrome.tabs.onRemoved.addListener((tabId) => {
   injectionPromises.delete(tabId);

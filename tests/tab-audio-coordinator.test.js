@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
 
-let runtimeMessageListener = null;
+const runtimeMessageListeners = [];
 let tabRemovedListener = null;
 const sentMessages = [];
 const sessionStore = Object.create(null);
@@ -27,7 +27,7 @@ global.chrome = {
   runtime: {
     onMessage: {
       addListener(listener) {
-        runtimeMessageListener = listener;
+        runtimeMessageListeners.push(listener);
       }
     }
   },
@@ -57,7 +57,7 @@ require("../src/background.js");
 
 function sendRuntimeMessage(type, tabId) {
   return new Promise((resolve, reject) => {
-    if (!runtimeMessageListener) {
+    if (!runtimeMessageListeners.length) {
       reject(new Error("runtime listener was not registered"));
       return;
     }
@@ -67,10 +67,8 @@ function sendRuntimeMessage(type, tabId) {
       settled = true;
       resolve(response);
     };
-    const keepChannelOpen = runtimeMessageListener(
-      { type },
-      { tab: { id: tabId } },
-      sendResponse
+    const keepChannelOpen = runtimeMessageListeners.some((listener) =>
+      listener({ type }, { tab: { id: tabId } }, sendResponse) === true
     );
 
     if (keepChannelOpen !== true && !settled) {

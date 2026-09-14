@@ -2,3 +2,5 @@
 Thumbs.db
 node_modules/
 *.log
+native/win-natural/bin/
+native/win-natural/obj/
