@@ -129,15 +129,12 @@ test("Native host errors and disconnects reject the matching request", async () 
   await assert.rejects(disconnected, /disconnected/);
 });
 
-test("native discovery is not part of reader startup", () => {
+test("native discovery is not part of reader startup or the runtime dispatcher", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   const openStart = background.indexOf("chrome.action.onClicked");
   const listenerCount = (background.match(/chrome\.runtime\.onMessage\.addListener\(/g) || []).length;
-  const dispatcherStart = background.indexOf("chrome.runtime.onMessage.addListener");
-  const installStart = background.indexOf("nativeMessagingApi.installDiagnosticsListener");
   assert.ok(openStart >= 0);
   assert.equal(listenerCount, 1);
-  assert.ok(dispatcherStart >= 0);
-  assert.ok(installStart > dispatcherStart);
   assert.equal(background.slice(openStart).includes("nativeMessaging.diagnostics()"), false);
+  assert.equal(background.includes("installDiagnosticsListener"), false);
 });
