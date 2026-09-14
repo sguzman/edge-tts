@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const path = require("node:path");
+const vm = require("node:vm");
 
 const root = path.join(__dirname, "..");
 const page = fs.readFileSync(path.join(root, "diagnostics", "win-natural.js"), "utf8");
@@ -37,4 +38,70 @@ test("helper synthesis validates the actual Local token and SAPI selection", () 
   assert.doesNotMatch(host, /File\.WriteAll/);
   assert.match(host, /SynthesisChunkBytes = 48 \* 1024/);
   assert.match(host, /MaxSynthesisBytes = 8 \* 1024 \* 1024/);
+});
+
+test("diagnostic Stop invalidates a late synthesis response and URLs revoke on end", async () => {
+  const handlers = {};
+  const elements = {
+    "#connection": { textContent: "" },
+    "#voices": { replaceChildren() {}, append() {} },
+    "#speak": { disabled: false, addEventListener(type, handler) { handlers.speak = handler; } },
+    "#stop": { addEventListener(type, handler) { handlers.stop = handler; } },
+    "#status": { textContent: "" }
+  };
+  const audio = {
+    playCalls: 0,
+    paused: true,
+    onended: null,
+    play() { this.playCalls += 1; this.paused = false; return Promise.resolve(); },
+    pause() { this.paused = true; },
+    load() {},
+    removeAttribute() {}
+  };
+  let resolveSynthesis;
+  const revoked = [];
+  const created = [];
+  const transport = {
+    diagnostics: async () => ({
+      connected: true,
+      handshake: { protocol: 1, architecture: "x64" },
+      voices: [{ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }],
+      ariaVoice: { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }
+    }),
+    requestMultipart() { return new Promise((resolve) => { resolveSynthesis = resolve; }); }
+  };
+  const context = {
+    EdgeTtsNativeMessaging: { createTransport: () => transport },
+    document: {
+      querySelector(selector) { return elements[selector]; },
+      createElement() { return audio; }
+    },
+    URL: {
+      createObjectURL() { const url = `blob:test-${created.length}`; created.push(url); return url; },
+      revokeObjectURL(url) { revoked.push(url); }
+    },
+    Blob: class BlobMock {},
+    Uint8Array,
+    Promise,
+    atob,
+    console
+  };
+  vm.runInNewContext(page, context);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  const firstPlayback = handlers.speak();
+  handlers.stop();
+  resolveSynthesis({ wavBase64: Buffer.from("late-wav").toString("base64") });
+  await firstPlayback;
+  await Promise.resolve();
+  assert.equal(audio.playCalls, 1, "only the synchronous unlock may have played");
+  assert.equal(created.length, 0, "a stopped late response must not create an audio URL");
+  assert.equal(elements["#status"].textContent, "Stopped.");
+
+  const secondPlayback = handlers.speak();
+  resolveSynthesis({ wavBase64: Buffer.from("wav").toString("base64") });
+  await secondPlayback;
+  assert.equal(created.length, 1);
+  audio.onended();
+  assert.deepEqual(revoked, ["blob:test-0"]);
 });
