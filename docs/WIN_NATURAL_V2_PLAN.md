@@ -123,6 +123,11 @@ worked. Timing reported `YES` with 6 boundaries, first boundary
 `char 0, len 7, audio 160.25 ms`, last boundary
 `char 39, len 7, audio 2169.333 ms`, and monotonic timing `YES`.
 
+**Gate 4B: candidate / pending human browser QA.** Gate 4B maps the accepted
+SAPI timing records to existing reader segments and emits ordinary reader
+boundaries from the WIN-NATURAL audio element's `currentTime`. It does not
+change the highlighter, live controls, pause/resume, or native startup path.
+
 Add word-timing synchronization, live playback rate, and volume without resynthesis.
 
 Acceptance:

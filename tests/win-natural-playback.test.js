@@ -7,6 +7,7 @@ const readerSource = fs.readFileSync(path.join(__dirname, "..", "src", "content"
 
 function loadStack() {
   global.EdgeTtsExtension = {};
+  global.EdgeTtsExtension.TextModel = require("../src/content/text-model.js");
   global.speechSynthesis = {
     getVoices: () => [],
     addEventListener() {},
@@ -15,8 +16,17 @@ function loadStack() {
   };
   const messages = [];
   let resolveNative;
+  const frames = new Map();
+  let frameId = 0;
+  global.requestAnimationFrame = (callback) => {
+    const id = ++frameId;
+    frames.set(id, callback);
+    return id;
+  };
+  global.cancelAnimationFrame = (id) => frames.delete(id);
   const audio = {
     paused: true,
+    currentTime: 0,
     src: "",
     onended: null,
     onerror: null,
@@ -60,6 +70,13 @@ function loadStack() {
     audio,
     messages,
     revoked,
+    frames,
+    runFrame: (timestamp = 0) => {
+      const callbacks = [...frames.entries()];
+      for (const [id, callback] of callbacks) {
+        if (frames.delete(id)) callback(timestamp);
+      }
+    },
     resolveNative: (value) => resolveNative(value)
   };
 }
@@ -131,6 +148,84 @@ test("native reader preserves validated timing metadata without driving playback
   assert.equal(api.audio.playCalls, 1);
 });
 
+test("native timing maps through payload starts, deduplicates segments, and follows media time", async () => {
+  const api = loadStack();
+  const boundaries = [];
+  const engine = new api.LocalTtsSpeechEngine({ onBoundary: (segment, metadata) => boundaries.push({ segment, metadata }) });
+  const voice = nativeVoice(api);
+  const block = {
+    segments: [
+      { text: "one", blockIndex: 0, segmentIndex: 0, sentenceIndex: 0 },
+      { text: "two", blockIndex: 0, segmentIndex: 1, sentenceIndex: 0 }
+    ]
+  };
+  engine.speak(block, 0, { voice });
+  await waitForTurn();
+  api.resolveNative({
+    accepted: true,
+    wavBase64: Buffer.from("wav").toString("base64"),
+    totalBytes: 3,
+    timing: [
+      { charIndex: 0, charLength: 1, audioMs: 100 },
+      { charIndex: 1, charLength: 1, audioMs: 200 },
+      { charIndex: 4, charLength: 3, audioMs: 300 }
+    ]
+  });
+  await waitForTurn();
+  await waitForTurn();
+
+  api.runFrame();
+  assert.equal(boundaries.length, 0, "no boundary may emit before its media timestamp");
+  api.audio.currentTime = 0.15;
+  api.runFrame();
+  assert.equal(boundaries.length, 1);
+  assert.equal(boundaries[0].segment.text, "one");
+  assert.equal(boundaries[0].metadata.type, "win-natural-word");
+
+  api.audio.currentTime = 0.25;
+  api.runFrame();
+  assert.equal(boundaries.length, 1, "duplicate timing records must not re-emit a segment");
+
+  api.audio.currentTime = 0.35;
+  api.runFrame();
+  assert.equal(boundaries.length, 2);
+  assert.equal(boundaries[1].segment.text, "two");
+  assert.equal(api.frames.size, 1, "the media-clock scheduler remains active while audio plays");
+});
+
+test("native timing clock catches up to the latest boundary and stops on cancel", async () => {
+  const api = loadStack();
+  const boundaries = [];
+  const engine = new api.LocalTtsSpeechEngine({ onBoundary: (segment) => boundaries.push(segment.text) });
+  const voice = nativeVoice(api);
+  engine.speak({ segments: [
+    { text: "one", blockIndex: 0, segmentIndex: 0, sentenceIndex: 0 },
+    { text: "two", blockIndex: 0, segmentIndex: 1, sentenceIndex: 0 },
+    { text: "three", blockIndex: 0, segmentIndex: 2, sentenceIndex: 0 }
+  ] }, 0, { voice });
+  await waitForTurn();
+  api.resolveNative({
+    accepted: true,
+    wavBase64: Buffer.from("wav").toString("base64"),
+    totalBytes: 3,
+    timing: [
+      { charIndex: 0, charLength: 3, audioMs: 0 },
+      { charIndex: 4, charLength: 3, audioMs: 100 },
+      { charIndex: 8, charLength: 5, audioMs: 200 }
+    ]
+  });
+  await waitForTurn();
+  await waitForTurn();
+  api.audio.currentTime = 0.3;
+  api.runFrame();
+  assert.deepEqual(boundaries, ["three"]);
+  engine.cancel();
+  api.audio.currentTime = 1;
+  api.runFrame();
+  assert.deepEqual(boundaries, ["three"]);
+  assert.equal(api.frames.size, 0);
+});
+
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
   const api = loadStack();
   const engine = new api.LocalTtsSpeechEngine({});
@@ -172,6 +267,7 @@ test("stacked LocalTtsSpeechEngine routes native Aria through background with th
   assert.equal(started.length, 1);
   api.audio.onended();
   assert.equal(ended.length, 1);
+  assert.equal(api.frames.size, 0, "audio end must tear down the native timing scheduler");
   assert.equal(api.revoked.length, 1);
   await waitForTurn();
   assert.equal(api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE").length, 1);

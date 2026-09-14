@@ -108,6 +108,25 @@
     return timing;
   }
 
+  function mapWinNaturalTimingToSegments(timing, payload) {
+    if (!Array.isArray(timing) || !payload?.segments?.length ||
+        !Array.isArray(payload.starts) || typeof segmentIndexForCharIndex !== "function") {
+      return [];
+    }
+    const seen = new Set();
+    const boundaries = [];
+    for (const boundary of timing) {
+      const segmentIndex = segmentIndexForCharIndex(payload.starts, boundary.charIndex);
+      const segment = payload.segments[segmentIndex];
+      if (!segment) continue;
+      const key = `${segment.blockIndex ?? "?"}:${segment.segmentIndex ?? segmentIndex}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      boundaries.push({ ...boundary, segment });
+    }
+    return boundaries;
+  }
+
   function localRequestId(generation, chunkIndex) {
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
@@ -141,6 +160,9 @@
       this.winNaturalActive = false;
       this.winNaturalRequest = null;
       this.winNaturalTiming = [];
+      this.winNaturalBoundaries = [];
+      this.winNaturalBoundaryIndex = 0;
+      this.winNaturalBoundaryFrame = null;
       this.winNaturalAudio = null;
       this.winNaturalObjectUrl = "";
       void this.refreshExtensionVoices();
@@ -268,7 +290,48 @@
       this.winNaturalObjectUrl = "";
     }
 
+    _clearWinNaturalBoundaryClock() {
+      if (this.winNaturalBoundaryFrame !== null) {
+        root.cancelAnimationFrame?.(this.winNaturalBoundaryFrame);
+        this.winNaturalBoundaryFrame = null;
+      }
+    }
+
+    _startWinNaturalBoundaryClock(generation, requestId) {
+      this._clearWinNaturalBoundaryClock();
+      const tick = () => {
+        if (generation !== this.generation ||
+            this.winNaturalRequest?.requestId !== requestId ||
+            !this.winNaturalActive || !this.winNaturalAudio) {
+          this.winNaturalBoundaryFrame = null;
+          return;
+        }
+
+        const mediaTime = Math.max(0, Number(this.winNaturalAudio.currentTime) || 0);
+        let latest = null;
+        while (this.winNaturalBoundaryIndex < this.winNaturalBoundaries.length &&
+               this.winNaturalBoundaries[this.winNaturalBoundaryIndex].audioMs / 1000 <= mediaTime) {
+          latest = this.winNaturalBoundaries[this.winNaturalBoundaryIndex];
+          this.winNaturalBoundaryIndex += 1;
+        }
+        if (latest) {
+          this.currentChunkBoundaryIndex = latest.segment.segmentIndex ?? this.currentChunkBoundaryIndex;
+          this.onBoundary?.(latest.segment, {
+            type: "win-natural-word",
+            charIndex: latest.charIndex,
+            length: latest.charLength,
+            audioMs: latest.audioMs,
+            winNatural: true
+          });
+        }
+
+        this.winNaturalBoundaryFrame = root.requestAnimationFrame?.(tick) ?? null;
+      };
+      this.winNaturalBoundaryFrame = root.requestAnimationFrame?.(tick) ?? null;
+    }
+
     _resetWinNaturalState({ keepMode = true, reason = "reset" } = {}) {
+      this._clearWinNaturalBoundaryClock();
       const audio = this.winNaturalAudio;
       if (audio) {
         try {
@@ -280,6 +343,8 @@
       this._revokeWinNaturalObjectUrl();
       this.winNaturalRequest = null;
       this.winNaturalTiming = [];
+      this.winNaturalBoundaries = [];
+      this.winNaturalBoundaryIndex = 0;
       this.winNaturalActive = false;
       if (!keepMode) this.winNaturalSessionMode = false;
       this.clearPlaybackTimers?.();
@@ -462,6 +527,9 @@
 
       this.winNaturalSessionMode = true;
       this.winNaturalActive = false;
+      this._clearWinNaturalBoundaryClock();
+      this.winNaturalBoundaries = [];
+      this.winNaturalBoundaryIndex = 0;
       this.generation += 1;
       const generation = this.generation;
       this.currentChunks = chunks;
@@ -521,6 +589,8 @@
       }
       const payload = this.winNaturalRequest.payload;
       this.winNaturalTiming = normalizeWinNaturalTiming(response.timing, payload.text.length);
+      this.winNaturalBoundaries = mapWinNaturalTimingToSegments(this.winNaturalTiming, payload);
+      this.winNaturalBoundaryIndex = 0;
       if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
       const audio = this._ensureWinNaturalAudio();
       if (!audio) {
@@ -533,6 +603,7 @@
       audio.src = this.winNaturalObjectUrl;
       audio.onended = () => {
         if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+        this._clearWinNaturalBoundaryClock();
         this.winNaturalActive = false;
         this.winNaturalRequest = null;
         this._revokeWinNaturalObjectUrl();
@@ -564,6 +635,7 @@
       this.winNaturalActive = true;
       const startedAt = root.performance?.now?.() ?? Date.now();
       this.onStart?.(payload.segments?.[0], Math.max(0, startedAt - this.requestedAt));
+      this._startWinNaturalBoundaryClock(generation, requestId);
     }
 
     _speakLocalChunk(generation) {

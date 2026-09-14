@@ -389,6 +389,14 @@ with character offsets relative to the exact synthesis text and `audioMs` in
 SAPI milliseconds. Gate 4A does not implement highlighting, live rate/volume,
 pause/resume changes, or startup-latency optimization.
 
+### Gate 4B — media-clock highlighting candidate
+
+**Candidate pending human browser QA.** SAPI timing is evidence only; the
+WIN-NATURAL `HTMLAudioElement.currentTime` is the playback clock. Existing
+reader segments and the existing Highlighter remain presentation authority.
+This candidate maps timing through `payload.starts` and emits existing
+`onBoundary` callbacks without changing Zira or Online routing.
+
 ### Purpose
 
 Complete the high-quality user experience around the Windows Natural backend.
