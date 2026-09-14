@@ -92,12 +92,12 @@
       }
       const voiceResponse = await request("voices");
       const voices = Array.isArray(voiceResponse?.voices)
-        ? voiceResponse.voices.filter((voice) => String(voice?.id || "").startsWith("Local-"))
+        ? voiceResponse.voices.filter((voice) => isAdapterVoice(voice))
         : [];
       const ariaVoice = voices.find(
         (voice) =>
-          String(voice?.id || "") === "Local-aria-v2" &&
-          String(voice?.name || "") === "Microsoft Aria"
+          String(voice?.name || "").trim() === "Microsoft Aria" &&
+          (!voice?.lang || String(voice.lang).toLowerCase() === "en-us")
       ) || null;
       const result = {
         connected: true,
@@ -110,6 +110,10 @@
       };
       console.info("Edge Natural TTS Native Messaging diagnostics", result);
       return result;
+    }
+
+    function isAdapterVoice(voice) {
+      return String(voice?.id || "").toLowerCase().startsWith("local-");
     }
 
     return { diagnostics, disconnect, request, HOST_NAME, REQUEST_TIMEOUT_MS };

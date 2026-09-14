@@ -53,16 +53,37 @@ test("Native Messaging handshake and filtered voice enumeration succeed", async 
     type: "voices",
     requestId: port.sent[1].requestId,
     voices: [
-      { id: "Local-aria-v2", name: "Microsoft Aria", lang: "en-US" },
+      { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" },
       { id: "Microsoft David Desktop", name: "Microsoft David", lang: "en-US" }
     ]
   });
   const result = await pending;
   assert.equal(result.connected, true);
   assert.deepEqual(result.handshake, { protocol: 1, architecture: "x64" });
-  assert.deepEqual(result.voices.map((voice) => voice.id), ["Local-aria-v2"]);
+  assert.deepEqual(result.voices.map((voice) => voice.id), ["Local-NarratorVoices"]);
   assert.equal(result.ariaFound, true);
-  assert.deepEqual(result.ariaVoice, { id: "Local-aria-v2", name: "Microsoft Aria", lang: "en-US" });
+  assert.deepEqual(result.ariaVoice, { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" });
+});
+
+test("Aria detection uses the adapter prefix and voice identity, not a canonical token ID", async () => {
+  const port = fakePort();
+  const transport = createTransport({ connectNative: () => port, now: () => 100 });
+  const pending = transport.diagnostics();
+  port.emit({ type: "hello", requestId: port.sent[0].requestId, protocol: 1, architecture: "x64" });
+  await Promise.resolve();
+  port.emit({
+    type: "voices",
+    requestId: port.sent[1].requestId,
+    voices: [
+      { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" },
+      { id: "Local-other", name: "Microsoft Aria", lang: "fr-FR" },
+      { id: "Microsoft-Aria", name: "Microsoft Aria", lang: "en-US" }
+    ]
+  });
+  const result = await pending;
+  assert.deepEqual(result.voices.map((voice) => voice.id), ["Local-NarratorVoices", "Local-other"]);
+  assert.equal(result.ariaFound, true);
+  assert.equal(result.ariaVoice.id, "Local-NarratorVoices");
 });
 
 test("diagnostic listener ignores existing audio messages and has no eager native work", () => {
