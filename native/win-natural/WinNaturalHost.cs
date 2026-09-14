@@ -7,6 +7,7 @@ using System.Linq;
 using System.Runtime.InteropServices;
 using System.Speech.Synthesis;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Win32;
 using System.Security.Principal;
 
@@ -14,6 +15,10 @@ using System.Security.Principal;
 // Natural voice as a Local-* SAPI voice; this host only handshakes/enumerates.
 internal static class WinNaturalHost
 {
+    private sealed record EnumeratorSnapshot(
+        [property: JsonPropertyName("exists")] bool Exists,
+        [property: JsonPropertyName("values")] Dictionary<string, string?> Values);
+
     private const int MaxMessageBytes = 16 * 1024 * 1024;
     private static readonly object OutputGate = new();
     private static readonly Stream Output = Console.OpenStandardOutput();
@@ -93,6 +98,8 @@ internal static class WinNaturalHost
                 executablePath = Process.GetCurrentProcess().MainModule?.FileName,
                 currentDirectory = Directory.GetCurrentDirectory(),
                 user = WindowsIdentity.GetCurrent().Name,
+                userSid = WindowsIdentity.GetCurrent().User?.Value,
+                integrityLevel = IntegrityLevel(),
                 is64BitProcess = Environment.Is64BitProcess,
                 osArchitecture = RuntimeInformation.OSArchitecture.ToString(),
                 installedVoiceCount = installed.Count,
@@ -119,11 +126,20 @@ internal static class WinNaturalHost
 
     private static object RegistryDiagnostics()
     {
-        var narratorPath = Registry.CurrentUser
-            .OpenSubKey(@"Software\NaturalVoiceSAPIAdapter\Enumerator")?
-            .GetValue("NarratorVoicePath") as string;
+        using var identity = WindowsIdentity.GetCurrent();
+        var sid = identity.User?.Value;
+        var currentUser = ReadEnumerator(Registry.CurrentUser.OpenSubKey(@"Software\NaturalVoiceSAPIAdapter\Enumerator"));
+        var usersSid = sid == null
+            ? null
+            : ReadEnumerator(Registry.Users.OpenSubKey($@"{sid}\Software\NaturalVoiceSAPIAdapter\Enumerator"));
+        var narratorPath = currentUser.Values.TryGetValue("NarratorVoicePath", out var configuredPath)
+            ? configuredPath
+            : null;
         return new
         {
+            currentUserSid = sid,
+            currentUser,
+            hkeyUsersCurrentSid = usersSid,
             narratorVoicePath = narratorPath,
             narratorVoicePathIsRooted = narratorPath != null && Path.IsPathRooted(narratorPath),
             narratorVoicePathExists = narratorPath != null && Directory.Exists(narratorPath),
@@ -137,12 +153,18 @@ internal static class WinNaturalHost
     {
         using var localMachine = RegistryKey.OpenBaseKey(RegistryHive.LocalMachine, view);
         using var currentUser = RegistryKey.OpenBaseKey(RegistryHive.CurrentUser, view);
+        using var users = RegistryKey.OpenBaseKey(RegistryHive.Users, view);
+        var sid = WindowsIdentity.GetCurrent().User?.Value;
+        var userEnumerator = sid == null
+            ? null
+            : users.OpenSubKey($@"{sid}\Software\NaturalVoiceSAPIAdapter\Enumerator");
         var adapterPaths = FindAdapterPaths(localMachine.OpenSubKey(@"SOFTWARE\Classes\CLSID"));
         var machineTokens = CountLocalTokens(localMachine.OpenSubKey(@"SOFTWARE\Microsoft\Speech\Voices\Tokens"));
         var userTokens = CountLocalTokens(currentUser.OpenSubKey(@"Software\Microsoft\Speech\Voices\Tokens"));
         return new
         {
             view = view.ToString(),
+            adapterEnumerator = ReadEnumerator(userEnumerator),
             adapterPaths,
             adapterFilesExist = adapterPaths.All(File.Exists),
             machineSapiTokenCount = machineTokens.total,
@@ -151,6 +173,53 @@ internal static class WinNaturalHost
             userLocalTokenCount = userTokens.local
         };
     }
+
+    private static EnumeratorSnapshot ReadEnumerator(RegistryKey? key)
+    {
+        if (key == null) return new EnumeratorSnapshot(false, new Dictionary<string, string?>());
+        using (key)
+        {
+            return new EnumeratorSnapshot(true,
+                key.GetValueNames().ToDictionary(name => name, name => key.GetValue(name)?.ToString()));
+        }
+    }
+
+    private static string IntegrityLevel()
+    {
+        using var identity = WindowsIdentity.GetCurrent();
+        var sid = identity.User?.Value;
+        var token = identity.Token;
+        if (token == IntPtr.Zero) return "unknown";
+        GetTokenInformation(token, 25, IntPtr.Zero, 0, out var length);
+        var buffer = Marshal.AllocHGlobal(length);
+        try
+        {
+            if (!GetTokenInformation(token, 25, buffer, length, out _)) return "unknown";
+            var integritySid = Marshal.ReadIntPtr(buffer);
+            var subAuthorityCount = Marshal.ReadByte(GetSidSubAuthorityCount(integritySid));
+            if (subAuthorityCount == 0) return "unknown";
+            var rid = Marshal.ReadInt32(GetSidSubAuthority(integritySid, (uint)(subAuthorityCount - 1)));
+            return rid switch
+            {
+                >= 0x5000 => "protected",
+                >= 0x4000 => "system",
+                >= 0x3000 => "high",
+                >= 0x2000 => "medium",
+                _ => "low"
+            };
+        }
+        finally { Marshal.FreeHGlobal(buffer); }
+    }
+
+    [DllImport("advapi32.dll", SetLastError = true)]
+    private static extern bool GetTokenInformation(IntPtr tokenHandle, int tokenInformationClass,
+        IntPtr tokenInformation, int tokenInformationLength, out int returnLength);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+
+    [DllImport("advapi32.dll")]
+    private static extern IntPtr GetSidSubAuthority(IntPtr sid, uint subAuthorityIndex);
 
     private static string[] FindAdapterPaths(RegistryKey? clsids)
     {
