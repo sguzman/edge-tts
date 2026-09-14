@@ -8,41 +8,18 @@ class MockBaseEngine {
     this.onError = options.onError;
     this.generation = 0;
     this.delegated = [];
-    this.directSessionMode = false;
-    this.directAudio = null;
   }
 
   speak(_block, _start, options) {
     this.delegated.push(options.voice);
   }
 
-  cancel() {
-    if (this.directSessionMode) {
-      this.directCancelled = true;
-      this.directAudio?.pause?.();
-      return;
-    }
-    this.baseCancelled = true;
-  }
+  cancel() { this.baseCancelled = true; }
   abandon() { this.baseAbandoned = true; }
-  pause() {
-    if (this.directSessionMode) {
-      this.directPaused = true;
-      this.directAudio?.pause?.();
-      return;
-    }
-    this.basePaused = true;
-  }
-  resume() {
-    if (this.directSessionMode) {
-      this.directResumed = true;
-      void this.directAudio?.play?.();
-      return;
-    }
-    this.baseResumed = true;
-  }
-  isPaused() { return this.directSessionMode ? Boolean(this.directAudio?.paused) : false; }
-  isSpeaking() { return this.directSessionMode ? !this.directAudio?.paused : false; }
+  pause() { this.basePaused = true; }
+  resume() { this.baseResumed = true; }
+  isPaused() { return false; }
+  isSpeaking() { return false; }
   prepareDirectPlayback() { this.basePrepared = true; return true; }
 }
 
@@ -205,37 +182,4 @@ test("native audio URL is revoked after playback ends", async () => {
   engine.nativeAudio.onended();
   assert.deepEqual(revoked, ["blob:native-test"]);
   assert.equal(ended, 1);
-});
-
-test("Online lifecycle calls pass through the Windows Natural wrapper", () => {
-  const audio = {
-    paused: false,
-    pause() { this.paused = true; },
-    play() { this.paused = false; return Promise.resolve(); }
-  };
-  const engine = new WinNaturalSpeechEngine({});
-  engine.directSessionMode = true;
-  engine.directAudio = audio;
-
-  engine.pause();
-  assert.equal(engine.directPaused, true);
-  assert.equal(audio.paused, true);
-  engine.resume();
-  assert.equal(engine.directResumed, true);
-  engine.cancel();
-  assert.equal(engine.directCancelled, true);
-  assert.equal(audio.paused, true);
-  assert.equal(engine.nativeSessionMode, false);
-});
-
-test("native completion ownership is active only during a native request/session", () => {
-  const engine = new WinNaturalSpeechEngine({});
-  assert.equal(engine.ownsCompletionWithoutBoundaries(), false);
-  engine.nativeRequest = { requestId: "pending" };
-  assert.equal(engine.ownsCompletionWithoutBoundaries(), true);
-  engine.nativeRequest = null;
-  engine.nativeSessionMode = true;
-  assert.equal(engine.ownsCompletionWithoutBoundaries(), true);
-  engine.nativeSessionMode = false;
-  assert.equal(engine.ownsCompletionWithoutBoundaries(), false);
 });

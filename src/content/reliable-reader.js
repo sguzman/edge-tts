@@ -27,10 +27,6 @@
     return `${Number(blockIndex)}:${Number(segmentIndex)}`;
   }
 
-  function shouldUseBatchStartWatchdog(speech) {
-    return !speech?.directSessionMode && !speech?.ownsCompletionWithoutBoundaries?.();
-  }
-
   function advanceCursorOneSegment(model, blockIndex, segmentIndex) {
     const blocks = model?.blocks;
     if (!Array.isArray(blocks) || blocks.length === 0) {
@@ -165,7 +161,7 @@
       // accepting an utterance without producing audio/boundaries; applying it
       // while an MP3 is legitimately being synthesized would cancel slow but
       // healthy direct requests and recreate the old Start/Retry loop.
-      if (!shouldUseBatchStartWatchdog(this.speech)) {
+      if (this.speech?.directSessionMode) {
         return;
       }
 
@@ -323,7 +319,6 @@
     MAX_AUDIO_NO_BOUNDARY_RETRIES,
     advanceCursorOneSegment,
     cursorKey,
-    nextBatchBlockIndex,
-    shouldUseBatchStartWatchdog
+    nextBatchBlockIndex
   };
 });

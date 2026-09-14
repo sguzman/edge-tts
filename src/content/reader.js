@@ -637,9 +637,7 @@
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
       this.settings.voiceKey = voiceSelectionKey(voice);
-      if (voice.__edgeTtsSource === "win-natural") {
-        this.speech.prepareDirectPlayback?.(voice);
-      }
+      this.speech.prepareDirectPlayback?.(voice);
       await this.saveSettings();
       if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();

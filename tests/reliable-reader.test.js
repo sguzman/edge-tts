@@ -67,8 +67,7 @@ const {
   BATCH_TRANSITION_DELAY_MS,
   advanceCursorOneSegment,
   cursorKey,
-  nextBatchBlockIndex,
-  shouldUseBatchStartWatchdog
+  nextBatchBlockIndex
 } = require("../src/content/reliable-reader.js");
 
 test("next batch starts after the completed batch end, not the last boundary cursor", () => {
@@ -131,29 +130,4 @@ test("final batch finishes the document instead of scheduling another batch", ()
 
   assert.equal(app.finished, true);
   assert.equal(app.baseSpeakCalls, 0);
-});
-
-test("native boundaryless playback is exempt from the legacy retry watchdog", () => {
-  assert.equal(shouldUseBatchStartWatchdog({ directSessionMode: false, ownsCompletionWithoutBoundaries: () => true }), false);
-
-  const previousSetTimeout = global.setTimeout;
-  let timerCalls = 0;
-  global.setTimeout = () => {
-    timerCalls += 1;
-    return 1;
-  };
-  try {
-    const app = new ReliableReaderApp();
-    app.speech = {
-      nativeSessionMode: true,
-      ownsCompletionWithoutBoundaries: () => true,
-      cancel: () => { throw new Error("native watchdog must not cancel active audio"); }
-    };
-    app.speakCurrentPosition();
-    assert.equal(timerCalls, 0);
-    assert.equal(app.baseSpeakCalls, 1);
-    assert.equal(app.currentSegmentIndex, 1);
-  } finally {
-    global.setTimeout = previousSetTimeout;
-  }
 });
