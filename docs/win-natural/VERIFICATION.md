@@ -17,6 +17,35 @@ development worktree  -> development Edge profile
 
 Never infer development success from the stable profile or vice versa.
 
+## Browser candidate QA control: fresh page required
+
+After changing, reverting, or reloading the unpacked extension, perform browser
+acceptance only on a newly opened page or a fully reloaded page that has not
+retained a reader runtime from another candidate. Do not use a tab that
+previously hosted a different injected build as evidence for the current source
+tree.
+
+The injected page runtime and extension namespace can remain resident long enough
+to make an existing tab untrustworthy during extension-reload development. The
+reader bootstrap also has an existing-runtime sentinel/readiness optimization to
+avoid duplicate injection. Consequently, stale page state can masquerade as
+current-candidate behavior even after the repository and unpacked extension have
+been reverted or reloaded.
+
+Required procedure after every candidate change or revert:
+
+1. Reload the unpacked extension.
+2. Open a genuinely new webpage/tab, or fully reload a page that did not host the
+   previous candidate runtime.
+3. Run the acceptance checklist there.
+4. Discard any contradictory result from a previously injected tab until it has
+   been replaced by a fresh page.
+
+This control condition was confirmed during Gate 3 recovery: the reverted tree
+matched the accepted Gate 2 source exactly, yet an old Gate 3-injected tab still
+failed. On a new page after extension reload, Windows Legacy Zira and Online Aria
+passed again.
+
 ## Gate 0 — known-good reader baseline
 
 ### Purpose

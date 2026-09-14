@@ -2,6 +2,35 @@
 
 This document records the investigation that led to the current Windows Natural integration. It is intentionally more detailed than a setup guide. The purpose is to preserve the causal history: which observations were real, which hypotheses were wrong, and which implementation choices exist because of browser or Windows behavior that was not obvious from documentation.
 
+## Browser candidate QA rule: use a fresh page after extension changes
+
+After changing, reverting, or reloading the unpacked extension, browser acceptance
+must be performed on a newly opened page or on a fully reloaded page that has not
+retained a reader runtime from another candidate. Never infer the current source
+candidate's behavior from a tab that previously hosted another build.
+
+This became decisive during Gate 3 recovery. The repository had been reverted to
+the browser-accepted Gate 2 tree, but an existing tab that had previously hosted
+the failed Gate 3 injection still behaved as though the failed runtime were
+present. On a genuinely new page after reloading the extension, Windows Legacy
+Zira and Online Aria both passed again.
+
+The likely mechanism is that the page-resident injected extension namespace and
+reader runtime can survive long enough to make an existing tab untrustworthy
+during extension-reload development. The reader bootstrap has an existing-runtime
+sentinel/readiness optimization intended to avoid duplicate injection. That
+optimization is useful during normal operation, but it means a stale page can
+masquerade as the current unpacked-extension candidate after a reload or revert.
+
+The required control procedure is therefore:
+
+1. Reload the unpacked extension.
+2. Open a new tab/page, or fully reload a page that never hosted the prior
+   candidate runtime.
+3. Perform browser acceptance only in that fresh page.
+4. Treat behavior from a previously injected tab as stale until the page is
+   discarded and recreated.
+
 ## 1. Original objective
 
 The project already had two working categories of speech:
