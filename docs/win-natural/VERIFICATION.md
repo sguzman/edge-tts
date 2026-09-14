@@ -319,8 +319,14 @@ and can reconnect on a later diagnostics request. Extension-page synthesis does
 not require `sender.tab.id`. ReaderApp and all normal reader playback remain
 outside this gate.
 
-**Pending human browser acceptance.** Gate 3C remains the future normal-reader
-WIN-NATURAL integration gate.
+**PASSED.** Human browser acceptance was completed on fresh pages after
+reloading the unpacked extension. The diagnostics page reported
+`Connected via background — protocol 1, x64`, enumerated
+`Local-NarratorVoices / Microsoft Aria`, produced audible local Aria speech,
+and Stop worked. A fresh normal reader page preserved audible Windows Legacy
+Zira and Online Aria while WIN-NATURAL remained visible but
+disabled/catalog-only. Gate 3C remains the future normal-reader WIN-NATURAL
+integration gate.
 
 ## Gate 3C — minimal normal-reader WIN-NATURAL routing
 
@@ -488,5 +494,19 @@ Accepted after human browser QA confirmed:
 5. a fresh normal reader page preserved Windows Legacy Zira and Online Aria;
 6. WIN-NATURAL remained visible but disabled/catalog-only;
 7. Online William's known limitation was not treated as a Gate 3A regression.
+
+### Gate 3B
+
+Accepted after human browser QA confirmed:
+
+1. the diagnostics page used the background-owned transport and displayed
+   `Connected via background — protocol 1, x64`;
+2. Microsoft Aria enumerated as `Local-NarratorVoices`;
+3. diagnostic Aria playback was audible;
+4. diagnostic Stop worked;
+5. a fresh normal reader page preserved Windows Legacy Zira and Online Aria;
+6. WIN-NATURAL remained visible but disabled/catalog-only.
+
+Gate 3C was not started.
 
 Future gates should append similarly explicit acceptance histories rather than overwriting earlier evidence.

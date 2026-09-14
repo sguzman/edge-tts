@@ -501,3 +501,11 @@ helper multipart protocol is unchanged. The service worker returns the bounded
 base64 WAV response to the page, which still owns gesture unlock, playback,
 Stop/generation invalidation, and object-URL revocation. ReaderApp remains
 untouched; Gate 3C is still the future reader-integration gate.
+
+Gate 3B was accepted by human browser QA on fresh pages after reloading the
+unpacked extension. The diagnostics page reported
+`Connected via background — protocol 1, x64`, enumerated
+`Local-NarratorVoices / Microsoft Aria`, produced audible local Aria speech,
+and Stop worked. A fresh normal reader page preserved audible Windows Legacy
+Zira and Online Aria, while WIN-NATURAL remained visible but
+disabled/catalog-only. Gate 3C was deliberately not started.
