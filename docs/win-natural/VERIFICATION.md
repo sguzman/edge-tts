@@ -367,6 +367,11 @@ the current sentence instead of preserving an intra-sentence audio position.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
+**IN PROGRESS — Gate 4A timing substrate pending human browser QA.** Gate 4A
+captures request-relative SAPI `SpeakProgress` records and transports them with
+the completed WAV. It stops before visual mapping/highlighting and live control
+changes; Gate 4B must not begin until this candidate is accepted.
+
 ### Purpose
 
 Complete the high-quality user experience around the Windows Natural backend.

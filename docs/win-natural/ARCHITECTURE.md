@@ -335,7 +335,26 @@ Gate 5: promotion candidate
 
 Each gate is a compatibility firewall. Do not combine future gates because implementation looks easy in isolation.
 
-## 15.1 Gate 2 catalog-only decisions
+### 15.1 Gate 4A timing substrate
+
+Gate 4A adds no presentation behavior. For each native synthesis request, the
+persistent helper attaches a request-scoped `SpeakProgress` handler before
+`Speak(text)` and removes it in `finally`. Valid records are serialized at
+`synth-end` beside the existing WAV metadata:
+
+```json
+{"charIndex":0,"charLength":5,"audioMs":0}
+```
+
+`charIndex` and `charLength` are request-relative character offsets, and
+`audioMs` is a finite non-negative millisecond position. The background
+assembler validates bounds and monotonic audio order, contains malformed
+individual records, and returns the canonical array with `wavBase64` and
+`totalBytes`. The content engine preserves the validated array as playback
+metadata but does not drive highlighting from it. Gate 4B owns mapping these
+records to reader segments.
+
+## 15.2 Gate 2 catalog-only decisions
 
 Gate 2 represents each native voice as a catalog object with the actual token
 preserved separately from its logical identity:

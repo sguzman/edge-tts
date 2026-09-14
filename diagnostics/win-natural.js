@@ -3,6 +3,7 @@
   const voices = document.querySelector("#voices");
   const speakButton = document.querySelector("#speak");
   const stopButton = document.querySelector("#stop");
+  const timingStatus = document.querySelector("#timing");
   const status = document.querySelector("#status");
   const audio = document.createElement("audio");
   const unlockWav = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
@@ -70,6 +71,22 @@
     setStatus(ariaVoice ? `Aria ready: ${ariaVoice.id}` : "Microsoft Aria was not enumerated.");
   }
 
+  function renderTiming(boundaries) {
+    if (!Array.isArray(boundaries) || boundaries.length === 0) {
+      timingStatus.textContent = "Timing captured: NO (0 boundaries)";
+      return;
+    }
+    const first = boundaries[0];
+    const last = boundaries[boundaries.length - 1];
+    const monotonic = boundaries.every((boundary, index) => index === 0 ||
+      Number(boundary.audioMs) >= Number(boundaries[index - 1].audioMs));
+    timingStatus.textContent = `Timing captured: YES\n` +
+      `Boundary count: ${boundaries.length}\n` +
+      `First boundary: char ${first.charIndex}, len ${first.charLength}, audio ${first.audioMs} ms\n` +
+      `Last boundary: char ${last.charIndex}, len ${last.charLength}, audio ${last.audioMs} ms\n` +
+      `Monotonic timing: ${monotonic ? "YES" : "NO"}`;
+  }
+
   async function loadDiagnostics() {
     try {
       const response = await chrome.runtime.sendMessage({ type: "EDGE_TTS_WIN_NATURAL_DIAGNOSTICS" });
@@ -98,6 +115,7 @@
       if (response.totalBytes !== undefined && response.totalBytes !== bytes.length) {
         throw new Error("Background returned a WAV size mismatch.");
       }
+      renderTiming(response.timing);
       revokeAudio();
       objectUrl = URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
       audio.src = objectUrl;

@@ -107,10 +107,43 @@ test("multipart synthesis reconstructs start/chunk/end in order", async () => {
   const { port, pending, request } = startMultipartRequest();
   port.emit({ type: "synth-chunk", requestId: request.requestId, index: 0, data: Buffer.from("he").toString("base64") });
   port.emit({ type: "synth-chunk", requestId: request.requestId, index: 1, data: Buffer.from("llo").toString("base64") });
-  port.emit({ type: "synth-end", requestId: request.requestId, totalBytes: 5, chunkCount: 2 });
+  port.emit({
+    type: "synth-end",
+    requestId: request.requestId,
+    totalBytes: 5,
+    chunkCount: 2,
+    timing: [
+      { charIndex: 0, charLength: 2, audioMs: 0 },
+      { charIndex: 2, charLength: 2, audioMs: 143.25 }
+    ]
+  });
   const result = await pending;
   assert.equal(Buffer.from(result.wavBase64, "base64").toString(), "hello");
   assert.equal(result.totalBytes, 5);
+  assert.deepEqual(result.timing, [
+    { charIndex: 0, charLength: 2, audioMs: 0 },
+    { charIndex: 2, charLength: 2, audioMs: 143.25 }
+  ]);
+});
+
+test("multipart synthesis contains malformed timing without weakening WAV validation", async () => {
+  const { port, pending, request } = startMultipartRequest();
+  port.emit({ type: "synth-chunk", requestId: request.requestId, index: 0, data: Buffer.from("he").toString("base64") });
+  port.emit({ type: "synth-chunk", requestId: request.requestId, index: 1, data: Buffer.from("llo").toString("base64") });
+  port.emit({
+    type: "synth-end",
+    requestId: request.requestId,
+    totalBytes: 5,
+    chunkCount: 2,
+    timing: [
+      { charIndex: 0, charLength: 2, audioMs: 10 },
+      { charIndex: 99, charLength: 2, audioMs: 20 },
+      { charIndex: 2, charLength: 2, audioMs: 5 }
+    ]
+  });
+  const result = await pending;
+  assert.equal(Buffer.from(result.wavBase64, "base64").toString(), "hello");
+  assert.deepEqual(result.timing, [{ charIndex: 0, charLength: 2, audioMs: 10 }]);
 });
 
 for (const [name, emitInvalid] of [

@@ -110,6 +110,14 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
+**Status: IN PROGRESS. Gate 4A is the current timing-substrate candidate;
+human browser QA is pending.**
+
+Gate 4A only captures and transports request-relative native timing metadata.
+It does not implement visual highlighting, live rate/volume, pause/resume
+changes, or startup-latency optimization. Gate 4B will own timing-to-reader
+mapping and highlighting after Gate 4A is accepted.
+
 Add word-timing synchronization, live playback rate, and volume without resynthesis.
 
 Acceptance:

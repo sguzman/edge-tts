@@ -17,6 +17,9 @@ test("diagnostics page is an extension-origin page with no ReaderApp dependency"
   assert.match(page, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
   assert.match(page, /maxWavBytes = 8 \* 1024 \* 1024/);
   assert.match(page, /WAV size mismatch/);
+  assert.match(html, /id="timing"/);
+  assert.match(page, /Timing captured: YES/);
+  assert.match(page, /Monotonic timing/);
 });
 
 test("diagnostics page uses the actual Local-* Aria token and owns audio cleanup", () => {
@@ -41,6 +44,14 @@ test("helper synthesis validates the actual Local token and SAPI selection", () 
   assert.doesNotMatch(host, /File\.WriteAll/);
   assert.match(host, /SynthesisChunkBytes = 48 \* 1024/);
   assert.match(host, /MaxSynthesisBytes = 8 \* 1024 \* 1024/);
+  assert.match(host, /SpeakProgressEventArgs/);
+  assert.match(host, /synthesizer\.SpeakProgress \+= progressHandler/);
+  assert.match(host, /synthesizer\.SpeakProgress -= progressHandler/);
+  assert.match(host, /finally/);
+  assert.match(host, /charIndex/);
+  assert.match(host, /charLength/);
+  assert.match(host, /audioMs/);
+  assert.match(host, /timing \}/);
 });
 
 test("diagnostic Stop invalidates a late synthesis response and URLs revoke on end", async () => {
@@ -50,6 +61,7 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
     "#voices": { replaceChildren() {}, append() {} },
     "#speak": { disabled: false, addEventListener(type, handler) { handlers.speak = handler; } },
     "#stop": { addEventListener(type, handler) { handlers.stop = handler; } },
+    "#timing": { textContent: "" },
     "#status": { textContent: "" }
   };
   const audio = {

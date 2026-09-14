@@ -71,6 +71,27 @@
         return root.btoa(binary);
       }
 
+      function validateTiming(value, textLength) {
+        if (value === undefined) return [];
+        if (!Array.isArray(value)) return [];
+        let previousAudioMs = 0;
+        const timing = [];
+        for (const boundary of value) {
+          const charIndex = Number(boundary?.charIndex);
+          const charLength = Number(boundary?.charLength);
+          const audioMs = Number(boundary?.audioMs);
+          if (!Number.isSafeInteger(charIndex) || charIndex < 0 ||
+              !Number.isSafeInteger(charLength) || charLength <= 0 ||
+              (Number.isSafeInteger(textLength) && charIndex > textLength - charLength) ||
+              !Number.isFinite(audioMs) || audioMs < 0 || audioMs < previousAudioMs) {
+            continue;
+          }
+          previousAudioMs = audioMs;
+          timing.push({ charIndex, charLength, audioMs });
+        }
+        return timing;
+      }
+
       next.onMessage.addListener((message) => {
         const requestId = String(message?.requestId || "");
         const request = pending.get(requestId);
@@ -117,6 +138,7 @@
                   totalBytes !== request.totalBytes || request.receivedBytes !== request.totalBytes) {
                 throw new Error("Native synthesis payload is incomplete.");
               }
+              const timing = validateTiming(message.timing, request.textLength);
               const bytes = new Uint8Array(request.receivedBytes);
               let offset = 0;
               for (const chunk of request.chunks) {
@@ -125,7 +147,7 @@
               }
               pending.delete(requestId);
               clearTimeout(request.timeout);
-              request.resolve({ type: "synthesize", requestId, wavBase64: base64FromBytes(bytes), totalBytes: request.receivedBytes });
+              request.resolve({ type: "synthesize", requestId, wavBase64: base64FromBytes(bytes), totalBytes: request.receivedBytes, timing });
               return;
             }
             throw new Error("Unexpected Native Messaging multipart response.");
@@ -195,7 +217,8 @@
             receivedBytes: 0,
             chunkCount: 0,
             nextIndex: 0,
-            chunks: []
+            chunks: [],
+            textLength: typeof payload.text === "string" ? payload.text.length : null
           });
           activePort.postMessage({ type, requestId, ...payload });
         } catch (error) {

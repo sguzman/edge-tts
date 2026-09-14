@@ -90,6 +90,24 @@
     return voice?.__edgeTtsSource === "win-natural";
   }
 
+  function normalizeWinNaturalTiming(value, textLength) {
+    if (!Array.isArray(value)) return [];
+    let previousAudioMs = 0;
+    const timing = [];
+    for (const boundary of value) {
+      const charIndex = Number(boundary?.charIndex);
+      const charLength = Number(boundary?.charLength);
+      const audioMs = Number(boundary?.audioMs);
+      if (!Number.isSafeInteger(charIndex) || charIndex < 0 ||
+          !Number.isSafeInteger(charLength) || charLength <= 0 ||
+          (Number.isSafeInteger(textLength) && charIndex > textLength - charLength) ||
+          !Number.isFinite(audioMs) || audioMs < 0 || audioMs < previousAudioMs) continue;
+      previousAudioMs = audioMs;
+      timing.push({ charIndex, charLength, audioMs });
+    }
+    return timing;
+  }
+
   function localRequestId(generation, chunkIndex) {
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
@@ -122,6 +140,7 @@
       this.winNaturalSessionMode = false;
       this.winNaturalActive = false;
       this.winNaturalRequest = null;
+      this.winNaturalTiming = [];
       this.winNaturalAudio = null;
       this.winNaturalObjectUrl = "";
       void this.refreshExtensionVoices();
@@ -260,6 +279,7 @@
       }
       this._revokeWinNaturalObjectUrl();
       this.winNaturalRequest = null;
+      this.winNaturalTiming = [];
       this.winNaturalActive = false;
       if (!keepMode) this.winNaturalSessionMode = false;
       this.clearPlaybackTimers?.();
@@ -499,6 +519,8 @@
         this.onError?.(new Error("Windows Natural returned a WAV size mismatch."));
         return;
       }
+      const payload = this.winNaturalRequest.payload;
+      this.winNaturalTiming = normalizeWinNaturalTiming(response.timing, payload.text.length);
       if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
       const audio = this._ensureWinNaturalAudio();
       if (!audio) {
@@ -540,7 +562,6 @@
       }
       if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
       this.winNaturalActive = true;
-      const payload = this.winNaturalRequest.payload;
       const startedAt = root.performance?.now?.() ?? Date.now();
       this.onStart?.(payload.segments?.[0], Math.max(0, startedAt - this.requestedAt));
     }

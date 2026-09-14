@@ -30,6 +30,11 @@ internal static class WinNaturalHost
     private static readonly Stream Output = Console.OpenStandardOutput();
     private static SpeechSynthesizer? Synthesizer;
 
+    private sealed record TimingBoundary(
+        [property: JsonPropertyName("charIndex")] int CharIndex,
+        [property: JsonPropertyName("charLength")] int CharLength,
+        [property: JsonPropertyName("audioMs")] double AudioMs);
+
     private static SpeechSynthesizer GetSynthesizer() => Synthesizer ??= new SpeechSynthesizer();
 
     private static void Send(object message)
@@ -140,9 +145,28 @@ internal static class WinNaturalHost
 
         using var audio = new MemoryStream();
         synthesizer.SetOutputToWaveStream(audio);
-        synthesizer.Speak(text);
+        var timing = new List<TimingBoundary>();
+        EventHandler<SpeakProgressEventArgs> progressHandler = (_, progress) =>
+        {
+            var charIndex = progress.CharacterPosition;
+            var charLength = progress.CharacterCount;
+            var audioMs = progress.AudioPosition.TotalMilliseconds;
+            var previousAudioMs = timing.Count == 0 ? 0 : timing[^1].AudioMs;
+            if (charIndex < 0 || charLength <= 0 || charIndex > text.Length - charLength ||
+                !double.IsFinite(audioMs) || audioMs < 0 || audioMs < previousAudioMs) return;
+            timing.Add(new TimingBoundary(charIndex, charLength, Math.Round(audioMs, 3, MidpointRounding.AwayFromZero)));
+        };
+        synthesizer.SpeakProgress += progressHandler;
+        try
+        {
+            synthesizer.Speak(text);
+        }
+        finally
+        {
+            synthesizer.SpeakProgress -= progressHandler;
+            synthesizer.SetOutputToNull();
+        }
         var wav = audio.ToArray();
-        synthesizer.SetOutputToNull();
         if (wav.Length == 0 || wav.Length > MaxSynthesisBytes)
             throw new InvalidOperationException("Native synthesis returned an invalid WAV size.");
 
@@ -154,7 +178,7 @@ internal static class WinNaturalHost
             var count = Math.Min(SynthesisChunkBytes, wav.Length - offset);
             Send(new { type = "synth-chunk", requestId, index, data = Convert.ToBase64String(wav, offset, count) });
         }
-        Send(new { type = "synth-end", requestId, totalBytes = wav.Length, chunkCount });
+        Send(new { type = "synth-end", requestId, totalBytes = wav.Length, chunkCount, timing });
     }
 
     private static Dictionary<string, string?> RelevantEnvironment() => new()

@@ -109,6 +109,28 @@ test("native reader accepts the large flattened response payload returned by bac
   assert.throws(() => engine._nativeBytesFromBase64("not-base64"), /invalid WAV data/);
 });
 
+test("native reader preserves validated timing metadata without driving playback from it", async () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  const voice = nativeVoice(api);
+  engine.speak({ segments: [{ text: "hello native", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice });
+  await waitForTurn();
+  api.resolveNative({
+    accepted: true,
+    wavBase64: Buffer.from("wav").toString("base64"),
+    totalBytes: 3,
+    timing: [
+      { charIndex: 0, charLength: 5, audioMs: 0 },
+      { charIndex: 99, charLength: 2, audioMs: 20 },
+      { charIndex: 7, charLength: 6, audioMs: 12 }
+    ]
+  });
+  await waitForTurn();
+  await waitForTurn();
+  assert.deepEqual(engine.winNaturalTiming, [{ charIndex: 0, charLength: 5, audioMs: 0 }]);
+  assert.equal(api.audio.playCalls, 1);
+});
+
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
   const api = loadStack();
   const engine = new api.LocalTtsSpeechEngine({});
