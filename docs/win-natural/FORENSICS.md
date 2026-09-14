@@ -461,3 +461,26 @@ When Gates 2–5 are completed, extend this document with the same discipline:
 - record the exact manual acceptance behavior.
 
 The point of this file is not to celebrate clever debugging. It is to make clever debugging unnecessary next time.
+
+## Gate 3A decomposition after the failed monolithic Gate 3
+
+The failed monolithic Gate 3 combined native playback with ReaderApp routing,
+reader watchdogs, backend inheritance, catalog selection, and normal-page audio
+lifecycle. Although native synthesis itself worked, that composition regressed
+Online Natural, Windows Legacy, and native batch completion. Its commits remain
+in Git history for forensic reference, but the implementation was reverted to
+the accepted Gate 2 runtime.
+
+The replacement decomposition is deliberately staged:
+
+```text
+Gate 3A — isolated diagnostics-page native playback
+Gate 3B — background-owned native synthesis, still outside ReaderApp
+Gate 3C — minimal normal-reader WIN-NATURAL routing
+Gate 4  — timing, highlighting, live controls, and performance
+```
+
+Gate 3A proves only the diagnostic-page path: HTMLAudioElement unlock,
+Native Messaging, SAPI token validation, in-memory WAV synthesis, multipart
+transport, and page-owned playback. It must not alter normal reader injection,
+catalog selection, audio ownership, or any existing playback backend.

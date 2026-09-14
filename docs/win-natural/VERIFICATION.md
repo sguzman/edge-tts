@@ -257,37 +257,51 @@ The UI's `[ONLINE]` classification is broader than the direct backend's notion
 of known routability, so broader Online voice capability remains a separate
 backlog concern. Do not expand Gate 2 to rewrite the Online synthesis backend.
 
-## Gate 3 — isolated Windows Natural playback
+## Gate 3A — isolated diagnostics-page native playback
 
 ### Purpose
 
-Route only an explicitly selected Windows Natural voice through the native backend.
+Prove the complete Windows Natural synthesis/playback pipeline without involving
+ReaderApp or normal-page lifecycle:
+
+```text
+diagnostic button
+  -> Native Messaging
+  -> SAPI Aria synthesis
+  -> multipart WAV
+  -> diagnostics-page HTMLAudioElement
+  -> audible sound
+```
+
+The page is opened directly as an extension-origin diagnostics page. It owns its
+audio element, object URL, stop state, and generation invalidation. It does not
+use `src/background.js`, ReaderApp audio ownership, `chrome.tts`, or normal
+reader injection. WIN-NATURAL remains catalog-only/disabled in normal pages.
 
 ### Required manual checks
 
 ```text
-Microsoft Aria reads a short page selection
-works with network disabled / offline condition
-actual SAPI token returned by enumeration is used
-Windows Natural Stop works
-Quit cancels/clears native session
-Online Natural remains unchanged
-Windows Legacy remains unchanged
-helper errors do not kill the reader
-```
-
-### Required architectural evidence
-
-```text
-backend ownership is explicit
-native request IDs are correlated
-cancel cannot accidentally target Online Natural
-no reader-startup dependency introduced
+diagnostic page connects to the x64 helper
+Local-* Microsoft Aria token is displayed
+Speak Aria diagnostic produces audible speech
+Stop immediately silences the diagnostic page
+late synthesis response cannot restart playback after Stop
 ```
 
 ### Status
 
-Pending.
+Implementation pending human browser acceptance. Gate 3A is not passed until
+the human hears the fixed diagnostic phrase from the isolated page.
+
+## Gate 3B — background-owned native synthesis outside ReaderApp
+
+Pending. This gate may move synthesis ownership into the background dispatcher,
+but must still preserve the accepted normal reader runtime.
+
+## Gate 3C — minimal normal-reader WIN-NATURAL routing
+
+Pending. This gate is the first point at which a native voice may be routed from
+the normal reader, and must be designed from the accepted Gate 2 baseline.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 

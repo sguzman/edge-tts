@@ -65,6 +65,55 @@ test("Native Messaging handshake and filtered voice enumeration succeed", async 
   assert.deepEqual(result.ariaVoice, { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" });
 });
 
+function startMultipartRequest() {
+  const port = fakePort();
+  const transport = createTransport({ connectNative: () => port, now: () => 400 });
+  const pending = transport.requestMultipart("synthesize", { voiceId: "Local-NarratorVoices", text: "test" });
+  const request = port.sent[0];
+  port.emit({ type: "synth-start", requestId: request.requestId, totalBytes: 5, chunkCount: 2 });
+  return { port, pending, request };
+}
+
+test("multipart synthesis reconstructs start/chunk/end in order", async () => {
+  const { port, pending, request } = startMultipartRequest();
+  port.emit({ type: "synth-chunk", requestId: request.requestId, index: 0, data: Buffer.from("he").toString("base64") });
+  port.emit({ type: "synth-chunk", requestId: request.requestId, index: 1, data: Buffer.from("llo").toString("base64") });
+  port.emit({ type: "synth-end", requestId: request.requestId, totalBytes: 5, chunkCount: 2 });
+  const result = await pending;
+  assert.equal(Buffer.from(result.wavBase64, "base64").toString(), "hello");
+  assert.equal(result.totalBytes, 5);
+});
+
+for (const [name, emitInvalid] of [
+  ["missing chunk", (port, id) => port.emit({ type: "synth-end", requestId: id, totalBytes: 5, chunkCount: 2 })],
+  ["duplicate chunk", (port, id) => {
+    const data = Buffer.from("he").toString("base64");
+    port.emit({ type: "synth-chunk", requestId: id, index: 0, data });
+    port.emit({ type: "synth-chunk", requestId: id, index: 0, data });
+  }],
+  ["out-of-order chunk", (port, id) => port.emit({ type: "synth-chunk", requestId: id, index: 1, data: Buffer.from("hello").toString("base64") })],
+  ["malformed base64", (port, id) => port.emit({ type: "synth-chunk", requestId: id, index: 0, data: "not base64!" })],
+  ["byte-total mismatch", (port, id) => {
+    port.emit({ type: "synth-chunk", requestId: id, index: 0, data: Buffer.from("hello").toString("base64") });
+    port.emit({ type: "synth-end", requestId: id, totalBytes: 4, chunkCount: 2 });
+  }]
+]) {
+  test(`multipart synthesis rejects ${name}`, async () => {
+    const { port, pending, request } = startMultipartRequest();
+    emitInvalid(port, request.requestId);
+    await assert.rejects(pending, /incomplete|out of order|Malformed|exceeds/);
+  });
+}
+
+test("multipart synthesis enforces the 8 MiB response bound", async () => {
+  const port = fakePort();
+  const transport = createTransport({ connectNative: () => port, now: () => 500 });
+  const pending = transport.requestMultipart("synthesize");
+  const request = port.sent[0];
+  port.emit({ type: "synth-start", requestId: request.requestId, totalBytes: 8 * 1024 * 1024 + 1, chunkCount: 1 });
+  await assert.rejects(pending, /Invalid native synthesis size/);
+});
+
 test("Aria detection uses the adapter prefix and voice identity, not a canonical token ID", async () => {
   const port = fakePort();
   const transport = createTransport({ connectNative: () => port, now: () => 100 });
@@ -162,4 +211,27 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.match(background, /createTransport\(\)\.request\("voices"\)/);
   const startup = fs.readFileSync(path.join(__dirname, "..", "src", "content", "startup-fastpath.js"), "utf8");
   assert.equal(startup.includes("refreshWinNaturalVoices"), false);
+});
+
+test("Gate 3A remains outside normal reader injection and playback files", () => {
+  const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
+  assert.equal(background.includes("win-natural-speech-engine.js"), false);
+  for (const file of [
+    "reader.js",
+    "reliable-reader.js",
+    "failsafe-reader.js",
+    "direct-audio-engine.js",
+    "local-tts-engine.js",
+    "speech-engine.js",
+    "reliable-speech-engine.js",
+    "voice-ui.js",
+    "toolbar.js",
+    "audio-controls.js",
+    "startup-fastpath.js",
+    "content-script.js"
+  ]) {
+    const current = fs.readFileSync(path.join(__dirname, "..", "src", "content", file), "utf8");
+    const baseline = require("node:child_process").execFileSync("git", ["show", `8c4025e:src/content/${file}`], { encoding: "utf8" });
+    assert.equal(current, baseline, `${file} must remain Gate-2 identical`);
+  }
 });

@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Windows Natural diagnostic</title>
+  <style>
+    body { font: 15px system-ui, sans-serif; margin: 2rem; max-width: 42rem; }
+    button { margin: .25rem .5rem .75rem 0; padding: .45rem .8rem; }
+    #status { white-space: pre-wrap; min-height: 2rem; }
+    li { margin: .25rem 0; }
+    code { font-family: ui-monospace, monospace; }
+  </style>
+</head>
+<body>
+  <h1>Windows Natural diagnostic</h1>
+  <p id="connection">Connecting…</p>
+  <ul id="voices"><li>Loading voices…</li></ul>
+  <button id="speak" type="button" disabled>Speak Aria diagnostic</button>
+  <button id="stop" type="button">Stop</button>
+  <p id="status" role="status">Idle.</p>
+  <script src="../src/background/native-messaging.js"></script>
+  <script src="./win-natural.js"></script>
+</body>
+</html>
