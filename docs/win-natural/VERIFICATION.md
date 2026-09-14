@@ -422,6 +422,17 @@ Human browser acceptance on fresh pages for candidate
 
 Gate 4B is accepted. Gate 4C live rate/volume work has not started.
 
+### Gate 4C — live native playback controls
+
+**Candidate pending human browser QA.** WIN-NATURAL `setPlaybackRate` applies
+the normalized setting directly to the persistent WAV element's browser
+`playbackRate`, preserving canonical PCM timestamps and the existing
+`currentTime` boundary scheduler. WIN-NATURAL `setOutputVolume` applies the
+existing 0–200% product gain through one persistent
+`MediaElementAudioSourceNode -> GainNode -> destination` graph, reused across
+native chunks without resynthesis or audio replacement. Online and Windows
+Legacy control routing remains delegated to the existing backends.
+
 ### Purpose
 
 Complete the high-quality user experience around the Windows Natural backend.

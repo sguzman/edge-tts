@@ -14,6 +14,10 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const createUtteranceChunks = speechModule?.createUtteranceChunks;
   const segmentIndexForCharIndex = root.EdgeTtsExtension?.TextModel?.segmentIndexForCharIndex;
+  const directAudioApi = root.EdgeTtsExtension?.DirectAudio || {};
+  const MIN_PLAYBACK_RATE = Number(directAudioApi.MIN_PLAYBACK_RATE) || 0.25;
+  const MAX_PLAYBACK_RATE = Number(directAudioApi.MAX_PLAYBACK_RATE) || 16;
+  const MAX_OUTPUT_GAIN = Number(directAudioApi.MAX_OUTPUT_GAIN) || 2;
 
   function voiceKey(voice) {
     return `${String(voice?.name || "").trim().toLocaleLowerCase()}\u0000${String(
@@ -164,7 +168,13 @@
       this.winNaturalBoundaryIndex = 0;
       this.winNaturalBoundaryFrame = null;
       this.winNaturalAudio = null;
+      this.winNaturalAudioContext = null;
+      this.winNaturalMediaSource = null;
+      this.winNaturalGain = null;
+      this.winNaturalAudioGraphAttempted = false;
       this.winNaturalObjectUrl = "";
+      this.winNaturalPlaybackRate = 1;
+      this.winNaturalOutputGain = 1;
       void this.refreshExtensionVoices();
       void this.refreshWinNaturalVoices();
     }
@@ -284,6 +294,44 @@
       return audio;
     }
 
+    _ensureWinNaturalAudioGraph(audio = this.winNaturalAudio) {
+      if (!audio || this.winNaturalAudioGraphAttempted) return;
+      this.winNaturalAudioGraphAttempted = true;
+      const AudioContextCtor = root.AudioContext || root.webkitAudioContext;
+      if (typeof AudioContextCtor !== "function") return;
+      try {
+        this.winNaturalAudioContext = new AudioContextCtor();
+        this.winNaturalMediaSource = this.winNaturalAudioContext.createMediaElementSource(audio);
+        this.winNaturalGain = this.winNaturalAudioContext.createGain();
+        this.winNaturalMediaSource.connect(this.winNaturalGain);
+        this.winNaturalGain.connect(this.winNaturalAudioContext.destination);
+      } catch (error) {
+        this.winNaturalAudioContext = null;
+        this.winNaturalMediaSource = null;
+        this.winNaturalGain = null;
+        console.warn("Edge Natural TTS could not create a Windows Natural gain stage.", error);
+      }
+    }
+
+    _applyWinNaturalOutputGain() {
+      const gain = Math.min(MAX_OUTPUT_GAIN, Math.max(0, Number(this.winNaturalOutputGain) || 0));
+      if (this.winNaturalGain) {
+        this.winNaturalGain.gain.value = gain;
+        if (this.winNaturalAudio) this.winNaturalAudio.volume = 1;
+      } else if (this.winNaturalAudio) {
+        this.winNaturalAudio.volume = Math.min(1, gain);
+      }
+    }
+
+    async _resumeWinNaturalAudioContext() {
+      if (this.winNaturalAudioContext?.state !== "suspended") return;
+      try {
+        await this.winNaturalAudioContext.resume();
+      } catch (error) {
+        console.warn("Edge Natural TTS could not resume the Windows Natural AudioContext.", error);
+      }
+    }
+
     _revokeWinNaturalObjectUrl() {
       if (!this.winNaturalObjectUrl) return;
       try { root.URL?.revokeObjectURL?.(this.winNaturalObjectUrl); } catch (_error) {}
@@ -359,6 +407,30 @@
 
     ownsCompletionWithoutBoundaries() {
       return Boolean(this.winNaturalSessionMode && this.winNaturalRequest);
+    }
+
+    setPlaybackRate(rate) {
+      if (!this.winNaturalSessionMode) {
+        return super.setPlaybackRate?.(rate) ?? false;
+      }
+      const numeric = Number(rate);
+      this.winNaturalPlaybackRate = Number.isFinite(numeric)
+        ? Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, numeric))
+        : 1;
+      if (this.winNaturalAudio) this.winNaturalAudio.playbackRate = this.winNaturalPlaybackRate;
+      return true;
+    }
+
+    setOutputVolume(volume) {
+      if (!this.winNaturalSessionMode) {
+        return super.setOutputVolume?.(volume) ?? false;
+      }
+      const numeric = Number(volume);
+      this.winNaturalOutputGain = Number.isFinite(numeric)
+        ? Math.min(MAX_OUTPUT_GAIN, Math.max(0, numeric))
+        : 1;
+      this._applyWinNaturalOutputGain();
+      return true;
     }
 
     cancel() {
@@ -463,6 +535,10 @@
       }
       const audio = this._ensureWinNaturalAudio();
       if (!audio) return false;
+      this._ensureWinNaturalAudioGraph(audio);
+      this._applyWinNaturalOutputGain();
+      audio.playbackRate = this.winNaturalPlaybackRate;
+      void this._resumeWinNaturalAudioContext();
       audio.muted = true;
       audio.src = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAAA";
       audio.load?.();
@@ -472,6 +548,7 @@
       audio.muted = false;
       audio.removeAttribute?.("src");
       audio.load?.();
+      this._applyWinNaturalOutputGain();
       return true;
     }
 
@@ -527,6 +604,14 @@
 
       this.winNaturalSessionMode = true;
       this.winNaturalActive = false;
+      const requestedRate = Number(options.rate);
+      if (Number.isFinite(requestedRate)) {
+        this.winNaturalPlaybackRate = Math.min(MAX_PLAYBACK_RATE, Math.max(MIN_PLAYBACK_RATE, requestedRate));
+      }
+      const configuredVolume = Number(root.EdgeTtsExtension?.AudioControls?.currentVolume);
+      if (Number.isFinite(configuredVolume)) {
+        this.winNaturalOutputGain = Math.min(MAX_OUTPUT_GAIN, Math.max(0, configuredVolume));
+      }
       this._clearWinNaturalBoundaryClock();
       this.winNaturalBoundaries = [];
       this.winNaturalBoundaryIndex = 0;
@@ -600,7 +685,12 @@
       }
       this._revokeWinNaturalObjectUrl();
       this.winNaturalObjectUrl = root.URL.createObjectURL(new Blob([bytes], { type: "audio/wav" }));
+      this._ensureWinNaturalAudioGraph(audio);
       audio.src = this.winNaturalObjectUrl;
+      audio.playbackRate = this.winNaturalPlaybackRate;
+      this._applyWinNaturalOutputGain();
+      await this._resumeWinNaturalAudioContext();
+      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
       audio.onended = () => {
         if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
         this._clearWinNaturalBoundaryClock();

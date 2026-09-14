@@ -110,7 +110,7 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: IN PROGRESS. Gate 4A and Gate 4B are ACCEPTED; Gate 4C has not started.**
+**Status: IN PROGRESS. Gate 4A and Gate 4B are ACCEPTED; Gate 4C is a candidate pending human browser QA.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
@@ -138,8 +138,14 @@ first and `2361.179 ms` last. In the normal reader, highlighting remained
 synchronized at the start and after 15 and 30+ seconds, sentence highlighting
 tracked the audible sentence, and Stop halted highlight movement immediately.
 
-Gate 4C remains the future live-control work, including rate and volume
-without resynthesis.
+**Gate 4C: candidate / pending human browser QA.** WIN-NATURAL rate changes
+use the persistent WAV element's browser `playbackRate`; they do not alter
+SAPI synthesis or canonical PCM timing. WIN-NATURAL volume changes use a
+persistent `MediaElementAudioSourceNode -> GainNode -> destination` graph
+when Web Audio is available, supporting the existing 0–200% gain range.
+The graph is created once per persistent native audio element and reused
+across chunks. Online and Windows Legacy controls retain their existing
+routing.
 
 Gate 4B acceptance:
 

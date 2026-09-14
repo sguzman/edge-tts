@@ -5,7 +5,7 @@ const path = require("node:path");
 
 const readerSource = fs.readFileSync(path.join(__dirname, "..", "src", "content", "reader.js"), "utf8");
 
-function loadStack() {
+function loadStack({ webAudio = false } = {}) {
   global.EdgeTtsExtension = {};
   global.EdgeTtsExtension.TextModel = require("../src/content/text-model.js");
   global.speechSynthesis = {
@@ -27,6 +27,8 @@ function loadStack() {
   const audio = {
     paused: true,
     currentTime: 0,
+    playbackRate: 1,
+    volume: 1,
     src: "",
     onended: null,
     onerror: null,
@@ -40,6 +42,33 @@ function loadStack() {
     load() {},
     removeAttribute() { this.src = ""; }
   };
+  const audioContexts = [];
+  class FakeAudioContext {
+    constructor() {
+      this.state = "running";
+      this.sources = [];
+      this.gains = [];
+      audioContexts.push(this);
+    }
+    createMediaElementSource(element) {
+      const source = { element, connect() {} };
+      this.sources.push(source);
+      return source;
+    }
+    createGain() {
+      const gain = { gain: { value: 1 }, connect() {} };
+      this.gains.push(gain);
+      return gain;
+    }
+    resume() {
+      this.state = "running";
+      return Promise.resolve();
+    }
+  }
+  if (webAudio) {
+    global.AudioContext = FakeAudioContext;
+    global.webkitAudioContext = undefined;
+  }
   global.document = { createElement: () => audio };
   global.URL = {
     createObjectURL: () => "blob:native-test",
@@ -70,6 +99,7 @@ function loadStack() {
     audio,
     messages,
     revoked,
+    audioContexts,
     frames,
     runFrame: (timestamp = 0) => {
       const callbacks = [...frames.entries()];
@@ -224,6 +254,148 @@ test("native timing clock catches up to the latest boundary and stops on cancel"
   api.runFrame();
   assert.deepEqual(boundaries, ["three"]);
   assert.equal(api.frames.size, 0);
+});
+
+test("native playback rate changes live without restarting audio or its boundary cursor", async () => {
+  const api = loadStack();
+  const boundaries = [];
+  const engine = new api.LocalTtsSpeechEngine({ onBoundary: (segment) => boundaries.push(segment.text) });
+  engine.speak({ segments: [
+    { text: "one", blockIndex: 0, segmentIndex: 0 },
+    { text: "two", blockIndex: 0, segmentIndex: 1 }
+  ] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  api.resolveNative({
+    accepted: true,
+    wavBase64: Buffer.from("wav").toString("base64"),
+    totalBytes: 3,
+    timing: [
+      { charIndex: 0, charLength: 3, audioMs: 100 },
+      { charIndex: 4, charLength: 3, audioMs: 200 }
+    ]
+  });
+  await waitForTurn();
+  await waitForTurn();
+  api.audio.currentTime = 0.15;
+  api.runFrame();
+  const source = api.audio.src;
+  const requestCount = api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE").length;
+  assert.deepEqual(boundaries, ["one"]);
+  assert.equal(engine.setPlaybackRate(2), true);
+  assert.equal(api.audio.playbackRate, 2);
+  assert.equal(api.audio.src, source);
+  assert.equal(api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE").length, requestCount);
+  api.audio.currentTime = 0.25;
+  api.runFrame();
+  assert.deepEqual(boundaries, ["one", "two"], "rate changes must not reset the boundary cursor");
+});
+
+test("native playback rate persists across a native chunk transition", async () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  engine.speak({ segments: [
+    { text: "one", blockIndex: 0, segmentIndex: 0 },
+    { text: "two", blockIndex: 0, segmentIndex: 1 }
+  ] }, 0, {
+    voice: nativeVoice(api),
+    chunkOptions: { firstChunkMaxChars: 3, maxChars: 3, emergencyMaxChars: 3 }
+  });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  assert.equal(engine.setPlaybackRate(1.7), true);
+  const audio = api.audio;
+  audio.onended();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitForTurn();
+  const requests = api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE");
+  assert.equal(requests.length, 2);
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  assert.equal(engine.winNaturalAudio, audio);
+  assert.equal(audio.playbackRate, 1.7);
+});
+
+test("native output gain changes live, supports boost, and reuses one audio graph", async () => {
+  const api = loadStack({ webAudio: true });
+  const engine = new api.LocalTtsSpeechEngine({});
+  engine.speak({ segments: [{ text: "native gain", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  assert.equal(api.audioContexts.length, 1);
+  const gain = api.audioContexts[0].gains[0];
+  const source = api.audio.src;
+  assert.equal(engine.setOutputVolume(0), true);
+  assert.equal(gain.gain.value, 0);
+  assert.equal(engine.setOutputVolume(1), true);
+  assert.equal(gain.gain.value, 1);
+  assert.equal(engine.setOutputVolume(1.8), true);
+  assert.equal(gain.gain.value, 1.8);
+  assert.equal(api.audio.volume, 1);
+  assert.equal(api.audio.src, source);
+  assert.equal(api.audioContexts.length, 1);
+});
+
+test("native output gain persists across chunks and reset silences the persistent element", async () => {
+  const api = loadStack({ webAudio: true });
+  const engine = new api.LocalTtsSpeechEngine({});
+  engine.speak({ segments: [
+    { text: "one", blockIndex: 0, segmentIndex: 0 },
+    { text: "two", blockIndex: 0, segmentIndex: 1 }
+  ] }, 0, {
+    voice: nativeVoice(api),
+    chunkOptions: { firstChunkMaxChars: 3, maxChars: 3, emergencyMaxChars: 3 }
+  });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  engine.setOutputVolume(1.6);
+  const audio = api.audio;
+  audio.onended();
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  assert.equal(api.audioContexts.length, 1);
+  assert.equal(api.audioContexts[0].gains[0].gain.value, 1.6);
+  engine.cancel();
+  assert.equal(audio.paused, true);
+  assert.equal(audio.src, "");
+  assert.equal(api.audioContexts.length, 1);
+});
+
+test("native controls delegate to Online and do not intercept Legacy routing", () => {
+  const api = loadStack({ webAudio: true });
+  const engine = new api.LocalTtsSpeechEngine({});
+  const online = { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true };
+  engine.speak({ segments: [{ text: "online", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: online });
+  engine._ensureAudioElement();
+  assert.equal(engine.setPlaybackRate(1.5), true);
+  assert.equal(engine.directAudio.playbackRate, 1.5);
+  assert.equal(engine.setOutputVolume(1.8), true);
+  assert.equal(engine.directGain.gain.value, 1.8);
+
+  engine.cancel();
+  const legacy = {
+    name: "Microsoft Zira",
+    lang: "en-US",
+    localService: true,
+    __edgeTtsSource: "chrome-tts",
+    chromeVoiceName: "Microsoft Zira"
+  };
+  engine.speak({ segments: [{ text: "legacy", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: legacy });
+  assert.equal(engine.winNaturalSessionMode, false);
+  assert.equal(engine.winNaturalAudio, null, "Legacy routing must not create native audio");
+
+  const legacyEngine = new api.LocalTtsSpeechEngine({});
+  legacyEngine.speak({ segments: [{ text: "legacy", blockIndex: 0, segmentIndex: 0 }] }, 0, { voice: legacy });
+  assert.equal(legacyEngine.setPlaybackRate(1.5), false);
+  assert.equal(legacyEngine.setOutputVolume(1.8), false);
 });
 
 test("engine preparation does not invoke the native unlock path for Online or Legacy voices", () => {
