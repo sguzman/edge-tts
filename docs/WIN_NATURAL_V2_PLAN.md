@@ -110,7 +110,7 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: IN PROGRESS. Gate 4A and Gate 4B are ACCEPTED; Gate 4C is a candidate pending human browser QA.**
+**Status: COMPLETE. Gate 4A, Gate 4B, and Gate 4C are ACCEPTED. Gate 5 is NOT STARTED.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
@@ -138,7 +138,7 @@ first and `2361.179 ms` last. In the normal reader, highlighting remained
 synchronized at the start and after 15 and 30+ seconds, sentence highlighting
 tracked the audible sentence, and Stop halted highlight movement immediately.
 
-**Gate 4C: candidate / pending human browser QA.** WIN-NATURAL rate changes
+**Gate 4C: ACCEPTED.** WIN-NATURAL rate changes
 use the persistent WAV element's browser `playbackRate`; they do not alter
 SAPI synthesis or canonical PCM timing. WIN-NATURAL volume changes use a
 persistent `MediaElementAudioSourceNode -> GainNode -> destination` graph
@@ -147,11 +147,34 @@ The graph is created once per persistent native audio element and reused
 across chunks. Online and Windows Legacy controls retain their existing
 routing.
 
+Gate 4C browser evidence on fresh pages for correction candidate
+`f5cbda3a145098be50ffd0c2db17945d514f90fb`: live rate changes from 1x to
+approximately 2x and back to approximately 0.7x passed without restart,
+resynthesis, gaps, overlap, or highlighting drift. Live volume changes from
+100% to 0%, back to 100%, and through 150–200% gain passed without restart,
+gaps, pops, duplicates, or instability. Stop/Play remained functional.
+Quit followed by same-tab restart passed twice consecutively after final
+engine disposal was added.
+
+Gate 4C lifecycle architecture: Stop/cancel is a reusable reset; Quit is
+final dispose. Final disposal invalidates generation and tears down old audio,
+object URLs, animation frames, handlers, Web Audio nodes/context, and
+inherited direct-audio resources, allowing the resident content-script
+bootstrap to create a fresh ReaderApp in the same tab.
+
+Known deferred UX limitations: WIN-NATURAL startup/synthesis latency remains
+high for a local/offline voice, and Pause -> Resume restarts the current
+sentence rather than preserving an exact intra-sentence media position. These
+are backlog items and are not implemented in Gate 4C.
+
 Gate 4B acceptance:
 
 - Highlighting follows SAPI timing data.
 - Highlighting follows the actual PCM/browser media timeline.
 - Existing Stop/Quit teardown remains intact.
+
+Gate 4 overall is complete after Gate 4C. The next planned engineering goal is
+`WIN-NATURAL startup/synthesis latency investigation`; it has not started.
 
 ### Gate 5 — promotion candidate
 

@@ -367,7 +367,7 @@ the current sentence instead of preserving an intra-sentence audio position.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
-**IN PROGRESS — Gate 4A ACCEPTED; Gate 4B is a candidate pending human browser QA.** Gate 4A captures
+**COMPLETE — Gate 4A, Gate 4B, and Gate 4C ACCEPTED; Gate 5 NOT STARTED.** Gate 4A captures
 request-relative SAPI `SpeakProgress` records and transports them with the
 completed WAV. It stops before visual mapping/highlighting and live control
 changes.
@@ -390,7 +390,7 @@ raw `audioMs` originating from SAPI milliseconds. Gate 4A does not implement
 highlighting, live rate/volume, pause/resume changes, or startup-latency
 optimization.
 
-### Gate 4B — media-clock highlighting candidate
+### Gate 4B — media-clock highlighting (accepted)
 
 **ACCEPTED.** SAPI timing is boundary evidence only; the
 WIN-NATURAL `HTMLAudioElement.currentTime` is the playback clock. Existing
@@ -420,11 +420,11 @@ Human browser acceptance on fresh pages for candidate
    synchronized after approximately 15 and 30+ seconds, tracked audible
    sentence boundaries, and stopped immediately with Stop.
 
-Gate 4B is accepted. Gate 4C live rate/volume work has not started.
+Gate 4B is accepted. Gate 4C live rate/volume work is accepted below.
 
 ### Gate 4C — live native playback controls
 
-**Candidate pending human browser QA.** WIN-NATURAL `setPlaybackRate` applies
+**ACCEPTED.** WIN-NATURAL `setPlaybackRate` applies
 the normalized setting directly to the persistent WAV element's browser
 `playbackRate`, preserving canonical PCM timestamps and the existing
 `currentTime` boundary scheduler. WIN-NATURAL `setOutputVolume` applies the
@@ -432,6 +432,32 @@ existing 0–200% product gain through one persistent
 `MediaElementAudioSourceNode -> GainNode -> destination` graph, reused across
 native chunks without resynthesis or audio replacement. Online and Windows
 Legacy control routing remains delegated to the existing backends.
+
+Human browser acceptance on fresh pages for correction candidate
+`f5cbda3a145098be50ffd0c2db17945d514f90fb`:
+
+- Live rate changes from 1.0x to approximately 2.0x and back to approximately
+  0.7x passed without restart/resynthesis, gaps, overlap, or highlighting drift.
+- Live volume changes from 100% to 0%, back to 100%, and through 150–200% gain
+  passed without restart, gaps, pops, duplicates, or instability; highlighting
+  remained synchronized.
+- Quit followed by same-tab restart passed twice consecutively.
+- Final smoke checks for live rate, live volume, Stop -> Play, and no observed
+  regression passed.
+
+Gate 4C lifecycle architecture: Stop/cancel is a reusable reset; Quit is final
+dispose. Final disposal invalidates generation and tears down old audio, object
+URLs, animation frames, handlers, Web Audio nodes/context, and inherited
+direct-audio resources so the resident bootstrap can create a fresh ReaderApp
+in the same tab.
+
+Known deferred limitations: WIN-NATURAL startup/synthesis latency remains high
+for a local/offline voice, and Pause -> Resume restarts the current sentence
+instead of preserving an exact intra-sentence media position. Neither is fixed
+in this closeout. The next planned goal is `WIN-NATURAL startup/synthesis
+latency investigation`; it has not started.
+
+Gate 4 is complete. Gate 5 has not started.
 
 ### Purpose
 
@@ -463,7 +489,7 @@ cancel terminates active synthesis cleanly
 
 ### Status
 
-Pending.
+Accepted. Gate 4A, Gate 4B, and Gate 4C are complete; Gate 5 has not started.
 
 ## Gate 5 — promotion candidate
 

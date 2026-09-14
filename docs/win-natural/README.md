@@ -43,8 +43,10 @@ As of the completion of Gate 1 on the `development/win-natural-v2` line:
 - no Edge enterprise policy is required for the working solution;
 - the stable reader remains isolated on the `stable` branch/worktree and is not modified during development.
 
-Gate 3C is now accepted on fresh-page browser QA. Gate 4 remains unstarted and
-owns native timing/highlighting, live controls, and performance work.
+Gate 3C is accepted on fresh-page browser QA. Gate 4A, Gate 4B, and Gate 4C
+are accepted. Gate 5 has not started. The next planned engineering goal is
+WIN-NATURAL startup/synthesis latency investigation; pause/resume position
+fidelity remains a separate deferred limitation.
 
 ## The short version of the hard part
 

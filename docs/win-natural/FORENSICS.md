@@ -555,5 +555,24 @@ boundaries, first boundary `char 0, len 7, audio 160.25 ms`, last boundary
 The preserved contract is `{ charIndex, charLength, audioMs }`, where offsets
 are relative to the exact synthesis-request text and `audioMs` is the SAPI
 audio position in milliseconds. Gate 4A deliberately stops before mapping
-timing to reader segments or changing presentation behavior. Gate 4B remains
-unstarted.
+timing to reader segments or changing presentation behavior. Gate 4B is
+accepted, and Gate 4C is accepted as recorded in the verification log.
+
+Gate 4C human browser acceptance on fresh pages for correction candidate
+`f5cbda3a145098be50ffd0c2db17945d514f90fb` passed live rate changes from 1x
+to approximately 2x and back to approximately 0.7x, live volume from 100% to
+0%, back to 100%, and through 150–200%, with no restart, gap, overlap, or
+highlighting drift. Stop/Play passed. Quit followed by same-tab restart passed
+twice consecutively after final engine disposal was added.
+
+Gate 4C records the distinction between reusable reset and final disposal:
+Stop/cancel preserves the same-engine native audio graph; Quit invalidates the
+generation and tears down audio, object URLs, animation frames, handlers, Web
+Audio nodes/context, and inherited direct-audio resources so the resident
+bootstrap can create a fresh ReaderApp in the same tab.
+
+Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 has not started. The next
+planned engineering goal is WIN-NATURAL startup/synthesis latency
+investigation. Native startup latency and pause/resume's current-sentence
+restart behavior remain separate deferred limitations and were not fixed in
+this closeout.
