@@ -28,8 +28,26 @@ Acceptance:
 
 - Existing reader behavior is unchanged.
 - Browser Native Messaging handshake succeeds.
-- Browser-side diagnostics enumerate `Microsoft Aria / Local-aria-v2`.
+- Browser-side diagnostics enumerate an adapter-backed `Local-*` voice named `Microsoft Aria` with the expected language; the exact token ID is not canonical because it depends on adapter discovery configuration.
 - Failure or absence of the native host cannot affect reader startup or playback.
+
+**Status: PASSED.** Browser-accepted Gate 1 candidate includes `acc0b11` (`Finalize Gate 1 Aria discovery`) plus the previously verified Gate 1 transport and diagnostic commits on `development/win-natural-v2`.
+
+Accepted browser behavior:
+
+- Native Messaging connection: PASS.
+- Protocol 1 handshake: PASS.
+- x64 helper: PASS.
+- Edge-launched helper enumerates `Local-NarratorVoices / Microsoft Aria / en-US`.
+- `ariaFound: true` with the real SAPI token preserved as `Local-NarratorVoices`.
+- Enumeration remains successful under Edge's normal `cmd.exe` native-host launch path with `NativeHostsExecutablesLaunchDirectly` removed.
+- Online Natural first playback: PASS.
+- Online Natural playback after pause/resume: PASS.
+- Windows Legacy/local playback: PASS.
+- Stop: PASS.
+- Quit: PASS.
+
+Gate 1 also established a machine/deployment requirement: because the Edge-launched native host cannot see the adapter's per-user `NarratorVoicePath` configuration on this machine, the compatible extracted Aria package is exposed through the adapter's documented default filesystem location using a reversible `NarratorVoices` junction. This makes discovery independent of the unavailable HKCU adapter configuration. The exact SAPI token may therefore differ from the earlier direct-probe token (`Local-aria-v2`) and must never be treated as a stable logical identifier.
 
 ### Gate 2 — catalog visibility only
 
