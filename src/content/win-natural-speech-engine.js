@@ -90,6 +90,10 @@
       return super.prepareDirectPlayback?.(voice) || false;
     }
 
+    ownsCompletionWithoutBoundaries() {
+      return Boolean(this.nativeSessionMode || this.nativeRequest);
+    }
+
     _revokeObjectUrl() {
       if (!this.nativeObjectUrl) return;
       try {
