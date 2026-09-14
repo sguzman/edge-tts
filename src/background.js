@@ -30,6 +30,7 @@ let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
 let localTtsSession = null;
+let nativeTransport = null;
 
 async function loadAudioOwner() {
   if (audioOwnerLoaded) return audioOwnerTabId;
@@ -108,10 +109,32 @@ async function getExtensionTtsVoices() {
   }));
 }
 
+function getNativeTransport() {
+  if (!nativeMessagingApi?.createTransport) {
+    throw new Error("Native Messaging is unavailable.");
+  }
+  if (nativeTransport) return nativeTransport;
+  let transport;
+  transport = nativeMessagingApi.createTransport({
+    onDisconnect: () => {
+      if (nativeTransport === transport) nativeTransport = null;
+    }
+  });
+  nativeTransport = transport;
+  return transport;
+}
+
+function invalidateNativeTransport(transport) {
+  if (nativeTransport !== transport) return;
+  nativeTransport = null;
+  transport.disconnect?.();
+}
+
 async function getWinNaturalVoices() {
-  if (!nativeMessagingApi?.createTransport) return [];
+  let transport;
   try {
-    const response = await nativeMessagingApi.createTransport().request("voices");
+    transport = getNativeTransport();
+    const response = await transport.request("voices");
     return (Array.isArray(response?.voices) ? response.voices : [])
       .filter((voice) => String(voice?.id || "").toLowerCase().startsWith("local-"))
       .map((voice) => ({
@@ -120,8 +143,39 @@ async function getWinNaturalVoices() {
         lang: String(voice.lang || "")
       }));
   } catch (error) {
+    invalidateNativeTransport(transport);
     console.warn("Edge Natural TTS could not enumerate Windows Natural voices.", error);
     return [];
+  }
+}
+
+async function getWinNaturalDiagnostics() {
+  let transport;
+  try {
+    transport = getNativeTransport();
+    return await transport.diagnostics();
+  } catch (error) {
+    invalidateNativeTransport(transport);
+    throw error;
+  }
+}
+
+async function synthesizeWinNaturalDiagnostic(message) {
+  let transport;
+  const voiceId = String(message?.voiceId || "").trim();
+  const text = String(message?.text || "");
+  if (!/^Local-/i.test(voiceId)) throw new Error("Invalid Windows Natural voice ID.");
+  if (!text) throw new Error("Windows Natural synthesis text is empty.");
+  try {
+    transport = getNativeTransport();
+    return await transport.requestMultipart(
+      "synthesize",
+      { voiceId, text },
+      nativeMessagingApi.SYNTHESIS_TIMEOUT_MS || 30_000
+    );
+  } catch (error) {
+    invalidateNativeTransport(transport);
+    throw error;
   }
 }
 
@@ -267,6 +321,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message?.type === "EDGE_TTS_WIN_NATURAL_VOICES") {
     void getWinNaturalVoices().then((voices) => sendResponse({ voices }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_DIAGNOSTICS") {
+    void getWinNaturalDiagnostics()
+      .then((result) => sendResponse({ ...result }))
+      .catch((error) => sendResponse({ connected: false, error: String(error?.message || error) }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE") {
+    void synthesizeWinNaturalDiagnostic(message)
+      .then((result) => sendResponse({ accepted: true, ...result }))
+      .catch((error) => sendResponse({ accepted: false, error: String(error?.message || error) }));
     return true;
   }
 

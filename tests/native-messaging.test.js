@@ -65,6 +65,35 @@ test("Native Messaging handshake and filtered voice enumeration succeed", async 
   assert.deepEqual(result.ariaVoice, { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" });
 });
 
+test("one transport reuses a healthy port and reports disconnect for cache invalidation", async () => {
+  const ports = [];
+  let connects = 0;
+  let disconnects = 0;
+  const transport = createTransport({
+    connectNative: () => {
+      connects += 1;
+      const port = fakePort();
+      ports.push(port);
+      return port;
+    },
+    onDisconnect: () => { disconnects += 1; },
+    now: () => 150
+  });
+
+  const first = transport.request("hello");
+  ports[0].emit({ type: "hello", requestId: ports[0].sent[0].requestId, protocol: 1, architecture: "x64" });
+  await first;
+  const second = transport.request("voices");
+  ports[0].emit({ type: "voices", requestId: ports[0].sent[1].requestId, voices: [] });
+  await second;
+  assert.equal(connects, 1);
+
+  const disconnected = transport.request("voices");
+  ports[0].disconnect();
+  await assert.rejects(disconnected, /disconnected/);
+  assert.equal(disconnects, 1);
+});
+
 function startMultipartRequest() {
   const port = fakePort();
   const transport = createTransport({ connectNative: () => port, now: () => 400 });
@@ -208,7 +237,9 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.equal(background.slice(openStart).includes("nativeMessaging.diagnostics()"), false);
   assert.equal(background.includes("installDiagnosticsListener"), false);
   assert.match(background, /EDGE_TTS_WIN_NATURAL_VOICES/);
-  assert.match(background, /createTransport\(\)\.request\("voices"\)/);
+  assert.match(background, /getNativeTransport\(\)/);
+  assert.match(background, /EDGE_TTS_WIN_NATURAL_DIAGNOSTICS/);
+  assert.match(background, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
   const startup = fs.readFileSync(path.join(__dirname, "..", "src", "content", "startup-fastpath.js"), "utf8");
   assert.equal(startup.includes("refreshWinNaturalVoices"), false);
 });
@@ -234,4 +265,16 @@ test("Gate 3A remains outside normal reader injection and playback files", () =>
     const baseline = require("node:child_process").execFileSync("git", ["show", `8c4025e:src/content/${file}`], { encoding: "utf8" });
     assert.equal(current, baseline, `${file} must remain Gate-2 identical`);
   }
+});
+
+test("Gate 3B diagnostics are background-owned and extension-page synthesis needs no tab", () => {
+  const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
+  assert.match(background, /let nativeTransport = null/);
+  assert.match(background, /nativeMessagingApi\.createTransport\(\{\s*onDisconnect/s);
+  assert.match(background, /transport\.requestMultipart\(/);
+  const synthesisStart = background.indexOf('message?.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE"');
+  assert.ok(synthesisStart >= 0);
+  const synthesisBranch = background.slice(synthesisStart, background.indexOf("return true;", synthesisStart));
+  assert.doesNotMatch(synthesisBranch, /No content tab|Number\.isInteger\(tabId\)|sender\.tab/);
+  assert.equal((background.match(/chrome\.runtime\.onMessage\.addListener\(/g) || []).length, 1);
 });

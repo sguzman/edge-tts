@@ -301,8 +301,26 @@ Online voice limitation and not attributable to Gate 3A.
 
 ## Gate 3B — background-owned native synthesis outside ReaderApp
 
-Pending. This gate may move synthesis ownership into the background dispatcher,
-but must still preserve the accepted normal reader runtime.
+The Gate 3B candidate moves the diagnostic page's Native Messaging authority
+into the service worker:
+
+```text
+diagnostics page
+  -> chrome.runtime messaging
+  -> one lazily cached background transport
+  -> Native Messaging helper
+  -> bounded multipart WAV response
+  -> diagnostics-page HTMLAudioElement
+```
+
+The diagnostics page no longer loads or calls `connectNative()`. The background
+reuses a healthy transport, clears its cache on disconnect or request failure,
+and can reconnect on a later diagnostics request. Extension-page synthesis does
+not require `sender.tab.id`. ReaderApp and all normal reader playback remain
+outside this gate.
+
+**Pending human browser acceptance.** Gate 3C remains the future normal-reader
+WIN-NATURAL integration gate.
 
 ## Gate 3C — minimal normal-reader WIN-NATURAL routing
 

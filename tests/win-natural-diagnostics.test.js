@@ -10,15 +10,18 @@ const html = fs.readFileSync(path.join(root, "diagnostics", "win-natural.html"),
 const host = fs.readFileSync(path.join(root, "native", "win-natural", "WinNaturalHost.cs"), "utf8");
 
 test("diagnostics page is an extension-origin page with no ReaderApp dependency", () => {
-  assert.match(html, /src="\.\.\/src\/background\/native-messaging\.js"/);
   assert.match(html, /src="\.\/win-natural\.js"/);
-  assert.doesNotMatch(page, /ReaderApp|audioOwner|chrome\.tts/);
-  assert.match(page, /EDGE_TTS_NATIVE_DIAGNOSTICS|diagnostics\(\)/);
+  assert.doesNotMatch(html, /background\/native-messaging/);
+  assert.doesNotMatch(page, /ReaderApp|audioOwner|chrome\.tts|connectNative/);
+  assert.match(page, /EDGE_TTS_WIN_NATURAL_DIAGNOSTICS/);
+  assert.match(page, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
+  assert.match(page, /maxWavBytes = 8 \* 1024 \* 1024/);
+  assert.match(page, /WAV size mismatch/);
 });
 
 test("diagnostics page uses the actual Local-* Aria token and owns audio cleanup", () => {
   assert.match(page, /voiceId: ariaVoice\.id/);
-  assert.match(page, /requestMultipart\(\s*"synthesize"/s);
+  assert.match(page, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
   assert.match(page, /generation/);
   assert.match(page, /audio\.pause\(\)/);
   assert.match(page, /URL\.revokeObjectURL/);
@@ -61,17 +64,13 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
   let resolveSynthesis;
   const revoked = [];
   const created = [];
-  const transport = {
-    diagnostics: async () => ({
-      connected: true,
-      handshake: { protocol: 1, architecture: "x64" },
-      voices: [{ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }],
-      ariaVoice: { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }
-    }),
-    requestMultipart() { return new Promise((resolve) => { resolveSynthesis = resolve; }); }
+  const diagnosticsResponse = {
+    connected: true,
+    handshake: { protocol: 1, architecture: "x64" },
+    voices: [{ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }],
+    ariaVoice: { id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }
   };
   const context = {
-    EdgeTtsNativeMessaging: { createTransport: () => transport },
     document: {
       querySelector(selector) { return elements[selector]; },
       createElement() { return audio; }
@@ -84,6 +83,17 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
     Uint8Array,
     Promise,
     atob,
+    chrome: {
+      runtime: {
+        sendMessage(message) {
+          if (message.type === "EDGE_TTS_WIN_NATURAL_DIAGNOSTICS") return Promise.resolve(diagnosticsResponse);
+          if (message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE") {
+            return new Promise((resolve) => { resolveSynthesis = resolve; });
+          }
+          return Promise.reject(new Error("Unexpected message"));
+        }
+      }
+    },
     console
   };
   vm.runInNewContext(page, context);
@@ -91,7 +101,7 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
 
   const firstPlayback = handlers.speak();
   handlers.stop();
-  resolveSynthesis({ wavBase64: Buffer.from("late-wav").toString("base64") });
+  resolveSynthesis({ accepted: true, wavBase64: Buffer.from("late-wav").toString("base64") });
   await firstPlayback;
   await Promise.resolve();
   assert.equal(audio.playCalls, 1, "only the synchronous unlock may have played");
@@ -99,7 +109,8 @@ test("diagnostic Stop invalidates a late synthesis response and URLs revoke on e
   assert.equal(elements["#status"].textContent, "Stopped.");
 
   const secondPlayback = handlers.speak();
-  resolveSynthesis({ wavBase64: Buffer.from("wav").toString("base64") });
+  const wavBase64 = Buffer.from("wav").toString("base64");
+  resolveSynthesis({ accepted: true, wavBase64, totalBytes: 3 });
   await secondPlayback;
   assert.equal(created.length, 1);
   audio.onended();

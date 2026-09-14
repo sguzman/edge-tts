@@ -11,6 +11,7 @@
   function createTransport(options = {}) {
     const connectNative = options.connectNative || root.chrome?.runtime?.connectNative;
     const now = options.now || (() => Date.now());
+    const onDisconnect = options.onDisconnect;
     let port = null;
     let serial = 0;
     const pending = new Map();
@@ -21,6 +22,10 @@
         request.reject(error);
       }
       pending.clear();
+    }
+
+    function notifyDisconnect() {
+      try { onDisconnect?.(); } catch (_error) {}
     }
 
     function disconnect() {
@@ -141,6 +146,7 @@
       });
       next.onDisconnect.addListener(() => {
         if (port === next) port = null;
+        notifyDisconnect();
         rejectPending(new Error(root.chrome?.runtime?.lastError?.message || "Native Messaging host disconnected."));
       });
       port = next;

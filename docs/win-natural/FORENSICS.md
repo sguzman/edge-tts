@@ -492,3 +492,12 @@ stopped immediately. The fresh reader page preserved audible Windows Legacy Zira
 and Online Aria, with WIN-NATURAL still visible but disabled/catalog-only.
 Online William remained non-audible as the previously known Online voice issue;
 that observation was not attributed to Gate 3A.
+
+Gate 3B changes only the ownership boundary for that already-proven diagnostic
+path. The diagnostics page now sends explicit extension messages for enumeration
+and synthesis; the service worker lazily creates and caches one Native Messaging
+transport, invalidates it on disconnect/error, and reconnects later. The native
+helper multipart protocol is unchanged. The service worker returns the bounded
+base64 WAV response to the page, which still owns gesture unlock, playback,
+Stop/generation invalidation, and object-URL revocation. ReaderApp remains
+untouched; Gate 3C is still the future reader-integration gate.
