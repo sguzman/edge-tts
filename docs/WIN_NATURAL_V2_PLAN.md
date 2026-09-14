@@ -68,6 +68,24 @@ Acceptance:
 - Existing saved voice selection and online/local playback still work.
 - Native enumeration is asynchronous and never startup-critical.
 
+**Status: PASSED.** Browser-accepted candidate includes `c5b3675` (`Add Gate 2 Windows Natural catalog visibility`) plus `18faba1` (`Fix Gate 2 voice selection identity`).
+
+Accepted browser behavior:
+
+- Three-way taxonomy appears as Windows Legacy / Windows Natural / Online Natural.
+- `[WIN-NATURAL] Microsoft Aria — en-US` appears under Windows Natural and remains disabled/catalog-only.
+- Windows Legacy Zira: PASS.
+- Windows Legacy Mark: PASS.
+- Online Aria: PASS.
+- Switching back to Zira after Online playback: PASS.
+- Stop: PASS.
+- Quit: PASS.
+- Asynchronous native catalog arrival no longer overwrites the selected playable voice.
+
+Gate 2 exposed and fixed a real selection bug: name-only voice identity collided when Online Aria and Windows Natural Aria coexisted. The fix introduced backend-aware selection keys and preserved the exact playable voice across catalog refreshes.
+
+A separate Online-catalog limitation was observed during Gate 2 QA: some Online voices such as William failed while Aria succeeded. Diagnostic comparison found no Gate 2 synthesis regression: the direct-audio engine, routing heuristic, and short-name mapping were unchanged from the accepted pre-Gate-2 baseline, and William would have taken the same direct backend before Gate 2. The repository has no pre-Gate-2 browser evidence that William worked. Treat broader Online voice routability as a separate backlog concern rather than expanding Gate 2.
+
 ### Gate 3 — isolated WIN-NATURAL playback
 
 Route only an explicitly selected WIN-NATURAL voice through the native backend. Reuse the established direct-audio playback clock where possible; do not rewrite unrelated reader lifecycle code.
