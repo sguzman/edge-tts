@@ -18,6 +18,8 @@
   const MIN_PLAYBACK_RATE = Number(directAudioApi.MIN_PLAYBACK_RATE) || 0.25;
   const MAX_PLAYBACK_RATE = Number(directAudioApi.MAX_PLAYBACK_RATE) || 16;
   const MAX_OUTPUT_GAIN = Number(directAudioApi.MAX_OUTPUT_GAIN) || 2;
+  const WIN_NATURAL_FIRST_CHUNK_MAX_CHARS = 120;
+  const WIN_NATURAL_LATER_CHUNK_MAX_CHARS = 900;
 
   function voiceKey(voice) {
     return `${String(voice?.name || "").trim().toLocaleLowerCase()}\u0000${String(
@@ -138,6 +140,8 @@
   if (!BaseSpeechEngine || typeof createUtteranceChunks !== "function") {
     return {
       LocalTtsSpeechEngine: null,
+      WIN_NATURAL_FIRST_CHUNK_MAX_CHARS,
+      WIN_NATURAL_LATER_CHUNK_MAX_CHARS,
       chromeVoiceToCatalogVoice,
       isChromeTtsVoice,
       isWinNaturalVoice,
@@ -163,6 +167,7 @@
       this.winNaturalSessionMode = false;
       this.winNaturalActive = false;
       this.winNaturalRequest = null;
+      this.winNaturalPrefetch = null;
       this.winNaturalTiming = [];
       this.winNaturalBoundaries = [];
       this.winNaturalBoundaryIndex = 0;
@@ -417,6 +422,7 @@
       }
       this._revokeWinNaturalObjectUrl();
       this.winNaturalRequest = null;
+      this.winNaturalPrefetch = null;
       this.winNaturalTiming = [];
       this.winNaturalBoundaries = [];
       this.winNaturalBoundaryIndex = 0;
@@ -433,7 +439,7 @@
     }
 
     ownsCompletionWithoutBoundaries() {
-      return Boolean(this.winNaturalSessionMode && this.winNaturalRequest);
+      return Boolean(this.winNaturalSessionMode && (this.winNaturalRequest || this.winNaturalPrefetch));
     }
 
     setPlaybackRate(rate) {
@@ -642,7 +648,11 @@
 
     _speakWinNatural(block, startSegmentIndex, options) {
       if (this.disposed) return;
-      const chunks = createUtteranceChunks(block, startSegmentIndex, options?.chunkOptions);
+      const chunks = createUtteranceChunks(block, startSegmentIndex, {
+        ...(options?.chunkOptions || {}),
+        firstChunkMaxChars: WIN_NATURAL_FIRST_CHUNK_MAX_CHARS,
+        maxChars: WIN_NATURAL_LATER_CHUNK_MAX_CHARS
+      });
       if (!chunks.length) {
         this.onEnd?.();
         return;
@@ -689,26 +699,30 @@
       }
 
       const voiceId = this.currentOptions?.voice?.nativeVoiceId;
-      const requestId = localRequestId(generation, this.currentChunkIndex);
-      this.winNaturalRequest = { requestId, generation, chunkIndex: this.currentChunkIndex, payload };
-      Promise.resolve(root.chrome?.runtime?.sendMessage?.({
-        type: "EDGE_TTS_WIN_NATURAL_SYNTHESIZE",
-        requestId,
-        voiceId,
-        text: payload.text
-      }))
-        .then((response) => this._handleWinNaturalResponse(generation, requestId, response))
+      const request = this._createWinNaturalRequest(generation, this.currentChunkIndex, payload, voiceId);
+      this.winNaturalRequest = request;
+      request.promise
+        .then((prepared) => this._activateWinNaturalChunk(prepared))
         .catch((error) => {
-          if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
+          if (generation !== this.generation || this.winNaturalRequest?.requestId !== request.requestId) return;
           this._resetWinNaturalState({ keepMode: true, reason: "synthesis-error" });
           this.onError?.(new Error(`Windows Natural synthesis failed: ${error?.message || String(error)}`));
         });
     }
 
-    async _handleWinNaturalResponse(generation, requestId, response) {
-      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) {
-        return;
-      }
+    _createWinNaturalRequest(generation, chunkIndex, payload, voiceId) {
+      const requestId = localRequestId(generation, chunkIndex);
+      const request = { requestId, generation, chunkIndex, payload };
+      request.promise = Promise.resolve(root.chrome?.runtime?.sendMessage?.({
+        type: "EDGE_TTS_WIN_NATURAL_SYNTHESIZE",
+        requestId,
+        voiceId,
+        text: payload.text
+      })).then((response) => this._prepareWinNaturalResponse(request, response));
+      return request;
+    }
+
+    _prepareWinNaturalResponse(request, response) {
       if (!response?.accepted) throw new Error(response?.error || "Windows Natural synthesis was refused.");
       if (response.totalBytes !== undefined && Number(response.totalBytes) < 1) {
         throw new Error("Windows Natural returned an invalid byte count.");
@@ -717,20 +731,45 @@
       try {
         bytes = this._nativeBytesFromBase64(response.wavBase64);
       } catch (error) {
-        this._resetWinNaturalState({ keepMode: true, reason: "invalid-response" });
-        this.onError?.(error);
-        return;
+        throw error;
       }
       if (response.totalBytes !== undefined && Number(response.totalBytes) !== bytes.length) {
-        this._resetWinNaturalState({ keepMode: true, reason: "byte-count-mismatch" });
-        this.onError?.(new Error("Windows Natural returned a WAV size mismatch."));
-        return;
+        throw new Error("Windows Natural returned a WAV size mismatch.");
       }
-      const payload = this.winNaturalRequest.payload;
-      this.winNaturalTiming = normalizeWinNaturalTiming(response.timing, payload.text.length);
-      this.winNaturalBoundaries = mapWinNaturalTimingToSegments(this.winNaturalTiming, payload);
+      const timing = normalizeWinNaturalTiming(response.timing, request.payload.text.length);
+      return {
+        ...request,
+        bytes,
+        timing,
+        boundaries: mapWinNaturalTimingToSegments(timing, request.payload)
+      };
+    }
+
+    _startWinNaturalPrefetch(generation, chunkIndex) {
+      if (generation !== this.generation || !this.winNaturalSessionMode ||
+          chunkIndex < 0 || chunkIndex >= this.currentChunks.length || this.winNaturalPrefetch) return;
+      const payload = this.currentChunks[chunkIndex];
+      const voiceId = this.currentOptions?.voice?.nativeVoiceId;
+      const request = this._createWinNaturalRequest(generation, chunkIndex, payload, voiceId);
+      this.winNaturalPrefetch = { kind: "pending", request };
+      request.promise.then((prepared) => {
+        if (generation !== this.generation || !this.winNaturalSessionMode ||
+            this.winNaturalPrefetch?.request !== request) return;
+        this.winNaturalPrefetch = { kind: "ready", prepared };
+      }).catch((error) => {
+        if (generation !== this.generation || this.winNaturalPrefetch?.request !== request) return;
+        this.winNaturalPrefetch = { kind: "failed", error };
+      });
+    }
+
+    async _activateWinNaturalChunk(prepared) {
+      const { generation, requestId, payload, bytes, timing, boundaries } = prepared || {};
+      if (!prepared || generation !== this.generation || !this.winNaturalSessionMode ||
+          this.currentChunkIndex !== prepared.chunkIndex) return;
+      this.winNaturalRequest = prepared;
+      this.winNaturalTiming = timing;
+      this.winNaturalBoundaries = boundaries;
       this.winNaturalBoundaryIndex = 0;
-      if (generation !== this.generation || this.winNaturalRequest?.requestId !== requestId) return;
       const audio = this._ensureWinNaturalAudio();
       if (!audio) {
         this._resetWinNaturalState({ keepMode: true, reason: "audio-unavailable" });
@@ -758,7 +797,21 @@
           this.currentOptions = null;
           this.onEnd?.();
         } else {
-          root.setTimeout(() => this._speakWinNaturalChunk(this.generation), 0);
+          const nextIndex = this.currentChunkIndex;
+          const prefetched = this.winNaturalPrefetch;
+          this.winNaturalPrefetch = null;
+          if (prefetched?.kind === "ready") {
+            void this._activateWinNaturalChunk(prefetched.prepared);
+          } else if (prefetched?.kind === "pending") {
+            prefetched.request.promise.then((next) => this._activateWinNaturalChunk(next))
+              .catch(() => {
+                if (this.winNaturalSessionMode && this.currentChunkIndex === nextIndex) {
+                  this._speakWinNaturalChunk(this.generation);
+                }
+              });
+          } else {
+            root.setTimeout(() => this._speakWinNaturalChunk(this.generation), 0);
+          }
         }
       };
       audio.onerror = () => {
@@ -780,6 +833,7 @@
       const startedAt = root.performance?.now?.() ?? Date.now();
       this.onStart?.(payload.segments?.[0], Math.max(0, startedAt - this.requestedAt));
       this._startWinNaturalBoundaryClock(generation, requestId);
+      this._startWinNaturalPrefetch(generation, prepared.chunkIndex + 1);
     }
 
     _speakLocalChunk(generation) {
@@ -914,6 +968,8 @@
 
   return {
     LocalTtsSpeechEngine,
+    WIN_NATURAL_FIRST_CHUNK_MAX_CHARS,
+    WIN_NATURAL_LATER_CHUNK_MAX_CHARS,
     chromeVoiceToCatalogVoice,
     isChromeTtsVoice,
     isWinNaturalVoice,

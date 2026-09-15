@@ -173,8 +173,9 @@ Gate 4B acceptance:
 - Highlighting follows the actual PCM/browser media timeline.
 - Existing Stop/Quit teardown remains intact.
 
-Gate 4 overall is complete after Gate 4C. The next planned engineering goal is
-`WIN-NATURAL startup/synthesis latency investigation`; it has not started.
+Gate 4 overall is complete after Gate 4C. The `WIN-NATURAL startup/synthesis
+latency investigation` is active as an unaccepted optimization candidate.
+Gate 5 has not started.
 
 ### Gate 5 — promotion candidate
 

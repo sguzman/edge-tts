@@ -571,8 +571,28 @@ generation and tears down audio, object URLs, animation frames, handlers, Web
 Audio nodes/context, and inherited direct-audio resources so the resident
 bootstrap can create a fresh ReaderApp in the same tab.
 
-Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 has not started. The next
-planned engineering goal is WIN-NATURAL startup/synthesis latency
-investigation. Native startup latency and pause/resume's current-sentence
-restart behavior remain separate deferred limitations and were not fixed in
-this closeout.
+Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 has not started. The
+WIN-NATURAL startup/synthesis latency investigation is now active as an
+unaccepted optimization candidate. Native startup latency and pause/resume's
+current-sentence restart behavior remain separate deferred limitations and were
+not fixed in this closeout.
+
+## Latency investigation: first optimization candidate
+
+Fresh Edge measurements with the existing native latency diagnostics showed that
+warm SAPI synthesis, rather than Native Messaging or browser playback, is the
+steady-state bottleneck. A 49-character warm request measured about 61 ms for
+SAPI `Speak` and about 129 ms dispatch-to-media. A 900-character warm request
+measured about 1010 ms for `Speak` and about 1234 ms dispatch-to-media, with
+about 50.9 seconds of PCM output. The first `SelectVoice` measured about 176 ms
+and later selections were effectively 0 ms.
+
+The candidate keeps the helper and transport unchanged. WIN-NATURAL chunks
+target about 120 characters initially and about 900 thereafter, flushing at the
+existing sentence/paragraph boundaries unless the emergency limit is reached.
+Once a current native WAV is accepted and playing, one and only one next chunk
+may be prefetched. A ready prefetch is promoted only from that chunk's `ended`
+event; generation/session/chunk/voice/payload checks prevent stale prefetches
+from playing or affecting timing, highlighting, or cursor state. Rate and
+volume are read at promotion time. No PCM streaming, helper redesign, or Gate 5
+work is included. Stop here for fresh normal-reader browser QA.

@@ -454,8 +454,28 @@ in the same tab.
 Known deferred limitations: WIN-NATURAL startup/synthesis latency remains high
 for a local/offline voice, and Pause -> Resume restarts the current sentence
 instead of preserving an exact intra-sentence media position. Neither is fixed
-in this closeout. The next planned goal is `WIN-NATURAL startup/synthesis
-latency investigation`; it has not started.
+in this closeout. The `WIN-NATURAL startup/synthesis latency investigation` is
+now active as an unaccepted optimization candidate; Gate 5 has not started.
+
+## WIN-NATURAL latency investigation — optimization candidate
+
+Human Edge measurements using the existing latency diagnostics established that
+warm SAPI synthesis is the steady-state bottleneck. A 49-character warm request
+took about 61 ms for `Speak` and about 129 ms from dispatch to media playback.
+A 900-character warm request took about 1010 ms for `Speak` and about 1234 ms
+from dispatch to media playback, while producing about 50.9 seconds of PCM.
+The first `SelectVoice` took about 176 ms; later selections were effectively
+0 ms. Native transport and browser media setup were secondary contributors.
+
+The first optimization candidate is WIN-NATURAL-only: target about 120
+characters for the first chunk and about 900 for later chunks while preserving
+sentence boundaries, then prefetch at most one next synthesis. A ready next
+response is promoted on media `ended`; generation/session/chunk/voice/payload
+checks prevent stale work from changing audio, timing, highlighting, or the
+reader cursor. Current rate and volume are applied at promotion time. The
+helper, transport, PCM timing, Gate 4 lifecycle, Windows Legacy, and Online
+Natural paths remain unchanged. This candidate is awaiting fresh normal-reader
+browser QA and is not a gate acceptance.
 
 Gate 4 is complete. Gate 5 has not started.
 

@@ -75,8 +75,9 @@ function loadStack({ webAudio = false } = {}) {
     global.webkitAudioContext = undefined;
   }
   global.document = { createElement: () => audio };
+  let objectUrlId = 0;
   global.URL = {
-    createObjectURL: () => "blob:native-test",
+    createObjectURL: () => `blob:native-test-${++objectUrlId}`,
     revokeObjectURL: (value) => { revoked.push(value); }
   };
   global.Blob = class BlobMock {};
@@ -295,15 +296,88 @@ test("native playback rate changes live without restarting audio or its boundary
   assert.deepEqual(boundaries, ["one", "two"], "rate changes must not reset the boundary cursor");
 });
 
+test("native latency optimization uses a short first chunk and normal later chunks", async () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  const first = `${"a".repeat(119)}.`;
+  const second = `${"b".repeat(899)}.`;
+  const third = "c";
+  engine.speak({ segments: [
+    { text: first, blockIndex: 0, segmentIndex: 0 },
+    { text: second, blockIndex: 0, segmentIndex: 1 },
+    { text: third, blockIndex: 0, segmentIndex: 2 }
+  ] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  let requests = api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE");
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].text.length, 120);
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  requests = api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE");
+  assert.equal(requests.length, 2, "the next chunk should be prefetched once the first is accepted");
+  assert.equal(requests[1].text.length, 900);
+});
+
+test("native prefetch promotes the ready chunk without overlap and applies current controls", async () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  engine.speak({ segments: [
+    { text: `${"a".repeat(119)}.`, blockIndex: 0, segmentIndex: 0 },
+    { text: `${"b".repeat(899)}.`, blockIndex: 0, segmentIndex: 1 }
+  ] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("one").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  const audio = api.audio;
+  const firstSrc = audio.src;
+  engine.setPlaybackRate(1.8);
+  engine.setOutputVolume(0.4);
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("two").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  assert.equal(engine.winNaturalPrefetch?.kind, "ready");
+  const playCalls = audio.playCalls;
+  audio.onended();
+  await waitForTurn();
+  await waitForTurn();
+  assert.notEqual(audio.src, firstSrc);
+  assert.equal(audio.playbackRate, 1.8);
+  assert.equal(audio.volume, 0.4);
+  assert.equal(audio.playCalls, playCalls + 1);
+  assert.equal(api.messages.filter((message) => message.type === "EDGE_TTS_WIN_NATURAL_SYNTHESIZE").length, 2);
+});
+
+test("native stop invalidates an in-flight prefetch and cannot start it later", async () => {
+  const api = loadStack();
+  const engine = new api.LocalTtsSpeechEngine({});
+  engine.speak({ segments: [
+    { text: `${"a".repeat(119)}.`, blockIndex: 0, segmentIndex: 0 },
+    { text: `${"b".repeat(899)}.`, blockIndex: 0, segmentIndex: 1 }
+  ] }, 0, { voice: nativeVoice(api) });
+  await waitForTurn();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("one").toString("base64"), totalBytes: 3 });
+  await waitForTurn();
+  await waitForTurn();
+  const audio = api.audio;
+  const playCalls = audio.playCalls;
+  engine.cancel();
+  api.resolveNative({ accepted: true, wavBase64: Buffer.from("late").toString("base64"), totalBytes: 4 });
+  await waitForTurn();
+  await waitForTurn();
+  assert.equal(audio.playCalls, playCalls);
+  assert.equal(engine.winNaturalPrefetch, null);
+  assert.equal(engine.winNaturalActive, false);
+});
+
 test("native playback rate persists across a native chunk transition", async () => {
   const api = loadStack();
   const engine = new api.LocalTtsSpeechEngine({});
   engine.speak({ segments: [
-    { text: "one", blockIndex: 0, segmentIndex: 0 },
-    { text: "two", blockIndex: 0, segmentIndex: 1 }
+    { text: `${"one ".repeat(32)}.`, blockIndex: 0, segmentIndex: 0 },
+    { text: `${"two ".repeat(32)}.`, blockIndex: 0, segmentIndex: 1 }
   ] }, 0, {
-    voice: nativeVoice(api),
-    chunkOptions: { firstChunkMaxChars: 3, maxChars: 3, emergencyMaxChars: 3 }
+    voice: nativeVoice(api)
   });
   await waitForTurn();
   api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
@@ -349,11 +423,10 @@ test("native output gain persists across chunks and reset silences the persisten
   const api = loadStack({ webAudio: true });
   const engine = new api.LocalTtsSpeechEngine({});
   engine.speak({ segments: [
-    { text: "one", blockIndex: 0, segmentIndex: 0 },
-    { text: "two", blockIndex: 0, segmentIndex: 1 }
+    { text: `${"one ".repeat(32)}.`, blockIndex: 0, segmentIndex: 0 },
+    { text: `${"two ".repeat(32)}.`, blockIndex: 0, segmentIndex: 1 }
   ] }, 0, {
-    voice: nativeVoice(api),
-    chunkOptions: { firstChunkMaxChars: 3, maxChars: 3, emergencyMaxChars: 3 }
+    voice: nativeVoice(api)
   });
   await waitForTurn();
   api.resolveNative({ accepted: true, wavBase64: Buffer.from("wav").toString("base64"), totalBytes: 3 });
