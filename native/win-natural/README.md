@@ -33,15 +33,19 @@ dotnet publish .\native\win-natural\WinNaturalHost.csproj `
   --self-contained false
 ```
 
-## Register for an unpacked development extension
+## Register for an unpacked extension
 
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File .\native\win-natural\install-native-host.ps1 `
+  -Channel Development `
   -ExtensionId '<development-extension-id>'
 ```
 
-The script registers only the Edge Native Messaging host under the current user's registry hive and does not install, remove, replace, or downgrade any Microsoft voice package.
+Use `-Channel Stable` with the stable ID for a stable installation. The two
+channels have distinct host names, manifests, payload directories, and registry
+keys. The script does not install, remove, replace, or downgrade any Microsoft
+voice package.
 
 ## Registry-independent Narrator discovery
 

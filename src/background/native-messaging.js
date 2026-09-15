@@ -3,13 +3,26 @@
   if (typeof module === "object" && module.exports) module.exports = api;
   root.EdgeTtsNativeMessaging = api;
 })(globalThis, function createNativeMessagingApi(root) {
-  const HOST_NAME = "com.sguzman.edge_tts.win_natural";
+  const HOST_NAMES = Object.freeze({
+    "gfeeggciegdnlpdmebfjmahboogkilhi": "com.sguzman.edge_tts.win_natural",
+    "gajodjkpikfgfbcobncfacbjeaekgefb": "com.sguzman.edge_tts.win_natural.dev"
+  });
   const REQUEST_TIMEOUT_MS = 5_000;
   const SYNTHESIS_TIMEOUT_MS = 30_000;
   const MAX_SYNTHESIS_BYTES = 8 * 1024 * 1024;
 
+  function resolveHostName(extensionId = root.chrome?.runtime?.id) {
+    const normalizedId = String(extensionId || "").trim().toLowerCase();
+    const hostName = HOST_NAMES[normalizedId];
+    if (!hostName) {
+      throw new Error(`Unsupported Native Messaging extension ID: ${normalizedId || "missing"}`);
+    }
+    return hostName;
+  }
+
   function createTransport(options = {}) {
     const connectNative = options.connectNative || root.chrome?.runtime?.connectNative;
+    const hostName = resolveHostName(options.extensionId);
     const now = options.now || (() => Date.now());
     const onDisconnect = options.onDisconnect;
     let port = null;
@@ -44,7 +57,7 @@
       if (typeof connectNative !== "function") {
         throw new Error("Native Messaging is unavailable in this context.");
       }
-      const next = connectNative(HOST_NAME);
+      const next = connectNative(hostName);
       function rejectRequest(requestId, error) {
         const request = pending.get(requestId);
         if (!request) return;
@@ -312,7 +325,7 @@
       disconnect,
       request,
       requestMultipart,
-      HOST_NAME,
+      HOST_NAME: hostName,
       REQUEST_TIMEOUT_MS,
       SYNTHESIS_TIMEOUT_MS,
       MAX_SYNTHESIS_BYTES
@@ -343,5 +356,5 @@
     });
   }
 
-  return { HOST_NAME, REQUEST_TIMEOUT_MS, createTransport, installDiagnosticsListener };
+  return { HOST_NAMES, resolveHostName, REQUEST_TIMEOUT_MS, createTransport, installDiagnosticsListener };
 });

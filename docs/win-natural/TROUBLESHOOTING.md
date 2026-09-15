@@ -54,13 +54,14 @@ Check in this order:
 3. Native Messaging manifest exists;
 4. Edge Native Messaging registry key points at that manifest;
 5. manifest `path` points at the real `WinNaturalHost.exe`;
-6. manifest `allowed_origins` exactly contains the development extension origin;
+6. the channel manifest `allowed_origins` exactly contains its own extension origin;
 7. extension ID matches the unpacked development extension currently loaded.
 
 Expected per-user registration:
 
 ```text
-HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural
+Development: HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural.dev
+Stable: HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural
 ```
 
 Reinstall registration with:
@@ -68,6 +69,7 @@ Reinstall registration with:
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File .\native\win-natural\install-native-host.ps1 `
+  -Channel Development `
   -ExtensionId '<development-extension-id>'
 ```
 

@@ -25,11 +25,26 @@ test("native host installer computes its default publish path after parameter bi
   assert.doesNotMatch(installerSource, /\[string\]\$PublishDir\s*=\s*\(Join-Path/);
 });
 
-test("native host installer preserves existing origins without duplicates", () => {
-  assert.match(installerSource, /Get-Content\s+-LiteralPath\s+\$manifestPath\s+-Raw\s+\|\s+ConvertFrom-Json/);
-  assert.match(installerSource, /\$origins\s*=\s*@\(\$existingManifest\.allowed_origins/);
-  assert.match(installerSource, /Select-Object\s+-Unique/);
-  assert.match(installerSource, /\$manifest\.allowed_origins\s*=\s*@\(\$origins\s*\+\s*\$origin/);
+test("native host installer is explicitly channel-scoped and never merges origins", () => {
+  assert.match(installerSource, /ValidateSet\("Stable",\s*"Development"\)/);
+  assert.match(installerSource, /\$Channel/);
+  assert.match(installerSource, /gfeeggciegdnlpdmebfjmahboogkilhi/);
+  assert.match(installerSource, /gajodjkpikfgfbcobncfacbjeaekgefb/);
+  assert.match(installerSource, /-cne\s+\$channelConfig\.ExtensionId/);
+  assert.match(installerSource, /com\.sguzman\.edge_tts\.win_natural\.dev/);
+  assert.match(installerSource, /allowed_origins\s*=\s*@\("chrome-extension:\/\/\$ExtensionId\/"\)/);
+  assert.doesNotMatch(installerSource, /existingManifest|Select-Object\s+-Unique|origins\s*\+/);
+  assert.match(installerSource, /native-host/);
+  assert.match(installerSource, /\$channelConfig\.Directory/);
+  assert.match(installerSource, /Get-ChildItem\s+-LiteralPath\s+\$publishPath/);
+});
+
+test("native host uninstaller requires a channel and scopes registry and payload removal", () => {
+  const uninstaller = fs.readFileSync(path.join(__dirname, "..", "native", "win-natural", "uninstall-native-host.ps1"), "utf8");
+  assert.match(uninstaller, /ValidateSet\("Stable",\s*"Development"\)/);
+  assert.match(uninstaller, /com\.sguzman\.edge_tts\.win_natural\.dev/);
+  assert.match(uninstaller, /Remove-Item\s+-LiteralPath\s+\$installRoot\s+-Recurse\s+-Force/);
+  assert.doesNotMatch(uninstaller, /com\.sguzman\.edge_tts\.win_natural"\s*\r?\n.*allowed/);
 });
 
 test("speech backends, voice UI, controls, and startup fast path load before bootstrap", () => {

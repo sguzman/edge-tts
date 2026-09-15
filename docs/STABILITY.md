@@ -16,13 +16,18 @@ Stable promotion rules:
 
 ## Native Messaging deployment
 
-The unpacked extension ID is profile/worktree-specific. The development host
-registration authorizes the development extension origin only. After a
-candidate is promoted to the stable worktree, the human must read the stable
-extension's ID from `edge://extensions` in the stable Edge profile and run the
-native-host installer from the promoted stable checkout with that ID. This
-updates the current-user host manifest's `allowed_origins`; it does not change
-the voice package or the stable worktree automatically.
+The unpacked extension ID is profile/worktree-specific. Stable and development
+use different host names, per-channel manifests, payload directories, and
+registry keys. The runtime selects the host from its extension ID and fails
+closed for unknown IDs. Each installer invocation requires an explicit channel
+and authorizes only that channel's origin; it never merges origins into a
+shared manifest. A development install is therefore disposable and cannot
+overwrite or unregister stable state.
+
+After a candidate is promoted to the stable worktree, the human must read the
+stable extension's ID from `edge://extensions` in the stable Edge profile and
+run the installer with `-Channel Stable` from the promoted stable checkout.
+This machine registration remains separate from repository promotion.
 
 Do not perform that machine registration or stable-branch move as part of
 Gate 5 candidate preparation.

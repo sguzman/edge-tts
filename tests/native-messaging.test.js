@@ -5,8 +5,26 @@ const path = require("node:path");
 
 const {
   createTransport,
-  installDiagnosticsListener
+  installDiagnosticsListener,
+  resolveHostName
 } = require("../src/background/native-messaging.js");
+
+test("runtime extension IDs map to isolated Native Messaging hosts", () => {
+  assert.equal(resolveHostName("gfeeggciegdnlpdmebfjmahboogkilhi"), "com.sguzman.edge_tts.win_natural");
+  assert.equal(resolveHostName("gajodjkpikfgfbcobncfacbjeaekgefb"), "com.sguzman.edge_tts.win_natural.dev");
+  assert.throws(() => resolveHostName("unknown-extension-id"), /Unsupported Native Messaging extension ID/);
+});
+
+test("transport connects to the host selected by the injected runtime identity", () => {
+  const port = fakePort();
+  let connectedHost;
+  createTransport({
+    extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb",
+    connectNative: (host) => { connectedHost = host; return port; }
+  }).request("hello");
+  assert.equal(connectedHost, "com.sguzman.edge_tts.win_natural.dev");
+  port.emit({ type: "hello", requestId: port.sent[0].requestId, protocol: 1, architecture: "x64" });
+});
 
 function fakePort() {
   const messageListeners = [];
@@ -43,7 +61,7 @@ function fakeRuntime() {
 
 test("Native Messaging handshake and filtered voice enumeration succeed", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 100 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 100 });
   const pending = transport.diagnostics();
   assert.equal(port.sent[0].type, "hello");
   port.emit({ type: "hello", requestId: port.sent[0].requestId, protocol: 1, architecture: "x64" });
@@ -70,6 +88,7 @@ test("one transport reuses a healthy port and reports disconnect for cache inval
   let connects = 0;
   let disconnects = 0;
   const transport = createTransport({
+    extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb",
     connectNative: () => {
       connects += 1;
       const port = fakePort();
@@ -96,7 +115,7 @@ test("one transport reuses a healthy port and reports disconnect for cache inval
 
 function startMultipartRequest() {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 400 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 400 });
   const pending = transport.requestMultipart("synthesize", { voiceId: "Local-NarratorVoices", text: "test" });
   const request = port.sent[0];
   port.emit({ type: "synth-start", requestId: request.requestId, totalBytes: 5, chunkCount: 2 });
@@ -137,7 +156,7 @@ test("multipart synthesis reconstructs start/chunk/end in order", async () => {
 
 test("multipart latency diagnostics distinguish a new port from a reused warm port", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 400 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 400 });
   const complete = async (text, value) => {
     const pending = transport.requestMultipart("synthesize", { text });
     const request = port.sent.at(-1);
@@ -202,7 +221,7 @@ for (const [name, emitInvalid] of [
 
 test("multipart synthesis enforces the 8 MiB response bound", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 500 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 500 });
   const pending = transport.requestMultipart("synthesize");
   const request = port.sent[0];
   port.emit({ type: "synth-start", requestId: request.requestId, totalBytes: 8 * 1024 * 1024 + 1, chunkCount: 1 });
@@ -211,7 +230,7 @@ test("multipart synthesis enforces the 8 MiB response bound", async () => {
 
 test("Aria detection uses the adapter prefix and voice identity, not a canonical token ID", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 100 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 100 });
   const pending = transport.diagnostics();
   port.emit({ type: "hello", requestId: port.sent[0].requestId, protocol: 1, architecture: "x64" });
   await Promise.resolve();
@@ -234,6 +253,7 @@ test("diagnostic listener ignores existing audio messages and has no eager nativ
   const runtime = fakeRuntime();
   let connectCount = 0;
   const transport = createTransport({
+    extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb",
     connectNative: () => {
       connectCount += 1;
       return fakePort();
@@ -274,13 +294,13 @@ test("diagnostic listener ignores existing audio messages and has no eager nativ
 
 test("Native Messaging request timeout is bounded", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 200 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 200 });
   await assert.rejects(transport.request("hello", {}, 10), /timed out: hello/);
 });
 
 test("Native host errors and disconnects reject the matching request", async () => {
   const port = fakePort();
-  const transport = createTransport({ connectNative: () => port, now: () => 300 });
+  const transport = createTransport({ extensionId: "gajodjkpikfgfbcobncfacbjeaekgefb", connectNative: () => port, now: () => 300 });
   const pending = transport.request("voices");
   port.emit({ type: "error", requestId: port.sent[0].requestId, message: "malformed response" });
   await assert.rejects(pending, /malformed response/);

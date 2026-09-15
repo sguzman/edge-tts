@@ -1,6 +1,6 @@
 # Windows Natural setup
 
-This document describes the verified setup path for making a compatible Microsoft Narrator Natural voice visible to the `edge-tts` development extension through a persistent x64 Native Messaging helper.
+This document describes the verified setup path for making a compatible Microsoft Narrator Natural voice visible to an `edge-tts` extension through a persistent x64 Native Messaging helper. Stable and development use isolated Native Messaging channels; see [`../DEV_ISOLATION.md`](../DEV_ISOLATION.md).
 
 It deliberately separates **machine prerequisites**, **adapter discovery**, **native-host registration**, and **browser verification**. Do not collapse these into one giant installer until each layer is understood and independently testable.
 
@@ -128,27 +128,34 @@ Then run:
 ```powershell
 powershell -ExecutionPolicy Bypass `
   -File .\native\win-natural\install-native-host.ps1 `
+  -Channel Development `
   -ExtensionId '<development-extension-id>'
 ```
 
-The install script writes a per-user Native Messaging registration under:
+The install script writes only the selected channel's per-user Native Messaging registration. Development uses:
 
 ```text
-HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural
+HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural.dev
 ```
 
-and writes the Native Messaging manifest under the user's local app-data tree.
+Stable uses the same path with host name `com.sguzman.edge_tts.win_natural`.
+The manifests and copied helper payloads are separate under:
 
-The installer merges the requested origin into any existing valid
-`allowed_origins` entries and removes duplicates. This preserves separately
-installed development and stable unpacked extension IDs when the same
-per-user host is registered repeatedly. The requested origin is:
+```text
+%LOCALAPPDATA%\EdgeNaturalTts\native-host\development
+%LOCALAPPDATA%\EdgeNaturalTts\native-host\stable
+```
+
+The installer does not merge origins. Each manifest contains exactly its
+channel's requested origin:
 
 ```text
 chrome-extension://<development-extension-id>/
 ```
 
-Do not authorize the stable extension accidentally merely because it is another unpacked copy of the same source.
+Use `-Channel Stable` and the stable unpacked ID for the stable origin. A
+channel-mismatched ID is rejected, and development installation cannot alter
+stable registration or payload state.
 
 ## 8. Reload Edge extension state
 
@@ -224,7 +231,7 @@ The final Gate 1 setup does **not** require:
 
 To remove only project-owned integration state:
 
-1. remove the Edge Native Messaging registration with the repository's uninstall script;
+1. remove the selected Edge Native Messaging registration with the repository's uninstall script, for example `-Channel Development`;
 2. remove the `NarratorVoices` junction;
 3. unload the development extension or switch branches/worktrees as desired.
 
