@@ -642,5 +642,8 @@ not, by itself, proof of a newly introduced regression. The controlled Gate 5
 correction removes only those hot-path console calls, counts frames, and keeps
 one bounded `turn.end` summary plus existing phase/error/timeout diagnostics.
 The timeout constant remains 12 seconds and no Online protocol, streaming, or
-WIN-NATURAL behavior is changed. Fresh browser QA is required to determine
-whether the observer effect explains the timeout.
+WIN-NATURAL behavior is changed. Fresh-page human QA on corrected candidate
+`360460a99a0b52cc5d45fa3c406c84f881f9752c` passed Online Aria, all existing
+backend switching, the complete WIN-NATURAL smoke matrix, and lifecycle
+checks. Gate 5 is therefore accepted and promoted. The previous stable
+`c089d08ece6009592faa2fdf4306e4ce873e4ea8` remains the rollback point.

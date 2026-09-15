@@ -110,8 +110,8 @@ highlight synchronization, and precise intra-sentence Pause/Resume position.
 
 ### Gate 4 — highlighting and controls
 
-**Status: COMPLETE. Gate 4A, Gate 4B, and Gate 4C are ACCEPTED. Gate 5 is
-CANDIDATE PENDING HUMAN BROWSER QA and has not been promoted.**
+**Status: COMPLETE. Gate 4A, Gate 4B, Gate 4C, and Gate 5 are ACCEPTED. Gate 5
+has been promoted after fresh-page human browser QA.**
 
 Gate 4A only captures and transports request-relative native timing metadata.
 It does not implement visual highlighting, live rate/volume, pause/resume
@@ -175,15 +175,15 @@ Gate 4B acceptance:
 - Existing Stop/Quit teardown remains intact.
 
 Gate 4 overall is complete after Gate 4C. The WIN-NATURAL startup/synthesis
-latency optimization is accepted. Gate 5 has not started.
+latency optimization is accepted. Gate 5 is accepted and promoted.
 
 ### Gate 5 — promotion candidate
 
-**Status: CANDIDATE PENDING HUMAN BROWSER QA.** Candidate
-`b721eaf7463e60df7c4a8b4eaf6c4beab6e66cc4` is compared against stable
-`c089d08ece6009592faa2fdf4306e4ce873e4ea8`; their merge-base is the stable
-SHA. Gate 5 is blocked by a development-profile Online Natural regression and
-has not been promoted or accepted.
+**Status: ACCEPTED AND PROMOTED.** Accepted candidate
+`360460a99a0b52cc5d45fa3c406c84f881f9752c` was compared against rollback point
+`c089d08ece6009592faa2fdf4306e4ce873e4ea8`; their pre-promotion merge-base
+was the stable SHA. Gate 5 passed fresh-page human QA and was fast-forwarded
+to stable after the required checks.
 
 The candidate contains only the intended WIN-NATURAL integration, diagnostics,
 native helper/setup, tests, latency optimization, and documentation changes.
@@ -197,6 +197,12 @@ audio frames. The candidate removes per-frame console diagnostics from the
 direct MP3 hot path while retaining O(1) phase logs and one `turn.end` summary.
 The 12-second connection timeout is unchanged; this correction does not
 redesign the transport or alter WIN-NATURAL.
+
+Gate 5 human acceptance covered Windows Legacy Zira, Online Aria and their
+routing/switching; fast and synchronized WIN-NATURAL Aria playback; live rate
+and volume; Stop -> Play; Quit -> same-tab restart; WIN-NATURAL/Online
+switching; and no chunk gaps, ghost audio, or overlap. Stable promotion
+preserves `c089d08ece6009592faa2fdf4306e4ce873e4ea8` as the rollback point.
 
 ## Architectural constraints
 

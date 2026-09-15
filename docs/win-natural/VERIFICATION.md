@@ -367,7 +367,7 @@ the current sentence instead of preserving an intra-sentence audio position.
 
 ## Gate 4 — timing, highlighting, live controls, warm reuse
 
-**COMPLETE — Gate 4A, Gate 4B, and Gate 4C ACCEPTED; Gate 5 NOT STARTED.** Gate 4A captures
+**COMPLETE — Gate 4A, Gate 4B, Gate 4C, and Gate 5 ACCEPTED.** Gate 4A captures
 request-relative SAPI `SpeakProgress` records and transports them with the
 completed WAV. It stops before visual mapping/highlighting and live control
 changes.
@@ -455,7 +455,7 @@ Known deferred limitations: WIN-NATURAL startup/synthesis latency remains high
 for a local/offline voice, and Pause -> Resume restarts the current sentence
 instead of preserving an exact intra-sentence media position. Neither is fixed
 in this closeout. The `WIN-NATURAL startup/synthesis latency optimization` is
-accepted; Gate 5 remains pending human browser QA and has not been promoted.
+accepted; Gate 5 is accepted and promoted.
 
 ## WIN-NATURAL latency optimization — ACCEPTED
 
@@ -496,8 +496,7 @@ the existing base64 transport add smaller costs. These are deferred and were
 not optimized in this closeout. Exact intra-sentence Pause/Resume fidelity also
 remains a separate deferred issue.
 
-Gate 4 is complete. Gate 5 is pending human browser QA and has not been
-promoted.
+Gate 4 is complete. Gate 5 is accepted and promoted.
 
 ### Purpose
 
@@ -529,8 +528,8 @@ cancel terminates active synthesis cleanly
 
 ### Status
 
-Accepted. Gate 4A, Gate 4B, and Gate 4C are complete; Gate 5 is **CANDIDATE
-PENDING HUMAN BROWSER QA**.
+Accepted. Gate 4A, Gate 4B, Gate 4C, and Gate 5 are complete; Gate 5 is
+**ACCEPTED AND PROMOTED**.
 
 ## Gate 5 — promotion candidate
 
@@ -549,9 +548,10 @@ native helper build/tests
 
 ### Candidate and promotion baseline
 
-- Candidate: `b721eaf7463e60df7c4a8b4eaf6c4beab6e66cc4`
-- Stable SHA: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
-- Merge-base: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
+- Accepted candidate: `360460a99a0b52cc5d45fa3c406c84f881f9752c`
+- Promoted stable SHA: `360460a99a0b52cc5d45fa3c406c84f881f9752c`
+- Rollback SHA: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
+- Pre-promotion merge-base: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
 - Stable policy: [`docs/STABILITY.md`](../STABILITY.md)
 
 The stable-to-candidate diff is classified as intended WIN-NATURAL integration,
@@ -578,7 +578,14 @@ C — Lifecycle: Stop -> Play; Quit -> same-tab restart; switch away from
 ```
 
 Do not treat Pause/Resume exact-position fidelity as part of this candidate
-matrix. Do not mark Gate 5 accepted until the user accepts this exact SHA.
+matrix. Gate 5 was accepted by human QA on a genuinely fresh webpage after
+reloading the development extension.
+
+The accepted fresh-page matrix passed Windows Legacy Zira, Online Aria,
+Zira -> Online Aria -> Zira switching, fast WIN-NATURAL Aria startup,
+sustained synchronized playback, live rate and volume, no chunk gaps,
+Stop -> Play, Quit -> same-tab restart, WIN-NATURAL -> Online Aria ->
+WIN-NATURAL switching, and no ghost or overlapping audio.
 
 ### Gate 5 QA block — Online Natural regression
 
@@ -617,7 +624,15 @@ still unnecessary hot-path work and are the narrowest controlled correction.
 The correction removes per-frame console calls, retains phase logs and one
 `turn.end` summary with audio/metadata frame counts, preserves the absolute
 12-second timeout, and adds a deterministic hundreds-of-frames regression
-test. Gate 5 remains pending fresh browser verification and is not accepted.
+test. Human QA on `360460a99a0b52cc5d45fa3c406c84f881f9752c` then confirmed
+Online Aria playback and the complete Gate 5 matrix. The stable profile still
+requires separate Native Messaging registration for its own unpacked ID.
+
+Gate 5 is accepted and promoted. The failed candidate remains documented as a
+development regression: stable control was good; the active trace showed
+healthy audio streaming but timed out before `turn.end`; removing per-frame
+diagnostic logging corrected the issue without changing the 12-second timeout
+or Direct Audio transport semantics.
 
 ### Promotion rule
 
