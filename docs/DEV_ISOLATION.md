@@ -1,5 +1,7 @@
 # Development/runtime isolation
 
+> **Required companion:** read [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md) before any task that touches Edge processes, browser profiles, Native Messaging, account state, or stable deployment. The 2026-09-15 incident demonstrated that repository isolation alone is not sufficient protection for this project.
+
 `edge-tts` is a load-bearing reading tool. Experimental development must never be able to take the verified reader away from the user.
 
 ## Runtime layout
