@@ -624,3 +624,23 @@ The direct MP3 implementation is functionally unchanged from the accepted Gate
 controls/lifecycle, and native latency work. The existing narrow direct-audio
 stage diagnostics are retained for one focused fresh-page trace before any
 Online-specific fix is attempted.
+
+### Gate 5 correction — per-frame logging and timeout evidence
+
+The decisive development trace showed Online Natural route selection,
+WebSocket connection, request dispatch, metadata, and large audio delivery,
+followed by a timeout before `turn.end`; no Blob or browser `play()` occurred.
+The same run produced more than 1,000 console lines and hundreds of audio-frame
+log entries. This makes synchronous per-frame console logging a plausible
+observer-induced timeout mechanism in the active WebSocket handler.
+
+`git blame` and pickaxe history identify `81ef5b5d9ede223be82887e768e069337f1458e0`
+as the source of both `received metadata frame` and `received audio frame`
+logging. It predates the last explicit human-good Online Aria commit
+`99ae6695cf4f9641714b455d27dd3c588a987457`, so the temporal comparison is
+not, by itself, proof of a newly introduced regression. The controlled Gate 5
+correction removes only those hot-path console calls, counts frames, and keeps
+one bounded `turn.end` summary plus existing phase/error/timeout diagnostics.
+The timeout constant remains 12 seconds and no Online protocol, streaming, or
+WIN-NATURAL behavior is changed. Fresh browser QA is required to determine
+whether the observer effect explains the timeout.

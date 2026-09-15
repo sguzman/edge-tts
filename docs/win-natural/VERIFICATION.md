@@ -597,6 +597,28 @@ audio, Blob creation, and `HTMLMediaElement.play()` resolution/rejection for
 the one focused follow-up trace. No speculative Online backend change is made
 until that first semantic divergence is observed.
 
+### Gate 5 correction — hot-path diagnostic observer investigation
+
+Fresh-page browser evidence showed that Online Aria selected the correct
+development route, opened the WebSocket, sent the request, and received
+metadata plus approximately 573 KB of audio frames, but never reached
+`turn.end`, Blob creation, or `play()`. The reader eventually reported
+`Read Aloud websocket timed out`, while the console contained more than 1,000
+lines, including hundreds of per-frame diagnostics. This localizes the current
+correction target to observer-induced work in the WebSocket message path rather
+than routing, synthesis, or browser playback.
+
+History inspection shows both per-frame logs were introduced by
+`81ef5b5d9ede223be82887e768e069337f1458e0`, which predates the last explicit
+development Online Aria acceptance at
+`99ae6695cf4f9641714b455d27dd3c588a987457`. Thus the timing evidence does not
+prove that logging was newly introduced after that acceptance, but the logs are
+still unnecessary hot-path work and are the narrowest controlled correction.
+The correction removes per-frame console calls, retains phase logs and one
+`turn.end` summary with audio/metadata frame counts, preserves the absolute
+12-second timeout, and adds a deterministic hundreds-of-frames regression
+test. Gate 5 remains pending fresh browser verification and is not accepted.
+
 ### Promotion rule
 
 Stable moves only after the user explicitly accepts the exact candidate in Edge.

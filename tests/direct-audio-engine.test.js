@@ -171,6 +171,69 @@ test("direct playback exposes a gesture-time preparation hook without affecting 
   }
 });
 
+test("direct transport summarizes frames without logging once per frame", async () => {
+  const previousWebSocket = global.WebSocket;
+  const previousDebug = console.debug;
+  const debugCalls = [];
+  const audioHeader = new TextEncoder().encode("Path:audio\r\n");
+
+  function audioFrame(byte) {
+    const frame = new Uint8Array(2 + audioHeader.length + 1);
+    frame[0] = audioHeader.length >> 8;
+    frame[1] = audioHeader.length & 0xff;
+    frame.set(audioHeader, 2);
+    frame[2 + audioHeader.length] = byte;
+    return frame.buffer;
+  }
+
+  class FakeWebSocket {
+    constructor() {
+      this.readyState = 0;
+      queueMicrotask(() => {
+        this.readyState = 1;
+        this.onopen?.();
+        this.onmessage?.({ data: "Path:audio.metadata\r\n\r\n{\"Metadata\":[]}" });
+        for (let index = 0; index < 300; index += 1) {
+          this.onmessage?.({ data: audioFrame(index) });
+        }
+        this.onmessage?.({ data: "Path:turn.end\r\n\r\n" });
+      });
+    }
+
+    send() {}
+    close() {
+      this.readyState = 3;
+    }
+  }
+
+  try {
+    global.WebSocket = FakeWebSocket;
+    console.debug = (stage, details) => debugCalls.push({ stage, details });
+    const engine = new DirectAudioSpeechEngine({});
+    const result = await engine._synthesizeGroup(
+      engine.generation,
+      { text: "frame test", segments: [] },
+      "en-US-AriaNeural"
+    );
+
+    assert.equal(result.audioBytes, 300);
+    assert.equal(result.audioChunks.length, 300);
+    assert.equal(debugCalls.filter(({ stage }) => stage.includes("received audio frame")).length, 0);
+    assert.equal(debugCalls.filter(({ stage }) => stage.includes("received metadata frame")).length, 0);
+    const summary = debugCalls.find(({ stage }) => stage.includes("received turn.end"));
+    assert.ok(summary, JSON.stringify(debugCalls));
+    assert.deepEqual(summary.details, {
+      audioBytes: 300,
+      audioFrameCount: 300,
+      boundaries: 0,
+      metadataFrameCount: 1
+    });
+  } finally {
+    global.WebSocket = previousWebSocket;
+    console.debug = previousDebug;
+  }
+});
+
 test("local Windows voices still delegate to the existing Web Speech engine", () => {
   const engine = new DirectAudioSpeechEngine({});
   engine.speak(

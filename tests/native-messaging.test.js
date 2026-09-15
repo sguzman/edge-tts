@@ -314,7 +314,6 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   assert.equal(background.includes("win-natural-speech-engine.js"), false);
   for (const file of [
-    "direct-audio-engine.js",
     "reliable-speech-engine.js",
     "voice-ui.js",
     "toolbar.js",
@@ -326,6 +325,10 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
     const baseline = require("node:child_process").execFileSync("git", ["show", `8c4025e:src/content/${file}`], { encoding: "utf8" });
     assert.equal(current, baseline, `${file} must remain Gate-2 identical`);
   }
+  const direct = fs.readFileSync(path.join(__dirname, "..", "src", "content", "direct-audio-engine.js"), "utf8");
+  assert.match(direct, /CONNECTION_TIMEOUT_MS = 12_000/);
+  assert.equal(direct.includes('logDirect("received audio frame"'), false);
+  assert.equal(direct.includes('logDirect("received metadata frame"'), false);
   const local = fs.readFileSync(path.join(__dirname, "..", "src", "content", "local-tts-engine.js"), "utf8");
   assert.match(local, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
   const speechEngine = fs.readFileSync(path.join(__dirname, "..", "src", "content", "speech-engine.js"), "utf8");

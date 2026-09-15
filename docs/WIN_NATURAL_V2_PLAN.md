@@ -191,6 +191,13 @@ The exact final browser matrix is recorded in `docs/win-natural/VERIFICATION.md`
 Only after that exact candidate passes human QA may it be considered for stable
 promotion under `docs/STABILITY.md`.
 
+The current Gate 5 correction is focused on a development-only Online Natural
+timeout observed after the WebSocket had opened and delivered metadata and large
+audio frames. The candidate removes per-frame console diagnostics from the
+direct MP3 hot path while retaining O(1) phase logs and one `turn.end` summary.
+The 12-second connection timeout is unchanged; this correction does not
+redesign the transport or alter WIN-NATURAL.
+
 ## Architectural constraints
 
 - Do not make WIN-NATURAL discovery part of startup readiness.

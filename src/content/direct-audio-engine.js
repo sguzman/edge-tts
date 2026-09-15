@@ -688,6 +688,8 @@
         const audioChunks = [];
         const boundaries = [];
         let audioBytes = 0;
+        let audioFrameCount = 0;
+        let metadataFrameCount = 0;
         let settled = false;
 
         const timeout = root.setTimeout(() => {
@@ -736,9 +738,14 @@
               if (path === "audio.metadata") {
                 const parsedBoundaries = parseMetadata(parsed.body);
                 boundaries.push(...parsedBoundaries);
-                logDirect("received metadata frame", { boundaries: parsedBoundaries.length });
+                metadataFrameCount += 1;
               } else if (path === "turn.end") {
-                logDirect("received turn.end", { audioBytes, boundaries: boundaries.length });
+                logDirect("received turn.end", {
+                  audioBytes,
+                  audioFrameCount,
+                  boundaries: boundaries.length,
+                  metadataFrameCount
+                });
                 finish();
               }
               return;
@@ -751,7 +758,7 @@
               const copy = parsed.data.slice();
               audioChunks.push(copy);
               audioBytes += copy.length;
-              logDirect("received audio frame", { frameBytes: copy.length, audioBytes });
+              audioFrameCount += 1;
             }
           } catch (error) {
             finish(error);
