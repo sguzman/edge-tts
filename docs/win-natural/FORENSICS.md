@@ -571,8 +571,8 @@ generation and tears down audio, object URLs, animation frames, handlers, Web
 Audio nodes/context, and inherited direct-audio resources so the resident
 bootstrap can create a fresh ReaderApp in the same tab.
 
-Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 has not started. The
-WIN-NATURAL startup/synthesis latency optimization is accepted. Native startup
+Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 is pending human browser QA
+and has not been promoted. The WIN-NATURAL startup/synthesis latency optimization is accepted. Native startup
 latency remains somewhat slower than Windows Legacy, and pause/resume's
 current-sentence restart behavior remains a separate deferred limitation.
 

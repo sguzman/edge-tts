@@ -454,8 +454,8 @@ in the same tab.
 Known deferred limitations: WIN-NATURAL startup/synthesis latency remains high
 for a local/offline voice, and Pause -> Resume restarts the current sentence
 instead of preserving an exact intra-sentence media position. Neither is fixed
-in this closeout. The `WIN-NATURAL startup/synthesis latency investigation` is
-now active as an unaccepted optimization candidate; Gate 5 has not started.
+in this closeout. The `WIN-NATURAL startup/synthesis latency optimization` is
+accepted; Gate 5 remains pending human browser QA and has not been promoted.
 
 ## WIN-NATURAL latency optimization — ACCEPTED
 
@@ -496,7 +496,8 @@ the existing base64 transport add smaller costs. These are deferred and were
 not optimized in this closeout. Exact intra-sentence Pause/Resume fidelity also
 remains a separate deferred issue.
 
-Gate 4 is complete. Gate 5 has not started.
+Gate 4 is complete. Gate 5 is pending human browser QA and has not been
+promoted.
 
 ### Purpose
 
