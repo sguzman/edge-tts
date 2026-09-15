@@ -139,7 +139,10 @@ HKCU\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natur
 
 and writes the Native Messaging manifest under the user's local app-data tree.
 
-The manifest's `allowed_origins` entry must exactly match:
+The installer merges the requested origin into any existing valid
+`allowed_origins` entries and removes duplicates. This preserves separately
+installed development and stable unpacked extension IDs when the same
+per-user host is registered repeatedly. The requested origin is:
 
 ```text
 chrome-extension://<development-extension-id>/

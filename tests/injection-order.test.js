@@ -25,6 +25,13 @@ test("native host installer computes its default publish path after parameter bi
   assert.doesNotMatch(installerSource, /\[string\]\$PublishDir\s*=\s*\(Join-Path/);
 });
 
+test("native host installer preserves existing origins without duplicates", () => {
+  assert.match(installerSource, /Get-Content\s+-LiteralPath\s+\$manifestPath\s+-Raw\s+\|\s+ConvertFrom-Json/);
+  assert.match(installerSource, /\$origins\s*=\s*@\(\$existingManifest\.allowed_origins/);
+  assert.match(installerSource, /Select-Object\s+-Unique/);
+  assert.match(installerSource, /\$manifest\.allowed_origins\s*=\s*@\(\$origins\s*\+\s*\$origin/);
+});
+
 test("speech backends, voice UI, controls, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');

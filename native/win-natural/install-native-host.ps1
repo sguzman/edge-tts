@@ -17,8 +17,16 @@ $manifest = [ordered]@{
   description = "Edge Natural TTS Windows Natural diagnostic host"
   path = $exe
   type = "stdio"
-  allowed_origins = @("chrome-extension://$ExtensionId/")
 }
+$origins = @()
+if (Test-Path -LiteralPath $manifestPath) {
+  $existingManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+  if ($null -ne $existingManifest.allowed_origins) {
+    $origins = @($existingManifest.allowed_origins | ForEach-Object { [string]$_ })
+  }
+}
+$origin = "chrome-extension://$ExtensionId/"
+$manifest.allowed_origins = @($origins + $origin | Select-Object -Unique)
 [System.IO.File]::WriteAllText($manifestPath, ($manifest | ConvertTo-Json -Depth 4), [System.Text.UTF8Encoding]::new($false))
 $key = "HKCU:\Software\Microsoft\Edge\NativeMessagingHosts\com.sguzman.edge_tts.win_natural"
 New-Item -Force -Path $key | Out-Null
