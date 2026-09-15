@@ -528,7 +528,8 @@ cancel terminates active synthesis cleanly
 
 ### Status
 
-Accepted. Gate 4A, Gate 4B, and Gate 4C are complete; Gate 5 has not started.
+Accepted. Gate 4A, Gate 4B, and Gate 4C are complete; Gate 5 is **CANDIDATE
+PENDING HUMAN BROWSER QA**.
 
 ## Gate 5 — promotion candidate
 
@@ -545,26 +546,38 @@ git diff --check
 native helper build/tests
 ```
 
-### Required manual browser checks
+### Candidate and promotion baseline
 
-At minimum:
+- Candidate: `b721eaf7463e60df7c4a8b4eaf6c4beab6e66cc4`
+- Stable SHA: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
+- Merge-base: `c089d08ece6009592faa2fdf4306e4ce873e4ea8`
+- Stable policy: [`docs/STABILITY.md`](../STABILITY.md)
+
+The stable-to-candidate diff is classified as intended WIN-NATURAL integration,
+diagnostics, native helper/setup, tests, lifecycle/reader integration, latency
+optimization, and documentation. No untracked files, generated binaries,
+merge-conflict markers, or temporary production tracing were found. The
+candidate manifest adds `nativeMessaging`; stable promotion therefore requires
+registering the native host for the stable unpacked extension ID after the
+promotion, as described in `docs/STABILITY.md`. No machine configuration was
+changed during preparation.
+
+### Required small human browser matrix
+
+Use fresh pages after loading the exact candidate and perform only these stages:
 
 ```text
-HUD starts once
-Online Natural works
-Windows Legacy works
-Windows Natural works
-Windows Natural works offline
-voice taxonomy is correct
-Pause/Resume works
-Stop works
-Quit works
-highlighting works
-speed works
-volume works
-repeat playback works
-no startup deadlock if native host unavailable
+A — Existing backends: Windows Legacy Zira audible; Online Aria audible;
+    switch between them and confirm each remains the selected backend.
+B — WIN-NATURAL core: Microsoft Aria starts quickly; sustained playback and
+    highlighting stay synchronized with no chunk gap; live rate changes work;
+    live volume changes work.
+C — Lifecycle: Stop -> Play; Quit -> same-tab restart; switch away from
+    WIN-NATURAL and back; confirm no ghost or overlapping audio.
 ```
+
+Do not treat Pause/Resume exact-position fidelity as part of this candidate
+matrix. Do not mark Gate 5 accepted until the user accepts this exact SHA.
 
 ### Promotion rule
 

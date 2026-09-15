@@ -178,7 +178,16 @@ latency optimization is accepted. Gate 5 has not started.
 
 ### Gate 5 — promotion candidate
 
-Only after browser QA of the exact candidate commit may it be considered for `stable` promotion under `docs/STABILITY.md`.
+**Status: CANDIDATE PENDING HUMAN BROWSER QA.** Candidate
+`b721eaf7463e60df7c4a8b4eaf6c4beab6e66cc4` is compared against stable
+`c089d08ece6009592faa2fdf4306e4ce873e4ea8`; their merge-base is the stable
+SHA. Gate 5 has not been promoted or accepted.
+
+The candidate contains only the intended WIN-NATURAL integration, diagnostics,
+native helper/setup, tests, latency optimization, and documentation changes.
+The exact final browser matrix is recorded in `docs/win-natural/VERIFICATION.md`.
+Only after that exact candidate passes human QA may it be considered for stable
+promotion under `docs/STABILITY.md`.
 
 ## Architectural constraints
 
