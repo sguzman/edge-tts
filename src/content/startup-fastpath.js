@@ -77,6 +77,10 @@
       // Speech, so wait for it before choosing/restoring the saved voice.
       const settingsReady = this.loadSettings();
       const extensionVoicesReady = this.speech.refreshExtensionVoices?.() || Promise.resolve();
+      // Native enumeration is deliberately fire-and-forget here: Zira startup
+      // must not wait on Native Messaging, but the request must be explicit so
+      // the catalog can arrive asynchronously and use its bounded retry path.
+      void this.speech.refreshWinNaturalVoices?.({ retry: true });
       const naturalVoicesReady = this.speech.waitForVoices(
         350,
         (voices) => voices.some(isNaturalVoice)
@@ -88,14 +92,14 @@
 
       await Promise.all([settingsReady, extensionVoicesReady]);
       this.applySettings();
-      this.refreshVoices();
+      this.refreshVoices({ startup: true });
 
       if (!this.voices.some(isNaturalVoice)) {
         this.toolbar.setStatus("Loading Natural voice…");
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
         trace.extraVoiceWaitMs = now() - voiceWaitStartedAt;
-        this.refreshVoices();
+        this.refreshVoices({ startup: true });
       }
 
       const startBlock = firstBlockNearViewport(this.model?.blocks || []);

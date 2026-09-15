@@ -162,6 +162,7 @@
       this.applySettings();
       this.rebuildModel();
 
+      void this.speech.refreshWinNaturalVoices?.({ retry: true });
       this.refreshVoices({ startup: true });
       if (!this.voices.some(isNaturalVoice)) {
         this.toolbar.setStatus("Loading Natural voice…");

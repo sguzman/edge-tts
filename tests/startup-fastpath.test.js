@@ -31,7 +31,7 @@ test("voice readiness starts before text modeling and catalog selection waits fo
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
   const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady]);");
-  const firstRefresh = source.indexOf("this.refreshVoices();", awaitPrep);
+  const firstRefresh = source.indexOf("this.refreshVoices({ startup: true });", awaitPrep);
   const awaitNaturalFallback = source.indexOf("await naturalVoicesReady;", firstRefresh);
 
   assert.ok(localVoiceWait >= 0);
@@ -40,4 +40,64 @@ test("voice readiness starts before text modeling and catalog selection waits fo
   assert.ok(awaitPrep > modelBuild);
   assert.ok(firstRefresh > awaitPrep);
   assert.ok(awaitNaturalFallback > firstRefresh);
+  assert.match(source, /refreshWinNaturalVoices\?\.\(\{ retry: true \}\)/);
+});
+
+test("installed optimized startup cannot restore a saved Online voice over Zira", async () => {
+  global.EdgeTtsExtension.TextModel = {
+    firstBlockNearViewport(blocks) { return blocks[0]; }
+  };
+  global.EdgeTtsExtension.SpeechEngine = {
+    isNaturalVoice() { return false; }
+  };
+
+  class FakeReaderApp {
+    constructor() {
+      this.toolbar = { mount() {}, setStatus() {}, setPaused() {} };
+      this.voices = [];
+      this.refreshes = [];
+      this.selectedVoice = null;
+      this.nativeRefreshes = 0;
+      this.speech = {
+        refreshExtensionVoices: async () => {},
+        refreshWinNaturalVoices: async (options) => {
+          this.nativeRefreshes += 1;
+          assert.deepEqual(options, { retry: true });
+          return [];
+        },
+        waitForVoices: async () => []
+      };
+    }
+
+    async loadSettings() {
+      this.settings = { voiceName: "Microsoft Aria Online (Natural)" };
+    }
+
+    applySettings() {}
+
+    rebuildModel() {
+      this.model = { blocks: [{ index: 0 }] };
+    }
+
+    refreshVoices(options) {
+      this.refreshes.push(options);
+      const zira = { name: "Microsoft Zira", lang: "en-US", localService: true };
+      const online = { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true };
+      this.voices = [online, zira];
+      this.selectedVoice = options?.startup ? zira : online;
+    }
+
+    async claimAudioOwnership() { return false; }
+    stop() {}
+  }
+
+  const { installStartupFastPath } = require("../src/content/startup-fastpath.js");
+  assert.equal(installStartupFastPath(FakeReaderApp), true);
+  const app = new FakeReaderApp();
+  await app.open();
+
+  assert.equal(app.nativeRefreshes, 1);
+  assert.ok(app.refreshes.length >= 1);
+  assert.ok(app.refreshes.every((options) => options?.startup === true));
+  assert.equal(app.selectedVoice.name, "Microsoft Zira");
 });

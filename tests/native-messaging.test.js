@@ -314,7 +314,7 @@ test("Native host errors and disconnects reject the matching request", async () 
   await assert.rejects(disconnected, /disconnected/);
 });
 
-test("native discovery is not part of reader startup or the runtime dispatcher", () => {
+test("native discovery is explicit and remains outside the runtime dispatcher", () => {
   const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
   const openStart = background.indexOf("chrome.action.onClicked");
   const listenerCount = (background.match(/chrome\.runtime\.onMessage\.addListener\(/g) || []).length;
@@ -327,7 +327,7 @@ test("native discovery is not part of reader startup or the runtime dispatcher",
   assert.match(background, /EDGE_TTS_WIN_NATURAL_DIAGNOSTICS/);
   assert.match(background, /EDGE_TTS_WIN_NATURAL_SYNTHESIZE/);
   const startup = fs.readFileSync(path.join(__dirname, "..", "src", "content", "startup-fastpath.js"), "utf8");
-  assert.equal(startup.includes("refreshWinNaturalVoices"), false);
+  assert.match(startup, /refreshWinNaturalVoices\?\.\(\{ retry: true \}\)/);
 });
 
 test("Gate 3C keeps native playback isolated to the existing local engine and watchdog boundary", () => {
@@ -338,7 +338,6 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
     "voice-ui.js",
     "toolbar.js",
     "audio-controls.js",
-    "startup-fastpath.js",
     "content-script.js"
   ]) {
     const current = fs.readFileSync(path.join(__dirname, "..", "src", "content", file), "utf8");
