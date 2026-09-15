@@ -1,4 +1,4 @@
-# Edge Natural TTS
+# 🟣 Edge Natural TTS
 
 A Microsoft Edge extension that turns normal webpages into a synchronized read-aloud experience using Edge's online Natural voices and Windows-local voices.
 
