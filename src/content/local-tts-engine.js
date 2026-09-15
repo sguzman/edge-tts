@@ -20,6 +20,8 @@
   const MAX_OUTPUT_GAIN = Number(directAudioApi.MAX_OUTPUT_GAIN) || 2;
   const WIN_NATURAL_FIRST_CHUNK_MAX_CHARS = 120;
   const WIN_NATURAL_LATER_CHUNK_MAX_CHARS = 900;
+  const WIN_NATURAL_ENUMERATION_MAX_ATTEMPTS = 3;
+  const WIN_NATURAL_ENUMERATION_RETRY_DELAY_MS = 250;
 
   function voiceKey(voice) {
     return `${String(voice?.name || "").trim().toLocaleLowerCase()}\u0000${String(
@@ -161,6 +163,8 @@
       this.winNaturalVoicesLoaded = false;
       this.extensionVoiceRequest = null;
       this.winNaturalVoiceRequest = null;
+      this.winNaturalLastError = null;
+      this.winNaturalEnumerationAttempts = 0;
       this.localSessionMode = false;
       this.localActive = false;
       this.localRequest = null;
@@ -182,7 +186,6 @@
       this.winNaturalOutputGain = 1;
       this.disposed = false;
       void this.refreshExtensionVoices();
-      void this.refreshWinNaturalVoices();
     }
 
     getVoices() {
@@ -222,33 +225,66 @@
       return this.extensionVoiceRequest;
     }
 
-    async refreshWinNaturalVoices() {
+    async refreshWinNaturalVoices({ retry = false } = {}) {
       if (this.winNaturalVoiceRequest) return this.winNaturalVoiceRequest;
       if (!root.chrome?.runtime?.sendMessage) return this.winNaturalVoices;
 
-      this.winNaturalVoiceRequest = Promise.resolve(
-        root.chrome.runtime.sendMessage({ type: "EDGE_TTS_WIN_NATURAL_VOICES" })
-      )
-        .then((response) => {
-          this.winNaturalVoices = (response?.voices || [])
-            .map(nativeVoiceToCatalogVoice)
-            .filter(Boolean);
-          this.winNaturalVoicesLoaded = true;
-          for (const listener of this.extensionVoiceListeners) {
-            try {
-              listener(this.getVoices());
-            } catch (_error) {}
+      const maxAttempts = retry ? WIN_NATURAL_ENUMERATION_MAX_ATTEMPTS : 1;
+      this.winNaturalVoiceRequest = (async () => {
+        for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+          this.winNaturalEnumerationAttempts = attempt;
+          try {
+            const response = await root.chrome.runtime.sendMessage({
+              type: "EDGE_TTS_WIN_NATURAL_VOICES"
+            });
+            const voices = (response?.voices || [])
+              .map(nativeVoiceToCatalogVoice)
+              .filter(Boolean);
+            if (voices.length > 0) {
+              this.winNaturalVoices = voices;
+              this.winNaturalLastError = null;
+              this.winNaturalVoiceRequest = null;
+              this.winNaturalVoicesLoaded = true;
+              this._notifyExtensionVoiceListeners();
+              return this.winNaturalVoices;
+            }
+            const detail = response?.error?.message ||
+              "Native Messaging returned no Windows Natural voices.";
+            this.winNaturalLastError = new Error(detail);
+            if (response?.error?.name) {
+              this.winNaturalLastError.name = String(response.error.name);
+            }
+          } catch (error) {
+            this.winNaturalLastError = error instanceof Error
+              ? error
+              : new Error(String(error));
           }
-          return this.winNaturalVoices;
-        })
-        .catch((error) => {
-          console.warn("Edge Natural TTS could not load Windows Natural voices.", error);
-          return this.winNaturalVoices;
-        })
-        .finally(() => {
-          this.winNaturalVoiceRequest = null;
-        });
+
+          console.warn(
+            `Edge Natural TTS could not load Windows Natural voices ` +
+              `(attempt ${attempt}/${maxAttempts}).`,
+            this.winNaturalLastError
+          );
+          if (attempt < maxAttempts) {
+            await new Promise((resolve) =>
+              root.setTimeout(resolve, WIN_NATURAL_ENUMERATION_RETRY_DELAY_MS)
+            );
+          }
+        }
+
+        this.winNaturalVoiceRequest = null;
+        this.winNaturalVoicesLoaded = true;
+        return this.winNaturalVoices;
+      })();
       return this.winNaturalVoiceRequest;
+    }
+
+    _notifyExtensionVoiceListeners() {
+      for (const listener of this.extensionVoiceListeners) {
+        try {
+          listener(this.getVoices());
+        } catch (_error) {}
+      }
     }
 
     onVoicesChanged(callback) {

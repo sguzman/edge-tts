@@ -135,17 +135,30 @@ async function getWinNaturalVoices() {
   try {
     transport = getNativeTransport();
     const response = await transport.request("voices");
-    return (Array.isArray(response?.voices) ? response.voices : [])
+    const voices = (Array.isArray(response?.voices) ? response.voices : [])
       .filter((voice) => String(voice?.id || "").toLowerCase().startsWith("local-"))
       .map((voice) => ({
         id: String(voice.id),
         name: String(voice.name || ""),
         lang: String(voice.lang || "")
       }));
+    if (!voices.length) {
+      return {
+        voices: [],
+        error: { name: "EmptyVoiceCatalog", message: "Native host returned no Local-* voices." }
+      };
+    }
+    return { voices };
   } catch (error) {
     invalidateNativeTransport(transport);
     console.warn("Edge Natural TTS could not enumerate Windows Natural voices.", error);
-    return [];
+    return {
+      voices: [],
+      error: {
+        name: String(error?.name || "Error"),
+        message: String(error?.message || error)
+      }
+    };
   }
 }
 
@@ -320,7 +333,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   }
 
   if (message?.type === "EDGE_TTS_WIN_NATURAL_VOICES") {
-    void getWinNaturalVoices().then((voices) => sendResponse({ voices }));
+    void getWinNaturalVoices().then((result) => sendResponse(result));
     return true;
   }
 

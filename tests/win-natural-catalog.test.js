@@ -167,3 +167,47 @@ test("native enumeration failure leaves the existing catalog usable", async () =
   await engine.refreshWinNaturalVoices();
   assert.deepEqual(engine.getVoices().map((voice) => voice.name), ["Microsoft David"]);
 });
+
+test("native enumeration retries a transient failure and then publishes Aria", async () => {
+  let attempts = 0;
+  global.chrome.runtime.sendMessage = (message) => {
+    if (message.type !== "EDGE_TTS_WIN_NATURAL_VOICES") return Promise.resolve({ voices: [] });
+    attempts += 1;
+    if (attempts === 1) return Promise.reject(new Error("host disconnected"));
+    return Promise.resolve({
+      voices: [{ id: "Local-NarratorVoices", name: "Microsoft Aria", lang: "en-US" }]
+    });
+  };
+  const engine = new LocalTtsSpeechEngine({});
+  await engine.refreshWinNaturalVoices({ retry: true });
+  assert.equal(attempts, 2);
+  assert.equal(engine.getVoices().at(-1).nativeVoiceId, "Local-NarratorVoices");
+  assert.equal(engine.winNaturalLastError, null);
+});
+
+test("native enumeration stops after its bounded retry policy", async () => {
+  let attempts = 0;
+  global.chrome.runtime.sendMessage = (message) => {
+    if (message.type !== "EDGE_TTS_WIN_NATURAL_VOICES") return Promise.resolve({ voices: [] });
+    attempts += 1;
+    return Promise.reject(new Error("forbidden"));
+  };
+  const engine = new LocalTtsSpeechEngine({});
+  await engine.refreshWinNaturalVoices({ retry: true });
+  assert.equal(attempts, 3);
+  assert.match(engine.winNaturalLastError.message, /forbidden/);
+});
+
+test("native enumeration preserves an explicit browser error for diagnostics", async () => {
+  global.chrome.runtime.sendMessage = (message) => {
+    if (message.type !== "EDGE_TTS_WIN_NATURAL_VOICES") return Promise.resolve({ voices: [] });
+    return Promise.resolve({
+      voices: [],
+      error: { name: "NativeMessagingForbidden", message: "Access to the specified native messaging host is forbidden." }
+    });
+  };
+  const engine = new LocalTtsSpeechEngine({});
+  await engine.refreshWinNaturalVoices();
+  assert.equal(engine.winNaturalLastError.name, "NativeMessagingForbidden");
+  assert.match(engine.winNaturalLastError.message, /forbidden/);
+});
