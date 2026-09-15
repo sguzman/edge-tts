@@ -580,6 +580,23 @@ C — Lifecycle: Stop -> Play; Quit -> same-tab restart; switch away from
 Do not treat Pause/Resume exact-position fidelity as part of this candidate
 matrix. Do not mark Gate 5 accepted until the user accepts this exact SHA.
 
+### Gate 5 QA block — Online Natural regression
+
+Human QA on candidate `22c23a73636057fa0fdf8c1f1dd66f80084cc023` passed
+Windows Legacy Zira and WIN-NATURAL Microsoft Aria, but Online Natural Aria
+did not produce working playback. The separate stable profile passed Online
+Aria, so this is recorded as a development-candidate regression rather than an
+external service outage. Gate 5 promotion QA is blocked until Online Aria is
+restored and re-verified.
+
+The last development acceptance explicitly recording Online Aria playback was
+Gate 3C closeout `99ae6695cf4f9641714b455d27dd3c588a987457`; the exact direct
+Online engine remains the behavioral control. Current direct-audio diagnostics
+already expose route selection, mapped voice, WebSocket open/request, received
+audio, Blob creation, and `HTMLMediaElement.play()` resolution/rejection for
+the one focused follow-up trace. No speculative Online backend change is made
+until that first semantic divergence is observed.
+
 ### Promotion rule
 
 Stable moves only after the user explicitly accepts the exact candidate in Edge.

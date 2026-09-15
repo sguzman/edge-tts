@@ -608,3 +608,19 @@ dominant latency problem. Residual cold SelectVoice (~176 ms first observed,
 then ~0 ms warm), browser/media startup, and base64 transport costs remain
 non-blocking deferred opportunities. No streaming or transport redesign was
 justified.
+
+## Gate 5 promotion block: development Online Natural failure
+
+Human QA on exact candidate `22c23a73636057fa0fdf8c1f1dd66f80084cc023`
+reported Windows Legacy Zira and WIN-NATURAL Microsoft Aria passing, but Online
+Natural Aria failing to produce playback. Online Aria passed in the separate
+stable Edge profile, so Gate 5 is blocked by a development regression and
+stable must not be promoted.
+
+Forensic comparison identifies `99ae6695cf4f9641714b455d27dd3c588a987457`
+as the latest development commit with explicit human acceptance of Online Aria.
+The direct MP3 implementation is functionally unchanged from the accepted Gate
+0 implementation; later source changes are primarily native timing, native
+controls/lifecycle, and native latency work. The existing narrow direct-audio
+stage diagnostics are retained for one focused fresh-page trace before any
+Online-specific fix is attempted.

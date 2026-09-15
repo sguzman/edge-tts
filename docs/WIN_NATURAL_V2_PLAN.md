@@ -182,7 +182,8 @@ latency optimization is accepted. Gate 5 has not started.
 **Status: CANDIDATE PENDING HUMAN BROWSER QA.** Candidate
 `b721eaf7463e60df7c4a8b4eaf6c4beab6e66cc4` is compared against stable
 `c089d08ece6009592faa2fdf4306e4ce873e4ea8`; their merge-base is the stable
-SHA. Gate 5 has not been promoted or accepted.
+SHA. Gate 5 is blocked by a development-profile Online Natural regression and
+has not been promoted or accepted.
 
 The candidate contains only the intended WIN-NATURAL integration, diagnostics,
 native helper/setup, tests, latency optimization, and documentation changes.
