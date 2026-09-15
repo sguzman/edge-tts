@@ -572,12 +572,11 @@ Audio nodes/context, and inherited direct-audio resources so the resident
 bootstrap can create a fresh ReaderApp in the same tab.
 
 Gate 4A, Gate 4B, and Gate 4C are accepted. Gate 5 has not started. The
-WIN-NATURAL startup/synthesis latency investigation is now active as an
-unaccepted optimization candidate. Native startup latency and pause/resume's
-current-sentence restart behavior remain separate deferred limitations and were
-not fixed in this closeout.
+WIN-NATURAL startup/synthesis latency optimization is accepted. Native startup
+latency remains somewhat slower than Windows Legacy, and pause/resume's
+current-sentence restart behavior remains a separate deferred limitation.
 
-## Latency investigation: first optimization candidate
+## Latency optimization: accepted first optimization
 
 Fresh Edge measurements with the existing native latency diagnostics showed that
 warm SAPI synthesis, rather than Native Messaging or browser playback, is the
@@ -587,12 +586,25 @@ measured about 1010 ms for `Speak` and about 1234 ms dispatch-to-media, with
 about 50.9 seconds of PCM output. The first `SelectVoice` measured about 176 ms
 and later selections were effectively 0 ms.
 
-The candidate keeps the helper and transport unchanged. WIN-NATURAL chunks
-target about 120 characters initially and about 900 thereafter, flushing at the
-existing sentence/paragraph boundaries unless the emergency limit is reached.
-Once a current native WAV is accepted and playing, one and only one next chunk
-may be prefetched. A ready prefetch is promoted only from that chunk's `ended`
-event; generation/session/chunk/voice/payload checks prevent stale prefetches
-from playing or affecting timing, highlighting, or cursor state. Rate and
-volume are read at promotion time. No PCM streaming, helper redesign, or Gate 5
-work is included. Stop here for fresh normal-reader browser QA.
+The accepted optimization keeps the helper and transport unchanged.
+WIN-NATURAL chunks target 120 characters initially and 900 thereafter,
+flushing at existing sentence/paragraph boundaries unless the emergency limit
+is reached. The first target is soft. Once a current native WAV is accepted and
+playing, exactly one next chunk is prefetched. A ready prefetch is promoted only
+from that chunk's `ended` event; consuming N+1 begins prefetch of N+2, and a
+pending response waits cleanly without overlap. Generation/session/chunk/
+voice/payload checks prevent stale prefetches from playing or affecting timing,
+highlighting, or cursor state. Rate and volume are read at promotion time.
+Stop/cancel, backend switches, and final disposal clear prefetch state.
+
+Fresh normal-reader QA on `de840901daf50c680a6bdceece1fe0550f5addb7` passed:
+startup was dramatically faster, no audible chunk gap was observed,
+highlighting remained synchronized, and Stop worked normally. The accepted
+measurements were approximately 61 ms Speak/render and 129 ms dispatch-to-media
+for 49 characters with 2.86 seconds of PCM, versus 1009 ms and 1234 ms for 900
+characters with 50.9 seconds of PCM. Synthesis throughput was about 50x
+realtime, so whole-first-chunk batching—not slow overall synthesis—was the
+dominant latency problem. Residual cold SelectVoice (~176 ms first observed,
+then ~0 ms warm), browser/media startup, and base64 transport costs remain
+non-blocking deferred opportunities. No streaming or transport redesign was
+justified.

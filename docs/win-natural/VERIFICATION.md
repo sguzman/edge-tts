@@ -457,7 +457,7 @@ instead of preserving an exact intra-sentence media position. Neither is fixed
 in this closeout. The `WIN-NATURAL startup/synthesis latency investigation` is
 now active as an unaccepted optimization candidate; Gate 5 has not started.
 
-## WIN-NATURAL latency investigation — optimization candidate
+## WIN-NATURAL latency optimization — ACCEPTED
 
 Human Edge measurements using the existing latency diagnostics established that
 warm SAPI synthesis is the steady-state bottleneck. A 49-character warm request
@@ -467,15 +467,34 @@ from dispatch to media playback, while producing about 50.9 seconds of PCM.
 The first `SelectVoice` took about 176 ms; later selections were effectively
 0 ms. Native transport and browser media setup were secondary contributors.
 
-The first optimization candidate is WIN-NATURAL-only: target about 120
-characters for the first chunk and about 900 for later chunks while preserving
-sentence boundaries, then prefetch at most one next synthesis. A ready next
-response is promoted on media `ended`; generation/session/chunk/voice/payload
-checks prevent stale work from changing audio, timing, highlighting, or the
-reader cursor. Current rate and volume are applied at promotion time. The
+The accepted optimization is WIN-NATURAL-only: target 120 characters for the
+first chunk and 900 for later chunks while preserving sentence boundaries, then
+prefetch exactly one next synthesis. The first target is soft and does not
+force a mid-sentence split. A ready next response is promoted on media
+`ended`; consuming N+1 begins prefetch of N+2, while a pending prefetch waits
+cleanly without overlap. Generation/session/chunk/voice/payload checks prevent
+stale work from changing audio, timing, highlighting, or the reader cursor.
+Current rate and volume are applied at promotion time. Stop/cancel, backend
+switch, and final disposal invalidate foreground and prefetch state. The
 helper, transport, PCM timing, Gate 4 lifecycle, Windows Legacy, and Online
-Natural paths remain unchanged. This candidate is awaiting fresh normal-reader
-browser QA and is not a gate acceptance.
+Natural paths remain unchanged.
+
+Fresh normal-reader QA on accepted candidate `de840901daf50c680a6bdceece1fe0550f5addb7`
+passed: startup was dramatically faster, there was no audible inter-chunk gap,
+highlighting remained synchronized, and Stop continued to work normally.
+Warm measurements motivating the design were approximately 61 ms Speak/render
+and 129 ms dispatch-to-media for 49 characters with 2.86 seconds of PCM, and
+1009 ms Speak/render and 1234 ms dispatch-to-media for 900 characters with
+50.9 seconds of PCM. The evidence showed roughly 50x realtime synthesis
+throughput; the dominant UX problem was blocking startup on a large fully
+rendered first chunk, not insufficient overall synthesis throughput.
+
+Residual, non-blocking latency remains: WIN-NATURAL startup is still somewhat
+slower than Windows Legacy; the first observed SelectVoice cost was about
+176 ms and later selections were approximately 0 ms; browser/media startup and
+the existing base64 transport add smaller costs. These are deferred and were
+not optimized in this closeout. Exact intra-sentence Pause/Resume fidelity also
+remains a separate deferred issue.
 
 Gate 4 is complete. Gate 5 has not started.
 

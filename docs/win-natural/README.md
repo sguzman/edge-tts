@@ -44,9 +44,9 @@ As of the completion of Gate 1 on the `development/win-natural-v2` line:
 - the stable reader remains isolated on the `stable` branch/worktree and is not modified during development.
 
 Gate 3C is accepted on fresh-page browser QA. Gate 4A, Gate 4B, and Gate 4C
-are accepted. Gate 5 has not started. The next planned engineering goal is
-WIN-NATURAL startup/synthesis latency investigation; pause/resume position
-fidelity remains a separate deferred limitation.
+are accepted, and the WIN-NATURAL startup/synthesis latency optimization is
+accepted. Gate 5 has not started. Pause/resume position fidelity remains a
+separate deferred limitation.
 
 ## The short version of the hard part
 
