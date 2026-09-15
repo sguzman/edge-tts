@@ -12,6 +12,7 @@
     createSpeechBatch,
     isCatalogOnlyVoice,
     isNaturalVoice,
+    selectStartupVoice,
     selectPlayableVoice,
     voiceSelectionKey
   } = extension.SpeechEngine;
@@ -58,6 +59,30 @@
     }
     const stepped = Math.round(numeric / 100) * 100;
     return Math.min(MAX_BATCH_CHARS, Math.max(MIN_BATCH_CHARS, stepped));
+  }
+
+  function resolveClickTarget(app, event) {
+    let rebuilt = false;
+    if (app.stopped || app.paused) {
+      app.rebuildModel();
+      rebuilt = true;
+    }
+
+    const resolve = () => {
+      const caret = app.caretFromPoint(event.clientX, event.clientY);
+      if (!caret?.node || !(caret.node instanceof Text)) return null;
+      const block = app.model?.nodeToBlock.get(caret.node);
+      if (!block) return null;
+      const segment = findSegmentInNode(block, caret.node, caret.offset);
+      return segment ? { block, segment } : null;
+    };
+
+    let resolved = resolve();
+    if (!resolved && !rebuilt) {
+      app.rebuildModel();
+      resolved = resolve();
+    }
+    return resolved;
   }
 
   function isEditableTarget(target) {
@@ -137,11 +162,11 @@
       this.applySettings();
       this.rebuildModel();
 
-      this.refreshVoices();
+      this.refreshVoices({ startup: true });
       if (!this.voices.some(isNaturalVoice)) {
         this.toolbar.setStatus("Loading Natural voice…");
         await this.speech.waitForVoices(350, (voices) => voices.some(isNaturalVoice));
-        this.refreshVoices();
+        this.refreshVoices({ startup: true });
       }
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -438,15 +463,17 @@
       this.syncPageClickListener();
     }
 
-    refreshVoices() {
+    refreshVoices({ startup = false } = {}) {
       const documentLanguage = document.documentElement.lang || navigator.language;
       const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
       const currentKey = voiceSelectionKey(this.selectedVoice) || this.settings.voiceKey;
       this.voices = voices;
       this.selectedVoice =
-        voices.find((voice) =>
+        (!startup && voices.find((voice) =>
           !isCatalogOnlyVoice(voice) && currentKey && voiceSelectionKey(voice) === currentKey
-        ) || selectPlayableVoice(voices, this.settings.voiceName, this.settings.voiceKey);
+        )) || (startup
+          ? selectStartupVoice(voices)
+          : selectPlayableVoice(voices, this.settings.voiceName, this.settings.voiceKey));
 
       if (this.selectedVoice) {
         this.settings.voiceName = this.selectedVoice.name;
@@ -581,26 +608,16 @@
         return;
       }
 
-      const caret = this.caretFromPoint(event.clientX, event.clientY);
-      if (!caret?.node || !(caret.node instanceof Text)) {
-        return;
-      }
-
-      const block = this.model?.nodeToBlock.get(caret.node);
-      if (!block) {
-        return;
-      }
-
-      const segment = findSegmentInNode(block, caret.node, caret.offset);
-      if (!segment) {
+      const resolved = resolveClickTarget(this, event);
+      if (!resolved) {
         return;
       }
 
       event.preventDefault();
       event.stopImmediatePropagation();
 
-      this.currentBlockIndex = block.index;
-      this.currentSegmentIndex = segment.segmentIndex;
+      this.currentBlockIndex = resolved.block.index;
+      this.currentSegmentIndex = resolved.segment.segmentIndex;
       this.activeBatchEndBlockIndex = -1;
       this.stopped = false;
       this.paused = false;
@@ -745,5 +762,5 @@
     }
   }
 
-  extension.Reader = { ReaderApp, isEditableTarget, normalizeBatchChars };
+  extension.Reader = { ReaderApp, isEditableTarget, normalizeBatchChars, resolveClickTarget };
 })(globalThis);
