@@ -1,5 +1,7 @@
 # Architecture
 
+> **Operational warning:** this source-level architecture is only part of the running system. Windows Natural playback crosses Edge profile/extension identity, Native Messaging, Windows registry/manifest state, a native helper, x64 SAPI, NaturalVoiceSAPIAdapter, external voice assets, browser media policy, media-clock timing, and human QA. Before changing any of those boundaries, read [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md). A repository-correct change can still fail — or damage the stable reader — because several critical runtime surfaces live outside the repository.
+
 ## Goal
 
 The extension should feel like a page-native reading layer without becoming part of the host application's runtime:
@@ -53,6 +55,27 @@ Injected control surface for pause/resume, stop, explicit text refresh, searchab
 ### `reader.js`
 
 Orchestrates the text model, speech engine, highlighter, toolbar, settings, block progression, and optional click-to-seek. It owns the explicit refresh operation for dynamic pages.
+
+## Runtime architecture is larger than the source graph
+
+The visible reader unifies backends that do not share the same transport or authority model:
+
+```text
+[ONLINE]
+page -> direct Edge Read Aloud transport -> MP3 + timing -> browser media clock
+
+[WIN-NATURAL]
+page -> extension -> Native Messaging -> WinNaturalHost -> x64 SAPI
+     -> NaturalVoiceSAPIAdapter -> local Natural assets -> WAV + timing
+     -> browser media clock
+
+[WIN-LEGACY]
+page -> Web Speech / chrome.tts -> browser/OS speech events
+```
+
+These routes rejoin at reader cursor/highlighting/UI state but can fail independently before that point. A shared toolbar does **not** imply shared low-level semantics for discovery, authorization, pause/resume, cancellation, speed, volume, ownership, or timing.
+
+For the complete inventory of runtime surfaces and the rules for proving each layer healthy, see [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md).
 
 ## Click-to-seek
 
