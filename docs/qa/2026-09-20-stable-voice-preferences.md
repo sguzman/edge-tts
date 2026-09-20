@@ -51,3 +51,36 @@ Local Aria/WIN-NATURAL integration were not touched.
 
 This candidate is **not QA-qualified** because the required isolated browser
 environment was not established.
+
+## Attempt 2 — Windows Sandbox availability check
+
+Date: 2026-09-20
+
+The required Windows Sandbox QA run was not performed because Sandbox was not
+available/usable in this session. Read-only checks found:
+
+- OS: Windows 11 Pro, build 26200.
+- `wsb.exe`: not available on `PATH`.
+- `%WINDIR%\System32\WindowsSandbox.exe`: not present.
+- The servicing store contains `Containers-DisposableClientVM` packages, but
+  querying the authoritative optional-feature state with
+  `Get-WindowsOptionalFeature -Online -FeatureName Containers-DisposableClientVM`
+  requires elevation and was unavailable in this session.
+- No optional feature, Hyper-V setting, registry value, user, browser profile,
+  or other host state was changed.
+
+Because a usable Windows Sandbox could not be established, the objective's
+required A–F browser cases remain untested. No host Edge fallback was used.
+
+| Case | Result | Notes |
+|---|---|---|
+| A. Initial default | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+| B. Default startup voice UI | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+| C. Cross-session persistence | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+| D. Static order | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+| E. All voices catalog | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+| F. Deterministic fallback | NOT TESTED | Windows Sandbox unavailable/usable state not established. |
+
+The prior host-profile isolation failure remains preserved above. The real host
+Edge environment, Default profile, stable branch, registry, policies, and
+Native Messaging registration were not touched.
