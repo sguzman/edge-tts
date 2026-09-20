@@ -12,6 +12,7 @@
     createSpeechBatch,
     isCatalogOnlyVoice,
     isNaturalVoice,
+    selectStartupVoice,
     selectPlayableVoice,
     voiceSelectionKey
   } = extension.SpeechEngine;
@@ -38,10 +39,12 @@
   const DEFAULT_BATCH_CHARS = 1200;
 
   const DEFAULT_SETTINGS = {
-    settingsVersion: 2,
+    settingsVersion: 3,
     rate: 1,
     voiceName: "",
     voiceKey: "",
+    startupVoiceName: "",
+    startupVoiceKey: "",
     minBatchChars: DEFAULT_BATCH_CHARS,
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
@@ -99,6 +102,7 @@
         onQuit: () => this.quit(),
         onRefresh: () => this.refreshText(),
         onVoice: (name) => this.changeVoice(name),
+        onStartupVoice: (key) => this.changeStartupVoice(key),
         onRate: (rate) => this.changeRate(rate),
         onBatchChars: (chars) => this.changeBatchChars(chars),
         onWordColor: (color) => this.changeWordColor(color),
@@ -135,9 +139,10 @@
 
       await this.loadSettings();
       this.applySettings();
+      await this.speech.refreshExtensionVoices?.();
       this.rebuildModel();
 
-      this.refreshVoices();
+      this.refreshVoices({ startup: true });
       if (!this.voices.some(isNaturalVoice)) {
         this.toolbar.setStatus("Loading Natural voice…");
         await this.speech.waitForVoices(350, (voices) => voices.some(isNaturalVoice));
@@ -438,15 +443,17 @@
       this.syncPageClickListener();
     }
 
-    refreshVoices() {
+    refreshVoices({ startup = false } = {}) {
       const documentLanguage = document.documentElement.lang || navigator.language;
       const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
       const currentKey = voiceSelectionKey(this.selectedVoice) || this.settings.voiceKey;
       this.voices = voices;
       this.selectedVoice =
-        voices.find((voice) =>
+        (!startup && voices.find((voice) =>
           !isCatalogOnlyVoice(voice) && currentKey && voiceSelectionKey(voice) === currentKey
-        ) || selectPlayableVoice(voices, this.settings.voiceName, this.settings.voiceKey);
+        )) || (startup
+          ? selectStartupVoice(voices, this.settings.startupVoiceKey, this.settings.startupVoiceName)
+          : selectPlayableVoice(voices, this.settings.voiceName, this.settings.voiceKey));
 
       if (this.selectedVoice) {
         this.settings.voiceName = this.selectedVoice.name;
@@ -454,6 +461,12 @@
       }
 
       this.toolbar.setVoices(voices, this.settings.voiceKey);
+      this.toolbar.setStartupVoices?.(
+        voices,
+        this.settings.startupVoiceKey,
+        this.settings.startupVoiceName,
+        selectStartupVoice(voices, this.settings.startupVoiceKey, this.settings.startupVoiceName)
+      );
       this.toolbar.setRate(this.settings.rate);
     }
 
@@ -650,6 +663,21 @@
       }
     }
 
+    async changeStartupVoice(selectionKey) {
+      const voice = this.voices.find((candidate) => voiceSelectionKey(candidate) === selectionKey) ||
+        this.voices.find((candidate) => candidate.name === selectionKey);
+      if (!voice || isCatalogOnlyVoice(voice)) return;
+      this.settings.startupVoiceName = voice.name;
+      this.settings.startupVoiceKey = voiceSelectionKey(voice);
+      this.toolbar.setStartupVoices?.(
+        this.voices,
+        this.settings.startupVoiceKey,
+        this.settings.startupVoiceName,
+        voice
+      );
+      await this.saveSettings();
+    }
+
     async changeRate(rate) {
       this.settings.rate = rate;
       await this.saveSettings();
@@ -705,12 +733,16 @@
       try {
         const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
         const toolbarPosition = stored.toolbarPosition;
-        const requiresSafetyMigration = Number(stored.settingsVersion || 0) < 2;
+        const storedVersion = Number(stored.settingsVersion || 0);
+        const requiresSafetyMigration = storedVersion < 2;
+        const requiresStartupMigration = storedVersion < 3;
         this.settings = {
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
           voiceName: stored.voiceName || "",
           voiceKey: stored.voiceKey || "",
+          startupVoiceName: stored.startupVoiceName || "",
+          startupVoiceKey: stored.startupVoiceKey || "",
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
@@ -725,11 +757,10 @@
               : null
         };
 
-        if (requiresSafetyMigration) {
-          await chrome.storage.local.set({
-            settingsVersion: DEFAULT_SETTINGS.settingsVersion,
-            clickToSeek: false
-          });
+        if (requiresSafetyMigration || requiresStartupMigration) {
+          const migration = { settingsVersion: DEFAULT_SETTINGS.settingsVersion };
+          if (requiresSafetyMigration) migration.clickToSeek = false;
+          await chrome.storage.local.set(migration);
         }
       } catch (error) {
         console.warn("Could not load Edge Natural TTS settings.", error);

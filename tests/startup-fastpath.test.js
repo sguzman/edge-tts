@@ -31,7 +31,7 @@ test("voice readiness starts before text modeling and catalog selection waits fo
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
   const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady]);");
-  const firstRefresh = source.indexOf("this.refreshVoices();", awaitPrep);
+  const firstRefresh = source.indexOf("this.refreshVoices({ startup: true });", awaitPrep);
   const awaitNaturalFallback = source.indexOf("await naturalVoicesReady;", firstRefresh);
 
   assert.ok(localVoiceWait >= 0);

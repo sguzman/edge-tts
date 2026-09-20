@@ -27,6 +27,13 @@
       `${voice?.name || ""}\u0000${voice?.lang || ""}`;
   }
 
+  function voiceOptionLabel(voice) {
+    const labeler = extension.VoiceUi?.voiceLabel;
+    if (typeof labeler === "function") return labeler(voice);
+    const locale = voice?.lang ? ` — ${voice.lang}` : "";
+    return `${voice?.name || "Unnamed voice"}${locale}`;
+  }
+
   class Toolbar {
     constructor(handlers) {
       this.handlers = handlers;
@@ -36,10 +43,14 @@
       this.refreshButton = null;
       this.quitButton = null;
       this.voiceSelect = null;
+      this.startupVoiceSelect = null;
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
       this.voices = [];
       this.selectedVoiceKey = "";
+      this.startupVoiceKey = "";
+      this.startupVoiceName = "";
+      this.startupVoices = [];
       this.rateInput = null;
       this.rateValue = null;
       this.batchCharsInput = null;
@@ -94,6 +105,12 @@
             </label>
           </div>
           <div class="edge-tts-row">
+            <label>
+              Default startup voice
+              <select data-edge-tts-startup-voice aria-label="Default startup voice"></select>
+            </label>
+          </div>
+          <div class="edge-tts-row">
             <label class="edge-tts-rate-label">
               Speed
               <input data-edge-tts-rate type="range" min="0.5" max="2.5" step="0.1" value="1">
@@ -142,6 +159,7 @@
       this.refreshButton = element.querySelector("[data-edge-tts-action='refresh']");
       this.quitButton = element.querySelector("[data-edge-tts-action='quit']");
       this.voiceSelect = element.querySelector("[data-edge-tts-voice]");
+      this.startupVoiceSelect = element.querySelector("[data-edge-tts-startup-voice]");
       this.voiceFilterInput = element.querySelector("[data-edge-tts-voice-filter]");
       this.clearVoiceFilterButton = element.querySelector("[data-edge-tts-action='clear-voice-filter']");
       this.rateInput = element.querySelector("[data-edge-tts-rate]");
@@ -164,6 +182,12 @@
         if (this.voiceSelect.value) {
           this.selectedVoiceKey = this.voiceSelect.value;
           this.handlers.onVoice(this.selectedVoiceKey);
+        }
+      });
+      this.startupVoiceSelect.addEventListener("change", () => {
+        if (this.startupVoiceSelect.value) {
+          this.startupVoiceKey = this.startupVoiceSelect.value;
+          this.handlers.onStartupVoice?.(this.startupVoiceKey);
         }
       });
       this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
@@ -220,6 +244,7 @@
       this.refreshButton = null;
       this.quitButton = null;
       this.voiceSelect = null;
+      this.startupVoiceSelect = null;
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
       this.rateInput = null;
@@ -273,6 +298,51 @@
       this.voices = [...voices];
       this.selectedVoiceKey = selectedKey || "";
       this.renderVoiceOptions();
+    }
+
+    setStartupVoices(voices, startupKey, startupName, fallbackVoice) {
+      this.startupVoices = [...(voices || [])];
+      this.startupVoiceKey = startupKey || "";
+      this.startupVoiceName = startupName || "";
+      this.renderStartupVoiceOptions(fallbackVoice);
+    }
+
+    renderStartupVoiceOptions(fallbackVoice) {
+      if (!this.startupVoiceSelect) return;
+      const playable = this.startupVoices.filter((voice) => voice?.catalogOnly !== true);
+      const configured = this.startupVoiceKey && playable.find(
+        (voice) => voiceSelectionKey(voice) === this.startupVoiceKey
+      );
+      const fallbackKey = fallbackVoice ? voiceSelectionKey(fallbackVoice) : "";
+      this.startupVoiceSelect.replaceChildren();
+
+      if (this.startupVoiceKey && !configured) {
+        const unavailable = document.createElement("option");
+        unavailable.value = "";
+        unavailable.textContent = `Saved startup voice unavailable — using ${voiceOptionLabel(fallbackVoice)}`;
+        unavailable.disabled = true;
+        unavailable.selected = true;
+        this.startupVoiceSelect.appendChild(unavailable);
+      }
+
+      for (const voice of playable) {
+        const option = document.createElement("option");
+        option.value = voiceSelectionKey(voice);
+        option.textContent = voiceOptionLabel(voice);
+        option.selected = configured
+          ? option.value === this.startupVoiceKey
+          : !this.startupVoiceKey && option.value === fallbackKey;
+        this.startupVoiceSelect.appendChild(option);
+      }
+
+      if (!playable.length) {
+        const empty = document.createElement("option");
+        empty.value = "";
+        empty.textContent = "No playable voices available";
+        empty.disabled = true;
+        empty.selected = true;
+        this.startupVoiceSelect.appendChild(empty);
+      }
     }
 
     renderVoiceOptions() {

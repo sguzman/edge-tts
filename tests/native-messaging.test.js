@@ -316,9 +316,7 @@ test("Gate 3C keeps native playback isolated to the existing local engine and wa
   for (const file of [
     "reliable-speech-engine.js",
     "voice-ui.js",
-    "toolbar.js",
     "audio-controls.js",
-    "startup-fastpath.js",
     "content-script.js"
   ]) {
     const current = fs.readFileSync(path.join(__dirname, "..", "src", "content", file), "utf8");

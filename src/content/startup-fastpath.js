@@ -88,7 +88,7 @@
 
       await Promise.all([settingsReady, extensionVoicesReady]);
       this.applySettings();
-      this.refreshVoices();
+      this.refreshVoices({ startup: true });
 
       if (!this.voices.some(isNaturalVoice)) {
         this.toolbar.setStatus("Loading Natural voice…");
