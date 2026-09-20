@@ -22,6 +22,14 @@
     return voice?.catalogOnly === true;
   }
 
+  function isWindowsLegacyVoice(voice) {
+    return voice?.__edgeTtsSource === "chrome-tts" || voice?.localService === true;
+  }
+
+  function isMicrosoftZira(voice) {
+    return isWindowsLegacyVoice(voice) && /microsoft\s+zira/i.test(String(voice?.name || ""));
+  }
+
   function voiceSelectionKey(voice) {
     if (!voice) return "";
     const name = String(voice.name || "").trim();
@@ -29,7 +37,7 @@
     if (voice.__edgeTtsSource === "win-natural") {
       return `win-natural:${voice.nativeVoiceId || voice.voiceURI || name}|${lang}`;
     }
-    if (voice.__edgeTtsSource === "chrome-tts" || voice.localService === true) {
+    if (isWindowsLegacyVoice(voice)) {
       return `win-legacy:${voice.chromeVoiceName || voice.voiceURI || name}|${lang}`;
     }
     return `online-natural:${voice.voiceURI || name}|${lang}`;
@@ -51,25 +59,46 @@
     return candidate.replace("_", "-");
   }
 
-  function scoreVoice(voice, language, savedName) {
-    let score = 0;
-    const shortLanguage = language.split("-")[0].toLowerCase();
-    const voiceLanguage = (voice.lang || "").toLowerCase();
-
-    if (savedName && voice.name === savedName) score += 10_000;
-    if (isNaturalVoice(voice)) score += 1_000;
-    if (voiceLanguage === language.toLowerCase()) score += 250;
-    if (voiceLanguage.startsWith(shortLanguage)) score += 100;
-    if (/microsoft/i.test(voice.name || "")) score += 20;
-    if (voice.default) score += 5;
-
-    return score;
+  function voiceClassOrder(voice) {
+    if (isWindowsLegacyVoice(voice)) return 0;
+    if (voice?.__edgeTtsSource === "win-natural") return 1;
+    return 2;
   }
 
-  function sortVoices(voices, language, savedName) {
-    return [...voices].sort(
-      (left, right) => scoreVoice(right, language, savedName) - scoreVoice(left, language, savedName)
-    );
+  function compareVoices(left, right) {
+    const classDifference = voiceClassOrder(left) - voiceClassOrder(right);
+    if (classDifference !== 0) return classDifference;
+    const nameDifference = String(left?.name || "").trim().toLocaleLowerCase()
+      .localeCompare(String(right?.name || "").trim().toLocaleLowerCase());
+    if (nameDifference !== 0) return nameDifference;
+    const languageDifference = String(left?.lang || "").trim().toLocaleLowerCase()
+      .localeCompare(String(right?.lang || "").trim().toLocaleLowerCase());
+    if (languageDifference !== 0) return languageDifference;
+    return voiceSelectionKey(left).localeCompare(voiceSelectionKey(right));
+  }
+
+  function sortVoices(voices) {
+    return [...voices].sort(compareVoices);
+  }
+
+  function selectStartupVoice(voices, startupKey = "", startupName = "") {
+    const playable = (voices || []).filter((voice) => !isCatalogOnlyVoice(voice));
+    if (startupKey) {
+      const keyed = playable.find((voice) => voiceSelectionKey(voice) === startupKey);
+      if (keyed) return keyed;
+    }
+    if (startupName && !startupKey) {
+      const named = playable.find((voice) =>
+        String(voice?.name || "").trim().toLocaleLowerCase() ===
+        String(startupName).trim().toLocaleLowerCase()
+      );
+      if (named) return named;
+    }
+    return playable.find((voice) => isMicrosoftZira(voice) &&
+      String(voice.lang || "").toLowerCase() === "en-us") ||
+      playable.find(isMicrosoftZira) ||
+      playable[0] ||
+      null;
   }
 
   function separatorForSegments(left, right) {
@@ -310,8 +339,7 @@
     }
 
     chooseVoices(documentLanguage, savedName) {
-      const language = preferredLanguage(documentLanguage);
-      return sortVoices(this.getVoices(), language, savedName);
+      return sortVoices(this.getVoices());
     }
 
     clearPlaybackTimers() {
@@ -629,7 +657,9 @@
     selectPlayableVoice,
     preferredLanguage,
     recoveryKeyForSegment,
-    scoreVoice,
-    sortVoices
+    sortVoices,
+    isWindowsLegacyVoice,
+    isMicrosoftZira,
+    selectStartupVoice
   };
 });

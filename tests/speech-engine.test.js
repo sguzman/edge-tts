@@ -7,9 +7,12 @@ const {
   createSpeechBatch,
   createUtteranceChunks,
   createUtterancePayload,
+  isMicrosoftZira,
   isNaturalVoice,
   recoveryKeyForSegment,
-  sortVoices
+  selectStartupVoice,
+  sortVoices,
+  voiceSelectionKey
 } = require("../src/content/speech-engine.js");
 
 test("createUtterancePayload remaps segment starts after a seek", () => {
@@ -177,11 +180,33 @@ test("recovery key identifies the exact stuck model token", () => {
   );
 });
 
-test("natural voices sort ahead of local voices for the same language", () => {
-  const local = { name: "Microsoft David", lang: "en-US", default: true };
-  const natural = { name: "Microsoft Aria Online (Natural)", lang: "en-US", default: false };
-  const voices = sortVoices([local, natural], "en-US", "");
+test("voices sort deterministically by Legacy, Windows Natural, then Online", () => {
+  const local = { name: "Microsoft Zira", lang: "en-US", localService: true };
+  const native = { name: "Microsoft Aria", lang: "en-US", __edgeTtsSource: "win-natural" };
+  const natural = { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true };
+  const voices = sortVoices([natural, native, local], "es-MX", "natural");
 
-  assert.equal(voices[0], natural);
-  assert.equal(isNaturalVoice(voices[0]), true);
+  assert.deepEqual(voices, [local, native, natural]);
+  assert.equal(isNaturalVoice(voices[2]), true);
+});
+
+test("static ordering ignores language, selection, saved name, and defaults", () => {
+  const voices = [
+    { name: "Microsoft Zira", lang: "en-US", localService: true, default: false },
+    { name: "Microsoft David", lang: "en-US", localService: true, default: true },
+    { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true }
+  ];
+  assert.deepEqual(
+    sortVoices(voices, "en-US", "Microsoft Zira"),
+    sortVoices(voices, "fr-FR", "Microsoft Aria Online (Natural)")
+  );
+});
+
+test("startup resolver prefers configured voice, then playable Zira fallback", () => {
+  const zira = { name: "Microsoft Zira Desktop", lang: "en-US", localService: true };
+  const online = { name: "Microsoft Aria Online (Natural)", lang: "en-US", remote: true };
+  assert.equal(isMicrosoftZira(zira), true);
+  assert.equal(selectStartupVoice([zira, online]), zira);
+  assert.equal(selectStartupVoice([zira, online], voiceSelectionKey(online), online.name), online);
+  assert.equal(selectStartupVoice([online], "missing", "Missing"), online);
 });
