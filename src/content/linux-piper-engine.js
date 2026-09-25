@@ -130,7 +130,24 @@
         return super.speak(block, startSegmentIndex, options);
       }
 
-      const chunks = createUtteranceChunks(block, startSegmentIndex, options?.chunkOptions);
+      // Piper high-quality CPU models must not inherit the online backend's
+      // large ~1200-character batching. Keep native requests short so first
+      // audio arrives promptly and cancellation has frequent boundaries.
+      const requestedChunks = options?.chunkOptions || {};
+      const chunks = createUtteranceChunks(block, startSegmentIndex, {
+        firstChunkMaxChars: Math.min(
+          180,
+          Math.max(80, Number(requestedChunks.firstChunkMaxChars) || 180)
+        ),
+        maxChars: Math.min(
+          260,
+          Math.max(120, Number(requestedChunks.maxChars) || 260)
+        ),
+        emergencyMaxChars: Math.min(
+          500,
+          Math.max(260, Number(requestedChunks.emergencyMaxChars) || 500)
+        )
+      });
       if (!chunks.length) {
         this.onEnd?.();
         return;
