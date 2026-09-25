@@ -135,6 +135,15 @@
       return false;
     }
 
+    if (
+      message?.type === "EDGE_TTS_LINUX_PIPER_EVENT_V2" ||
+      message?.type === "EDGE_TTS_LINUX_PIPER_EVENT"
+    ) {
+      const accepted = app?.speech?.handleLinuxPiperEvent?.(message) === true;
+      sendResponse({ accepted });
+      return false;
+    }
+
     return false;
   };
 
