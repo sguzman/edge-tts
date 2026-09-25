@@ -313,16 +313,39 @@
         }
       };
 
-      void audio.play()
-        .then(() => {
-          if (activeGeneration !== this.generation) return;
-          this.onStart?.(
-            payload.segments?.[0],
-            Math.max(0, (root.performance?.now?.() ?? Date.now()) - this.requestedAt)
-          );
-          this._startBoundaryClock(activeGeneration);
-        })
-        .catch((error) => this._failLinuxPiper(error?.message || String(error)));
+      void (async () => {
+        if (this.directAudioContext?.state === "suspended") {
+          try {
+            await this.directAudioContext.resume();
+          } catch (error) {
+            console.warn(
+              "Edge Natural TTS could not resume Web Audio for Piper playback; falling back to direct media output.",
+              error
+            );
+
+            try {
+              this.directMediaSource?.disconnect?.();
+            } catch (_error) {}
+            try {
+              this.directGain?.disconnect?.();
+            } catch (_error) {}
+
+            this.directMediaSource = null;
+            this.directGain = null;
+            this.directAudioContext = null;
+            audio.volume = Math.min(1, Math.max(0, Number(this.directOutputGain) || 0));
+          }
+        }
+
+        await audio.play();
+        if (activeGeneration !== this.generation) return;
+
+        this.onStart?.(
+          payload.segments?.[0],
+          Math.max(0, (root.performance?.now?.() ?? Date.now()) - this.requestedAt)
+        );
+        this._startBoundaryClock(activeGeneration);
+      })().catch((error) => this._failLinuxPiper(error?.message || String(error)));
 
       return true;
     }
