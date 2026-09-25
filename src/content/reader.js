@@ -131,6 +131,10 @@
       this.applySettings();
       this.rebuildModel();
 
+      // Linux development branch: resolve the app-private Piper catalog before
+      // making the initial voice choice, so an installed local voice does not
+      // lose a race to Edge's online catalog during startup.
+      await this.speech.refreshLinuxPiperVoices?.();
       this.refreshVoices();
       if (!this.voices.some((voice) =>
         isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
