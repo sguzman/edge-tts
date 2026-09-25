@@ -11,6 +11,7 @@
   }
 })(globalThis, function createVoiceUiApi(root) {
   function voiceClass(voice) {
+    if (voice?.__edgeTtsSource === "linux-piper") return "piper";
     if (voice?.__edgeTtsSource === "win-natural") return "win-natural";
     if (voice?.__edgeTtsSource === "chrome-tts" || voice?.localService === true) return "win-legacy";
     if (voice?.remote === true || voice?.localService === false || /\b(natural|online)\b/i.test(String(voice?.name || ""))) return "online";
@@ -18,6 +19,7 @@
   }
 
   function voicePrefix(voice) {
+    if (voiceClass(voice) === "piper") return "[PIPER]";
     if (voiceClass(voice) === "win-natural") return "[WIN-NATURAL]";
     if (voiceClass(voice) === "online") return "[ONLINE]";
     return "[WIN-LEGACY]";
@@ -30,7 +32,7 @@
 
   function filterVoicesByClass(voices, query, selectedClass = "all") {
     const aliases = { local: "win-legacy", natural: "online" };
-    const normalizedClass = aliases[selectedClass] || ["win-natural", "win-legacy", "online"].includes(selectedClass)
+    const normalizedClass = aliases[selectedClass] || ["piper", "win-natural", "win-legacy", "online"].includes(selectedClass)
       ? (aliases[selectedClass] || selectedClass) : "all";
     const terms = String(query || "")
       .trim()
@@ -74,6 +76,7 @@
             Voice class
             <select data-edge-tts-voice-class aria-label="Filter voice class">
               <option value="all">All voices</option>
+              <option value="piper">Piper (Linux)</option>
               <option value="win-natural">Windows Natural</option>
               <option value="win-legacy">Windows Legacy</option>
               <option value="online">Online</option>
