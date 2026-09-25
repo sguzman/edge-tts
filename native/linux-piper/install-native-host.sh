@@ -65,8 +65,16 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
   python3 -m venv "$VENV_DIR"
 fi
 
-echo "Installing Piper 1.8.0 inside the app-private runtime only..."
-"$VENV_DIR/bin/python" -m pip install --disable-pip-version-check --no-input "piper-tts==1.8.0"
+if "$VENV_DIR/bin/python" - <<'PY'
+import importlib.metadata as metadata
+raise SystemExit(0 if metadata.version("piper-tts") == "1.8.0" else 1)
+PY
+then
+  echo "Reusing existing app-private Piper 1.8.0 runtime."
+else
+  echo "Installing Piper 1.8.0 inside the app-private runtime only..."
+  "$VENV_DIR/bin/python" -m pip install --disable-pip-version-check --no-input "piper-tts==1.8.0"
+fi
 
 "$VENV_DIR/bin/python" - <<'PY'
 import importlib.metadata as metadata
@@ -74,7 +82,7 @@ import importlib.metadata as metadata
 names = {dist.metadata["Name"].lower() for dist in metadata.distributions() if dist.metadata.get("Name")}
 if "onnxruntime-gpu" in names:
     raise SystemExit("Refusing runtime: onnxruntime-gpu is installed. Edge Natural TTS Piper must remain CPU-only.")
-if "piper-tts" not in names:
+if metadata.version("piper-tts") != "1.8.0":
     raise SystemExit("Piper installation verification failed.")
 print("Verified: Piper runtime is isolated and has no onnxruntime-gpu package.")
 PY
