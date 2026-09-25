@@ -26,6 +26,7 @@
     "[data-slate-editor='true']"
   ].join(",");
   const isWinNaturalVoice = (voice) => voice?.__edgeTtsSource === "win-natural";
+  const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
 
   const MIN_BATCH_CHARS = 400;
   const MAX_BATCH_CHARS = 2400;
@@ -131,9 +132,16 @@
       this.rebuildModel();
 
       this.refreshVoices();
-      if (!this.voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))) {
-        this.toolbar.setStatus("Loading Natural voice…");
-        await this.speech.waitForVoices(350, (voices) => voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice)));
+      if (!this.voices.some((voice) =>
+        isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
+      )) {
+        this.toolbar.setStatus("Loading voices…");
+        await this.speech.waitForVoices(
+          350,
+          (voices) => voices.some((voice) =>
+            isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
+          )
+        );
         this.refreshVoices();
       }
 
@@ -434,6 +442,7 @@
       this.voices = voices;
       this.selectedVoice =
         voices.find((voice) => voice.name === this.settings.voiceName) ||
+        voices.find(isLinuxPiperVoice) ||
         voices.find(isWinNaturalVoice) ||
         voices.find(isNaturalVoice) ||
         voices[0] ||
