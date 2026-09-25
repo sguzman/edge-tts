@@ -10,6 +10,8 @@ test("speech backends, voice UI, controls, and startup fast path load before boo
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');
   const directAudio = source.indexOf('"src/content/direct-audio-engine.js"');
+  const winNatural = source.indexOf('"src/content/win-natural-engine.js"');
+  const linuxPiper = source.indexOf('"src/content/linux-piper-engine.js"');
   const localTts = source.indexOf('"src/content/local-tts-engine.js"');
   const toolbar = source.indexOf('"src/content/toolbar.js"');
   const voiceUi = source.indexOf('"src/content/voice-ui.js"');
@@ -23,7 +25,9 @@ test("speech backends, voice UI, controls, and startup fast path load before boo
   assert.ok(baseSpeech >= 0);
   assert.ok(reliableSpeech > baseSpeech);
   assert.ok(directAudio > reliableSpeech);
-  assert.ok(localTts > directAudio);
+  assert.ok(winNatural > directAudio);
+  assert.ok(linuxPiper > winNatural);
+  assert.ok(localTts > linuxPiper);
   assert.ok(toolbar > localTts);
   assert.ok(voiceUi > toolbar);
   assert.ok(reader > voiceUi);
