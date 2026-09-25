@@ -199,7 +199,7 @@ def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threadi
         sample_width: int | None = None
         channels: int | None = None
 
-        for chunk in voice.synthesize(text, config, include_alignments=True):
+        for chunk in voice.synthesize(text, config, include_alignments=False):
             if cancel.is_set():
                 send_message({"type": "cancelled", "requestId": request_id})
                 return
@@ -302,8 +302,19 @@ def cancel_synthesis(request_id: str) -> None:
     with _state_lock:
         active_id = _active_request_id
         cancel = _active_cancel
-    if cancel is not None and (not request_id or request_id == active_id):
-        cancel.set()
+
+    if cancel is None or (request_id and request_id != active_id):
+        return
+
+    cancel.set()
+
+    # onnxruntime inference itself is not cooperatively cancellable through
+    # Piper's Python API. For interactive Stop/Pause/Quit semantics, terminate
+    # this helper immediately after acknowledging cancellation. Edge will spawn
+    # a fresh persistent helper on the next synthesis request.
+    send_message({"type": "cancelled", "requestId": active_id or request_id})
+    sys.stdout.buffer.flush()
+    os._exit(0)
 
 
 def handle_message(message: dict[str, Any]) -> None:
