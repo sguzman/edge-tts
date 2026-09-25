@@ -1,6 +1,6 @@
 # Architecture
 
-> **Operational warning:** this source-level architecture is only part of the running system. Windows Natural playback crosses Edge profile/extension identity, Native Messaging, Windows registry/manifest state, a native helper, x64 SAPI, NaturalVoiceSAPIAdapter, external voice assets, browser media policy, media-clock timing, and human QA. Before changing any of those boundaries, read [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md). A repository-correct change can still fail — or damage the stable reader — because several critical runtime surfaces live outside the repository.
+> **Operational warning:** this source-level architecture is only part of the running system. Windows Natural playback crosses Edge profile/extension identity, Native Messaging, Windows registry/manifest state, a native helper, x64 SAPI, NaturalVoiceSAPIAdapter, external voice assets, browser media policy, media-clock timing, and human QA. Linux Piper similarly crosses Edge extension identity, the per-user Native Messaging manifest, an app-private Piper runtime, external ONNX voice assets, browser media policy, and media-clock timing. Before changing any of those boundaries, read [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md). A repository-correct change can still fail — or damage the stable reader — because several critical runtime surfaces live outside the repository.
 
 ## Goal
 
@@ -69,11 +69,20 @@ page -> extension -> Native Messaging -> WinNaturalHost -> x64 SAPI
      -> NaturalVoiceSAPIAdapter -> local Natural assets -> WAV + timing
      -> browser media clock
 
+[PIPER]
+page -> extension -> Native Messaging -> persistent Linux helper
+     -> app-private Piper runtime (CPU only) -> user ONNX voice model
+     -> WAV + source-word timing bridge -> browser media clock
+
 [WIN-LEGACY]
 page -> Web Speech / chrome.tts -> browser/OS speech events
 ```
 
 These routes rejoin at reader cursor/highlighting/UI state but can fail independently before that point. A shared toolbar does **not** imply shared low-level semantics for discovery, authorization, pause/resume, cancellation, speed, volume, ownership, or timing.
+
+The Linux Piper host is deliberately CPU-only. Its launcher clears `CUDA_VISIBLE_DEVICES`, the host calls `PiperVoice.load(..., use_cuda=False)`, and its installer refuses an environment containing `onnxruntime-gpu`. Piper models are external user data under the XDG data directory rather than repository assets.
+
+Piper 1.8.0 exposes phoneme/sample alignments, but the current Linux v1 bridge does not claim those are source-word offsets. Until a validated phoneme-to-source mapping exists, the helper emits explicitly approximate source-word timing derived from final audio duration.
 
 For the complete inventory of runtime surfaces and the rules for proving each layer healthy, see [`LIVE_OPERATIONAL_HAZARDS.md`](./LIVE_OPERATIONAL_HAZARDS.md).
 
