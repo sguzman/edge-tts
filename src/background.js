@@ -6,6 +6,7 @@ const READER_FILES = [
   "src/content/reliable-speech-engine.js",
   "src/content/direct-audio-engine.js",
   "src/content/win-natural-engine.js",
+  "src/content/linux-piper-engine.js",
   "src/content/local-tts-engine.js",
   "src/content/toolbar.js",
   "src/content/voice-ui.js",
@@ -29,6 +30,9 @@ let localTtsSession = null;
 let winNaturalPort = null;
 let winNaturalHandshake = null;
 const winNaturalRequests = new Map();
+let linuxPiperPort = null;
+let linuxPiperHandshake = null;
+const linuxPiperRequests = new Map();
 
 function disconnectWinNaturalPort() {
   const port = winNaturalPort;
@@ -80,6 +84,97 @@ function stopWinNaturalForTab(tabId, requestId = null) {
   );
   if (!active) return false;
   try { winNaturalPort?.postMessage({ type: "cancel", requestId: active[1].requestId }); } catch (_error) {}
+  return true;
+}
+
+function disconnectLinuxPiperPort() {
+  const port = linuxPiperPort;
+  const handshake = linuxPiperHandshake;
+  linuxPiperPort = null;
+  linuxPiperHandshake = null;
+  handshake?.reject?.(new Error("Linux Piper helper disconnected."));
+  for (const request of linuxPiperRequests.values()) {
+    request.reject?.(new Error("Linux Piper helper disconnected."));
+    if (Number.isInteger(request.tabId)) {
+      void chrome.tabs.sendMessage(request.tabId, {
+        type: "EDGE_TTS_LINUX_PIPER_EVENT",
+        requestId: request.requestId,
+        event: { type: "error", message: "Linux Piper helper disconnected." }
+      }).catch(() => {});
+    }
+  }
+  linuxPiperRequests.clear();
+  try { port?.disconnect?.(); } catch (_error) {}
+}
+
+function ensureLinuxPiperPort() {
+  if (linuxPiperPort && linuxPiperHandshake) {
+    return linuxPiperHandshake.then(() => linuxPiperPort);
+  }
+
+  let port;
+  try {
+    port = chrome.runtime.connectNative("com.sguzman.edge_tts.linux_piper");
+  } catch (error) {
+    return Promise.reject(error);
+  }
+
+  linuxPiperPort = port;
+  linuxPiperHandshake = new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("Linux Piper helper handshake timed out.")), 5000);
+    const finish = (callback, value) => {
+      clearTimeout(timer);
+      callback(value);
+    };
+
+    port.onMessage.addListener((message) => {
+      if (message?.type === "hello") {
+        if (
+          message.protocol === 1 &&
+          message.platform === "linux" &&
+          message.backend === "piper" &&
+          message.cpuOnly === true
+        ) {
+          finish(resolve, true);
+        } else {
+          finish(reject, new Error("Linux Piper helper protocol or platform mismatch."));
+        }
+        return;
+      }
+      linuxPiperRequests.get(String(message?.requestId || ""))?.onMessage?.(message);
+    });
+  });
+
+  port.onDisconnect.addListener(() => {
+    const error = chrome.runtime.lastError;
+    disconnectLinuxPiperPort();
+    if (error) console.warn(error.message);
+  });
+
+  try {
+    port.postMessage({ type: "hello", protocol: 1 });
+  } catch (error) {
+    disconnectLinuxPiperPort();
+    return Promise.reject(error);
+  }
+
+  return linuxPiperHandshake
+    .then(() => port)
+    .catch((error) => {
+      disconnectLinuxPiperPort();
+      throw error;
+    });
+}
+
+function stopLinuxPiperForTab(tabId, requestId = null) {
+  if (!Number.isInteger(tabId)) return false;
+  const active = [...linuxPiperRequests.entries()].find(([, request]) =>
+    request.tabId === tabId && (!requestId || request.requestId === requestId)
+  );
+  if (!active) return false;
+  try {
+    linuxPiperPort?.postMessage({ type: "cancel", requestId: active[1].requestId });
+  } catch (_error) {}
   return true;
 }
 
@@ -352,6 +447,73 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
 
+  if (message?.type === "EDGE_TTS_LINUX_PIPER_VOICES") {
+    const requestId = `voices-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    void ensureLinuxPiperPort()
+      .then((port) => new Promise((resolve, reject) => {
+        linuxPiperRequests.set(requestId, {
+          resolve,
+          reject,
+          onMessage: (response) => {
+            if (response?.type !== "voices") return;
+            linuxPiperRequests.delete(requestId);
+            resolve(response.voices || []);
+          }
+        });
+        port.postMessage({ type: "voices", requestId });
+      }))
+      .then((voices) => sendResponse({ voices }))
+      .catch(() => sendResponse({ voices: [] }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_LINUX_PIPER_SYNTHESIZE") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ accepted: false });
+      return false;
+    }
+    const requestId = String(message.requestId || "");
+    if (!requestId || !message.text || !message.voiceId) {
+      sendResponse({ accepted: false });
+      return false;
+    }
+
+    void ensureLinuxPiperPort()
+      .then((port) => {
+        linuxPiperRequests.set(requestId, {
+          requestId,
+          tabId,
+          resolve: () => {},
+          reject: () => {},
+          onMessage: (response) => {
+            void chrome.tabs.sendMessage(tabId, {
+              type: "EDGE_TTS_LINUX_PIPER_EVENT",
+              requestId,
+              event: response
+            }).catch(() => {});
+            if (["synthesisEnd", "error", "cancelled"].includes(response?.type)) {
+              linuxPiperRequests.delete(requestId);
+            }
+          }
+        });
+        port.postMessage({
+          type: "synthesize",
+          requestId,
+          voiceId: String(message.voiceId || ""),
+          text: String(message.text || ""),
+          lang: String(message.lang || "")
+        });
+        sendResponse({ accepted: true });
+      })
+      .catch(() => sendResponse({ accepted: false }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_LINUX_PIPER_STOP") {
+    sendResponse({ stopped: stopLinuxPiperForTab(tabId, message.requestId || null) });
+    return false;
+  }
+
   return false;
 });
 
@@ -359,6 +521,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   injectionPromises.delete(tabId);
   stopLocalTtsForTab(tabId);
   stopWinNaturalForTab(tabId);
+  stopLinuxPiperForTab(tabId);
   void queueAudioMutation(async () => {
     await loadAudioOwner();
     if (audioOwnerTabId === tabId) {
