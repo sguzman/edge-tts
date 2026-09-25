@@ -10,6 +10,7 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const createUtteranceChunks = speechModule?.createUtteranceChunks;
   const segmentIndexForCharIndex = root.EdgeTtsExtension?.TextModel?.segmentIndexForCharIndex;
+  const PIPER_SYNTHESIS_TIMEOUT_MS = 20_000;
 
   function voiceKey(voice) {
     return `${String(voice?.name || "").toLocaleLowerCase()}\u0000${String(voice?.lang || "").toLocaleLowerCase()}`;
@@ -183,12 +184,29 @@
       }
 
       const request = requestId(generation, this.currentChunkIndex);
+      const timeoutId = root.setTimeout(() => {
+        if (
+          this.linuxPiperRequest?.requestId !== request ||
+          generation !== this.generation
+        ) {
+          return;
+        }
+        try {
+          root.chrome?.runtime?.sendMessage?.({
+            type: "EDGE_TTS_LINUX_PIPER_STOP",
+            requestId: request
+          });
+        } catch (_error) {}
+        this._failLinuxPiper("native synthesis timed out");
+      }, PIPER_SYNTHESIS_TIMEOUT_MS);
+
       this.linuxPiperRequest = {
         requestId: request,
         generation,
         payload,
         audio: [],
-        boundaries: []
+        boundaries: [],
+        timeoutId
       };
 
       Promise.resolve(
@@ -213,6 +231,9 @@
     }
 
     _failLinuxPiper(message) {
+      if (this.linuxPiperRequest?.timeoutId) {
+        root.clearTimeout(this.linuxPiperRequest.timeoutId);
+      }
       this._resetDirectState({ keepMode: true });
       this.linuxPiperRequest = null;
       this.onError?.(new Error(`Linux Piper TTS failed: ${message}`));
@@ -244,6 +265,10 @@
       }
       if (event.type !== "synthesisEnd") return false;
 
+      if (request.timeoutId) {
+        root.clearTimeout(request.timeoutId);
+        request.timeoutId = null;
+      }
       const payload = request.payload;
       this.directBoundaries = request.boundaries.map((boundary) => {
         const charIndex = Math.max(0, Number(boundary.charIndex) || 0);
@@ -304,6 +329,9 @@
 
     cancel() {
       if (this.directSessionMode && this.linuxPiperRequest) {
+        if (this.linuxPiperRequest.timeoutId) {
+          root.clearTimeout(this.linuxPiperRequest.timeoutId);
+        }
         try {
           root.chrome?.runtime?.sendMessage?.({
             type: "EDGE_TTS_LINUX_PIPER_STOP",
@@ -324,6 +352,7 @@
     LinuxPiperSpeechEngine,
     isLinuxPiperVoice,
     mergeVoices,
-    nativeVoiceToCatalogVoice
+    nativeVoiceToCatalogVoice,
+    PIPER_SYNTHESIS_TIMEOUT_MS
   };
 });
