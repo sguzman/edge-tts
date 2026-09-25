@@ -11,6 +11,8 @@ test("Piper uses short CPU-sized chunks instead of online-sized batches", () => 
   assert.match(piperEngine, /firstChunkMaxChars:\s*Math\.min\(\s*180/);
   assert.match(piperEngine, /maxChars:\s*Math\.min\(\s*260/);
   assert.match(piperEngine, /emergencyMaxChars:\s*Math\.min\(\s*500/);
+  assert.match(piperEngine, /PIPER_SYNTHESIS_TIMEOUT_MS = 20_000/);
+  assert.match(piperEngine, /native synthesis timed out/);
 });
 
 test("Piper native cancellation is process-authoritative", () => {
