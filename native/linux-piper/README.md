@@ -25,7 +25,7 @@ ID from `edge://extensions`.
 Then run:
 
 ```bash
-./native/linux-piper/install-native-host.sh --extension-id <extension-id>
+bash native/linux-piper/install-native-host.sh --extension-id <extension-id>
 ```
 
 The installer creates a private virtual environment, installs the pinned Piper
@@ -77,7 +77,7 @@ exact.
 ## Uninstall
 
 ```bash
-./native/linux-piper/uninstall-native-host.sh
+bash native/linux-piper/uninstall-native-host.sh
 ```
 
 This removes the app-private Piper runtime and Edge Native Messaging manifest.
