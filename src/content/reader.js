@@ -80,6 +80,7 @@
       this.pageClickListening = false;
       this.audioOwner = false;
       this.audioClaimSerial = 0;
+      this.lifecycleSerial = 0;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -121,6 +122,7 @@
 
     async open() {
       const openStartedAt = performance.now();
+      const lifecycle = ++this.lifecycleSerial;
       this.enabled = true;
       this.stopped = false;
       this.paused = false;
@@ -128,6 +130,13 @@
       this.toolbar.setStatus("Starting…");
 
       await this.loadSettings();
+      if (
+        lifecycle !== this.lifecycleSerial ||
+        !this.enabled ||
+        this.quitRequested
+      ) {
+        return;
+      }
       this.applySettings();
       this.rebuildModel();
 
@@ -135,6 +144,15 @@
       // making the initial voice choice, so an installed local voice does not
       // lose a race to Edge's online catalog during startup.
       await this.speech.refreshLinuxPiperVoices?.();
+      if (
+        lifecycle !== this.lifecycleSerial ||
+        !this.enabled ||
+        this.stopped ||
+        this.paused ||
+        this.quitRequested
+      ) {
+        return;
+      }
       this.refreshVoices();
       if (!this.voices.some((voice) =>
         isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
@@ -146,6 +164,15 @@
             isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
           )
         );
+        if (
+          lifecycle !== this.lifecycleSerial ||
+          !this.enabled ||
+          this.stopped ||
+          this.paused ||
+          this.quitRequested
+        ) {
+          return;
+        }
         this.refreshVoices();
       }
 
@@ -161,7 +188,18 @@
       console.debug(
         `Edge Natural TTS startup prepared in ${Math.round(performance.now() - openStartedAt)}ms`
       );
-      if (await this.claimAudioOwnership()) {
+      const granted = await this.claimAudioOwnership();
+      if (
+        lifecycle !== this.lifecycleSerial ||
+        !this.enabled ||
+        this.stopped ||
+        this.paused ||
+        this.quitRequested
+      ) {
+        if (granted) this.releaseAudioOwnership();
+        return;
+      }
+      if (granted) {
         this.speakCurrentPosition();
       } else {
         this.paused = true;
@@ -180,11 +218,17 @@
     quit() {
       if (this.quitRequested) return;
       this.quitRequested = true;
-
-      // Run the normal stop chain first. ReliableReader/FailSafeReader override
-      // stop(), so this also clears every speech/recovery/liveness timer.
-      this.stop();
       this.enabled = false;
+      this.lifecycleSerial += 1;
+
+      // Quit must be authoritative even if a native backend is unhealthy.
+      // Teardown continues even when transport cancellation throws.
+      try {
+        this.stop();
+      } catch (error) {
+        console.warn("Edge Natural TTS transport failed while quitting.", error);
+      }
+
       this.syncPageClickListener();
 
       this.unsubscribeVoiceChanges?.();
@@ -201,9 +245,6 @@
       this.activeBatchRequest = null;
       this.activeBatchEndBlockIndex = -1;
 
-      // content-script owns the tab registration. Detaching removes its runtime
-      // message listener and marker so the next extension-icon click injects a
-      // completely fresh reader instance.
       root.__EDGE_TTS_READER__?.detach?.(this);
     }
 
@@ -300,17 +341,28 @@
     }
 
     stop() {
+      this.lifecycleSerial += 1;
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.paused = false;
-      this.discardLocalSpeechState();
-      this.releaseAudioOwnership();
-      this.highlighter.clear();
+
+      // Commit user-visible state before touching any transport. Stop must work
+      // even if a native helper is hung or has disappeared.
       this.toolbar.setStopped();
+      this.highlighter.clear();
+      this.releaseAudioOwnership();
+
+      try {
+        this.discardLocalSpeechState();
+      } catch (error) {
+        console.warn("Edge Natural TTS transport failed while stopping.", error);
+      }
     }
 
     async playPause() {
+      const lifecycle = ++this.lifecycleSerial;
+
       if (this.stopped) {
         this.rebuildModel();
         const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -323,7 +375,17 @@
         this.currentSegmentIndex = 0;
         this.stopped = false;
         this.paused = false;
-        if (await this.claimAudioOwnership()) {
+        const granted = await this.claimAudioOwnership();
+        if (
+          lifecycle !== this.lifecycleSerial ||
+          this.stopped ||
+          this.paused ||
+          this.quitRequested
+        ) {
+          if (granted) this.releaseAudioOwnership();
+          return;
+        }
+        if (granted) {
           this.speakCurrentPosition();
         } else {
           this.paused = true;
@@ -337,7 +399,17 @@
         this.paused = false;
         this.toolbar.setPaused(false);
         this.toolbar.setStatus("Resuming…");
-        if (await this.claimAudioOwnership()) {
+        const granted = await this.claimAudioOwnership();
+        if (
+          lifecycle !== this.lifecycleSerial ||
+          this.stopped ||
+          this.paused ||
+          this.quitRequested
+        ) {
+          if (granted) this.releaseAudioOwnership();
+          return;
+        }
+        if (granted) {
           this.speakCurrentPosition();
         } else {
           this.paused = true;
@@ -345,15 +417,18 @@
           this.toolbar.setStatus("Paused — audio unavailable");
         }
       } else {
-        // Never leave a native SpeechSynthesisUtterance parked in Edge. The
-        // speech service is browser-global, so another tab's resume() can wake
-        // a parked utterance. Pause is therefore local state + transport cancel.
+        // Pause is local state + transport cancellation. Commit the local state
+        // first so a slow or broken native helper can never hold the UI hostage.
         this.clearResumeWatchdog();
-        this.discardLocalSpeechState();
-        this.releaseAudioOwnership();
         this.paused = true;
         this.toolbar.setPaused(true);
         this.toolbar.setStatus("Paused");
+        this.releaseAudioOwnership();
+        try {
+          this.discardLocalSpeechState();
+        } catch (error) {
+          console.warn("Edge Natural TTS transport failed while pausing.", error);
+        }
       }
     }
 
