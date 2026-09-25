@@ -329,11 +329,33 @@
             try {
               this.directGain?.disconnect?.();
             } catch (_error) {}
+            try {
+              audio.pause?.();
+              audio.removeAttribute?.("src");
+              audio.load?.();
+            } catch (_error) {}
 
             this.directMediaSource = null;
             this.directGain = null;
             this.directAudioContext = null;
-            audio.volume = Math.min(1, Math.max(0, Number(this.directOutputGain) || 0));
+
+            const fallbackAudio =
+              root.document?.createElement?.("audio") || new root.Audio();
+            fallbackAudio.preload = "auto";
+            fallbackAudio.preservesPitch = true;
+            if ("webkitPreservesPitch" in fallbackAudio) {
+              fallbackAudio.webkitPreservesPitch = true;
+            }
+            fallbackAudio.src = this.directObjectUrl;
+            fallbackAudio.playbackRate = this.directPlaybackRate;
+            fallbackAudio.volume = Math.min(
+              1,
+              Math.max(0, Number(this.directOutputGain) || 0)
+            );
+            fallbackAudio.onended = audio.onended;
+            fallbackAudio.onerror = audio.onerror;
+            this.directAudio = fallbackAudio;
+            audio = fallbackAudio;
           }
         }
 
