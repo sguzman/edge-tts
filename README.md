@@ -1,14 +1,15 @@
 # 🟣 Edge Natural TTS
 
-A Microsoft Edge extension that turns normal webpages into a synchronized read-aloud experience using Edge's online Natural voices and Windows-local voices.
+A Microsoft Edge extension that turns normal webpages into a synchronized read-aloud experience using Edge's online Natural voices, Windows-local voices, and an optional CPU-only Piper backend on Linux.
 
 ## Current behavior
 
 - Click the extension action to inject the reader into the current tab and start reading near the current viewport.
 - **Online voices use a direct Microsoft Edge Read Aloud transport:** the extension receives MP3 audio plus word-boundary metadata and plays the audio itself.
 - **Windows Natural voices are optional and offline:** the x64 native helper uses SAPI plus NaturalVoiceSAPIAdapter, returning WAV audio and SAPI word-boundary timing.
+- **Linux Piper voices are optional, offline, and CPU-only:** a persistent Native Messaging helper discovers user-installed Piper models under `~/.local/share/edge-natural-tts/voices/`, keeps the selected model warm, and returns WAV audio. The v1 Linux timing bridge is explicitly approximate until source-word alignment is validated.
 - **Windows-local discovery merges two catalogs:** page `speechSynthesis.getVoices()` plus extension `chrome.tts.getVoices()`. A Windows voice missing from Web Speech can therefore still appear and play through the extension-level Windows TTS backend.
-- Voice names are visibly prefixed with **[WIN-NATURAL]**, **[WIN-LEGACY]**, or **[ONLINE]**, and the toolbar filters All voices / Windows Natural / Windows Legacy / Online.
+- Voice names are visibly prefixed with **[PIPER]**, **[WIN-NATURAL]**, **[WIN-LEGACY]**, or **[ONLINE]**, and the toolbar can filter each class independently.
 - Natural synthesis is requested at normal prosody; the primary **Speed** control is client-side playback speed, currently 0.5x–8x.
 - Natural/direct audio has a **Volume** control from 0–200% using Web Audio gain. Local Windows voices remain limited to the OS/browser TTS volume range.
 - Highlights the currently spoken word and sentence using Microsoft word timing metadata for direct audio, Web Speech boundary events, or `chrome.tts` word events for Windows-local fallback voices.
@@ -26,17 +27,20 @@ The reader distinguishes voice **identity/discovery** from voice **playback tran
 
 For local voices, the extension first reads the normal page Web Speech catalog. It also asks the extension-level `chrome.tts` API for OS-provided voices. Catalog entries with the same voice name and locale are deduplicated, preferring the Web Speech object when both APIs expose the same voice. Remote `chrome.tts` entries are not imported into the Windows-local fallback catalog.
 
-This produces three user-facing classes:
+This produces four user-facing classes:
 
 ```text
+[PIPER]       Linux-local Piper voice through Native Messaging
 [WIN-NATURAL] Locally exposed NaturalVoiceSAPIAdapter voice
 [WIN-LEGACY]  Windows / OS voice through Web Speech or chrome.tts
 [ONLINE]      Edge Online / Natural voice
 ```
 
-The toolbar's **Voice class** filter can show all voices, Windows Natural, Windows Legacy, or Online. Text search composes with that class filter.
+The toolbar's **Voice class** filter can show all voices or any one backend class. Text search composes with that class filter.
 
 A local voice already exposed by `speechSynthesis` keeps the existing Web Speech playback path. A local voice found only through `chrome.tts` is spoken by the extension-level Windows TTS backend; its start/word/end events are bridged back into the tab so the existing reader cursor and highlighter continue to work.
+
+Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices.
 
 ## Direct Natural-voice audio
 
@@ -91,7 +95,7 @@ The reader first builds a logical batch:
 - if it is short, following readable paragraphs are appended until the target is reached;
 - paragraph boundaries remain represented in the batch so model position, seeking, and sentence highlighting continue across the combined material.
 
-For direct Natural playback, that logical material is split only as needed for the Read Aloud service, then the returned MP3 frames are assembled for client playback. Local Windows voices use the existing reader batching while their selected local transport emits progress events back into the same model cursor.
+For direct Natural playback, that logical material is split only as needed for the Read Aloud service, then the returned MP3 frames are assembled for client playback. Local Windows voices use the existing reader batching while their selected local transport emits progress events back into the same model cursor. Linux Piper uses the same batch model and returns WAV audio through the Native Messaging backend.
 
 ## Playback recovery
 
@@ -129,14 +133,14 @@ This project intentionally avoids background work on host pages:
 
 ## Development
 
-There is no build step and there are no runtime dependencies.
+The browser extension itself has no build step. Optional native backends have their own isolated runtime requirements.
 
 ```bash
 npm test
 npm run check
 ```
 
-The extension source is loaded directly from the repository.
+The extension source is loaded directly from the repository. The Linux Piper helper is provisioned into an app-private virtual environment; it does not modify system Python or user-site packages.
 
 ## Layout
 
@@ -151,6 +155,8 @@ src/
     speech-engine.js
     reliable-speech-engine.js
     direct-audio-engine.js
+    win-natural-engine.js
+    linux-piper-engine.js
     local-tts-engine.js
     toolbar.js
     voice-ui.js
@@ -162,11 +168,54 @@ src/
     content-script.js
     content.css
 tests/
+native/
+  win-natural/
+  linux-piper/
 docs/
   DIRECT_AUDIO.md
+  WIN_NATURAL.md
 ```
 
 See `docs/ARCHITECTURE.md` for the component boundaries.
+
+# Optional offline Linux Piper backend
+
+The Linux development branch uses a persistent Native Messaging host with an
+application-private Piper 1.8.0 runtime. It is **CPU-only**: the launcher clears
+`CUDA_VISIBLE_DEVICES`, the helper loads models with `use_cuda=False`, and
+the installer refuses an environment containing `onnxruntime-gpu`.
+
+Voice files remain external user data under:
+
+```text
+~/.local/share/edge-natural-tts/voices/
+```
+
+After loading this branch as an unpacked extension and copying its Edge
+extension ID, install the private runtime with:
+
+```bash
+bash native/linux-piper/install-native-host.sh --extension-id YOUR_EXTENSION_ID
+```
+
+The current Ryan setup is discovered automatically when these files are
+present:
+
+```text
+en_US-ryan-high.onnx
+en_US-ryan-high.onnx.json
+```
+
+Uninstall only the runtime/registration with:
+
+```bash
+bash native/linux-piper/uninstall-native-host.sh
+```
+
+The uninstaller intentionally preserves downloaded voice models. See
+`native/linux-piper/README.md` for backend details and the current timing
+limitation.
+
 # Optional offline Windows Natural backend
 
 The extension can use a locally exposed Windows Natural voice through the
