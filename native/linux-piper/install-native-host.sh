@@ -67,7 +67,11 @@ fi
 
 if "$VENV_DIR/bin/python" - <<'PY'
 import importlib.metadata as metadata
-raise SystemExit(0 if metadata.version("piper-tts") == "1.8.0" else 1)
+try:
+    version = metadata.version("piper-tts")
+except metadata.PackageNotFoundError:
+    version = ""
+raise SystemExit(0 if version == "1.8.0" else 1)
 PY
 then
   echo "Reusing existing app-private Piper 1.8.0 runtime."
