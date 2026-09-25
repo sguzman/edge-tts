@@ -24,20 +24,29 @@ const natural = {
   lang: "en-US",
   localService: false
 };
+const piper = {
+  name: "Ryan High",
+  lang: "en-US",
+  localService: true,
+  __edgeTtsSource: "linux-piper"
+};
 
 test("voice classes distinguish Windows legacy, Windows Natural, and online", () => {
   assert.equal(voiceClass(localWeb), "win-legacy");
   assert.equal(voiceClass(localChrome), "win-legacy");
   assert.equal(voiceClass({ name: "Microsoft Aria", lang: "en-US", localService: true, __edgeTtsSource: "win-natural" }), "win-natural");
   assert.equal(voiceClass(natural), "online");
+  assert.equal(voiceClass(piper), "piper");
   assert.match(voiceLabel(localChrome), /^\[WIN-LEGACY\]/);
   assert.match(voiceLabel(natural), /^\[ONLINE\]/);
+  assert.match(voiceLabel(piper), /^\[PIPER\]/);
 });
 
 test("class filter and text search compose", () => {
-  const voices = [localWeb, localChrome, natural];
+  const voices = [localWeb, localChrome, natural, piper];
   assert.deepEqual(filterVoicesByClass(voices, "", "win-legacy"), [localWeb, localChrome]);
   assert.deepEqual(filterVoicesByClass(voices, "aria", "online"), [natural]);
+  assert.deepEqual(filterVoicesByClass(voices, "ryan", "piper"), [piper]);
   assert.deepEqual(filterVoicesByClass(voices, "mark", "online"), []);
   assert.deepEqual(filterVoicesByClass(voices, "legacy", "all"), [localWeb, localChrome]);
 });
