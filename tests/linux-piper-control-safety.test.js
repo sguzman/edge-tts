@@ -43,3 +43,11 @@ test("reader invalidates stale startup work on lifecycle changes", () => {
   assert.match(reader, /lifecycle !== this\.lifecycleSerial/);
   assert.match(reader, /this\.lifecycleSerial \+= 1/);
 });
+
+
+test("Piper resumes Web Audio before playback and has a direct-media fallback", () => {
+  assert.match(piperEngine, /directAudioContext\?\.state === "suspended"/);
+  assert.match(piperEngine, /await this\.directAudioContext\.resume\(\)/);
+  assert.match(piperEngine, /falling back to direct media output/);
+  assert.match(piperEngine, /const fallbackAudio/);
+});
