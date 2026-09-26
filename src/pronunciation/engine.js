@@ -296,6 +296,7 @@
 
     const components = text.split("/").map((component) => {
       if (!component) return "";
+      if (component === "...") return "ellipsis";
 
       let spoken = component;
       if (spoken.startsWith(".") && spoken.length > 1) {
@@ -303,6 +304,7 @@
       }
 
       spoken = spoken
+        .replace(/\.{3}/g, " ellipsis ")
         .replace(/\./g, ` ${dot} `)
         .replace(/_/g, ` ${underscore} `)
         .replace(/-/g, ` ${dash} `)
