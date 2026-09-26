@@ -42,6 +42,15 @@ _active_cancel: threading.Event | None = None
 _active_thread: threading.Thread | None = None
 
 
+def clear_active_request(request_id: str) -> None:
+    global _active_request_id, _active_cancel, _active_thread
+    with _state_lock:
+        if _active_request_id == request_id:
+            _active_request_id = None
+            _active_cancel = None
+            _active_thread = None
+
+
 def _read_exact(stream: Any, count: int) -> bytes | None:
     data = bytearray()
     while len(data) < count:
@@ -257,6 +266,10 @@ def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threadi
                 }
             )
 
+        # Mark the helper idle before advertising completion so the browser can
+        # immediately enqueue the next prefetched sentence without racing this
+        # worker's finally block.
+        clear_active_request(request_id)
         send_message(
             {
                 "type": "synthesisEnd",
@@ -266,13 +279,10 @@ def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threadi
             }
         )
     except Exception as error:
+        clear_active_request(request_id)
         send_message({"type": "error", "requestId": request_id, "message": str(error)})
     finally:
-        with _state_lock:
-            if _active_request_id == request_id:
-                _active_request_id = None
-                _active_cancel = None
-                _active_thread = None
+        clear_active_request(request_id)
 
 
 def start_synthesis(message: dict[str, Any]) -> None:
