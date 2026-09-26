@@ -1036,6 +1036,20 @@
           .catch((error) => {
             if (activeGeneration !== this.generation) return;
 
+            // media.error may have already transferred this prepared WAV to
+            // extension-owned offscreen playback. The original page audio
+            // play() promise will then reject as a consequence of removing its
+            // unsafe blob URL; that rejection must not tear down the fallback.
+            if (
+              this.linuxPiperOffscreenPlayback?.prepared === prepared ||
+              (
+                this.linuxPiperOffscreenPlayback &&
+                this.directAudio !== audio
+              )
+            ) {
+              return;
+            }
+
             if (error?.name === "NotAllowedError") {
               // Extension-action activation can expire while CPU synthesis is
               // running. Keep this prepared WAV intact and let the next explicit
