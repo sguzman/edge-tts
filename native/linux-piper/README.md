@@ -12,8 +12,10 @@ This directory contains the Linux-local Piper backend for Edge Natural TTS.
 - Voice models are user data under
   `~/.local/share/edge-natural-tts/voices/` and are never deleted by the
   uninstaller.
-- The helper is persistent for the lifetime of the Edge Native Messaging port,
-  so the selected Piper model can remain warm between speech batches.
+- The helper is persistent for the lifetime of the Edge Native Messaging port.
+  Ryan High is warmed opportunistically as soon as the helper starts, and the
+  browser pipelines future sentence synthesis ahead of current playback to
+  reduce startup and transition latency.
 - The helper calls `PiperVoice.load(..., use_cuda=False)` and the launcher
   clears `CUDA_VISIBLE_DEVICES` as defense in depth.
 
@@ -73,6 +75,14 @@ duration-weighted source-word timing marked `approximate`.
 A later milestone should replace that approximation with a validated
 phoneme-to-source-word alignment layer. Do not label the current timing as
 exact.
+
+## Speed and cadence
+
+Piper does not use the browser playback-rate control for the entire requested
+speed range. Common moderate changes are synthesized with Piper
+`SynthesisConfig.length_scale`, while the browser applies only the residual
+rate needed to preserve the full 0.5x-8x UI range. This keeps more of the
+model's punctuation and phoneme timing intact than pure time compression.
 
 ## Uninstall
 
