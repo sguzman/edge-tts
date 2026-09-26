@@ -25,6 +25,7 @@ const injectionPromises = new Map();
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
+const PIPER_OFFSCREEN_URL = "src/offscreen/piper-audio.html";
 const READER_SESSION_REVISION = 3;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
@@ -36,6 +37,8 @@ const winNaturalRequests = new Map();
 let linuxPiperPort = null;
 let linuxPiperHandshake = null;
 const linuxPiperRequests = new Map();
+const linuxPiperOffscreenSessions = new Map();
+let linuxPiperOffscreenReady = null;
 
 function disconnectWinNaturalPort() {
   const port = winNaturalPort;
@@ -199,6 +202,70 @@ function stopLinuxPiperForTab(tabId, requestId = null) {
   } catch (_error) {}
 
   return true;
+}
+
+async function hasLinuxPiperOffscreenDocument() {
+  if (!chrome.offscreen?.createDocument) {
+    throw new Error("This Chromium build does not expose chrome.offscreen.");
+  }
+
+  if (typeof chrome.offscreen.hasDocument === "function") {
+    return chrome.offscreen.hasDocument();
+  }
+
+  if (typeof chrome.runtime.getContexts === "function") {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [chrome.runtime.getURL(PIPER_OFFSCREEN_URL)]
+    });
+    return contexts.length > 0;
+  }
+
+  return false;
+}
+
+async function ensureLinuxPiperOffscreenDocument() {
+  if (linuxPiperOffscreenReady) return linuxPiperOffscreenReady;
+
+  linuxPiperOffscreenReady = (async () => {
+    if (await hasLinuxPiperOffscreenDocument()) return true;
+
+    await chrome.offscreen.createDocument({
+      url: PIPER_OFFSCREEN_URL,
+      reasons: ["AUDIO_PLAYBACK"],
+      justification:
+        "Play Piper WAV audio in extension origin when a webpage blocks blob media URLs."
+    });
+    return true;
+  })();
+
+  try {
+    return await linuxPiperOffscreenReady;
+  } finally {
+    linuxPiperOffscreenReady = null;
+  }
+}
+
+async function sendLinuxPiperOffscreenCommand(message) {
+  await ensureLinuxPiperOffscreenDocument();
+  return chrome.runtime.sendMessage(message);
+}
+
+function stopLinuxPiperOffscreenForTab(tabId) {
+  if (!Number.isInteger(tabId)) return false;
+  let stopped = false;
+
+  for (const [playbackId, session] of linuxPiperOffscreenSessions.entries()) {
+    if (session.tabId !== tabId) continue;
+    linuxPiperOffscreenSessions.delete(playbackId);
+    stopped = true;
+    void sendLinuxPiperOffscreenCommand({
+      type: "EDGE_TTS_OFFSCREEN_PIPER_STOP",
+      playbackId
+    }).catch(() => {});
+  }
+
+  return stopped;
 }
 
 async function loadAudioOwner() {
@@ -380,6 +447,104 @@ async function speakLocalTtsForTab(tabId, message) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
+
+  if (message?.type === "EDGE_TTS_OFFSCREEN_PIPER_EVENT") {
+    const playbackId = String(message.playbackId || "");
+    const session = linuxPiperOffscreenSessions.get(playbackId);
+    if (!session) {
+      sendResponse({ accepted: false });
+      return false;
+    }
+
+    const event = message.event || {};
+    void chrome.tabs.sendMessage(session.tabId, {
+      type: "EDGE_TTS_PIPER_OFFSCREEN_EVENT",
+      playbackId,
+      event
+    }).catch(() => {});
+
+    if (["ended", "error", "stopped"].includes(String(event.type || ""))) {
+      linuxPiperOffscreenSessions.delete(playbackId);
+    }
+
+    sendResponse({ accepted: true });
+    return false;
+  }
+
+  if (message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PLAY") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ accepted: false, error: "Missing source tab for Piper playback." });
+      return false;
+    }
+
+    const playbackId = String(message.playbackId || "");
+    const audioChunks = Array.isArray(message.audioChunks) ? message.audioChunks : [];
+    if (!playbackId || !audioChunks.length) {
+      sendResponse({ accepted: false, error: "Missing Piper playback id or WAV data." });
+      return false;
+    }
+
+    stopLinuxPiperOffscreenForTab(tabId);
+    linuxPiperOffscreenSessions.set(playbackId, { tabId });
+
+    void sendLinuxPiperOffscreenCommand({
+      type: "EDGE_TTS_OFFSCREEN_PIPER_PLAY",
+      playbackId,
+      audioChunks,
+      playbackRate: Number(message.playbackRate) || 1,
+      volume: Number(message.volume)
+    })
+      .then((response) => {
+        if (!response?.accepted) {
+          linuxPiperOffscreenSessions.delete(playbackId);
+        }
+        sendResponse(response || { accepted: false });
+      })
+      .catch((error) => {
+        linuxPiperOffscreenSessions.delete(playbackId);
+        sendResponse({
+          accepted: false,
+          error: error?.message || String(error)
+        });
+      });
+    return true;
+  }
+
+  if (
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_RESUME" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_STOP" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_RATE" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_VOLUME"
+  ) {
+    const playbackId = String(message.playbackId || "");
+    const session = linuxPiperOffscreenSessions.get(playbackId);
+    if (!session || session.tabId !== tabId) {
+      sendResponse({ accepted: false, error: "No matching offscreen Piper playback." });
+      return false;
+    }
+
+    const internalType = String(message.type).replace(
+      "EDGE_TTS_PIPER_OFFSCREEN_",
+      "EDGE_TTS_OFFSCREEN_PIPER_"
+    );
+
+    void sendLinuxPiperOffscreenCommand({
+      ...message,
+      type: internalType
+    })
+      .then((response) => {
+        if (message.type === "EDGE_TTS_PIPER_OFFSCREEN_STOP") {
+          linuxPiperOffscreenSessions.delete(playbackId);
+        }
+        sendResponse(response || { accepted: true });
+      })
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
+  }
 
   if (message?.type === "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS") {
     void chrome.runtime.openOptionsPage();
@@ -574,6 +739,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   stopLocalTtsForTab(tabId);
   stopWinNaturalForTab(tabId);
   stopLinuxPiperForTab(tabId);
+  stopLinuxPiperOffscreenForTab(tabId);
   void queueAudioMutation(async () => {
     await loadAudioOwner();
     if (audioOwnerTabId === tabId) {
