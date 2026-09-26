@@ -11,6 +11,10 @@
   const createUtteranceChunks = speechModule?.createUtteranceChunks;
   const segmentIndexForCharIndex = root.EdgeTtsExtension?.TextModel?.segmentIndexForCharIndex;
   const PIPER_SYNTHESIS_TIMEOUT_MS = 20_000;
+  const PIPER_SOFT_CLAUSE_CHARS = 240;
+  const PIPER_HARD_CLAUSE_CHARS = 320;
+  const PIPER_SOFT_CLAUSE_WORDS = 38;
+  const PIPER_HARD_CLAUSE_WORDS = 52;
 
   function voiceKey(voice) {
     return `${String(voice?.name || "").toLocaleLowerCase()}\u0000${String(voice?.lang || "").toLocaleLowerCase()}`;
@@ -86,6 +90,98 @@
     return { text, starts, segments: [...segments] };
   }
 
+  function isPiperClauseBreak(segment) {
+    const text = String(segment?.text || "");
+    return /[,;:][\"'”’\)\]]*$/.test(text) ||
+      /[—–-][\"'”’\)\]]*$/.test(text);
+  }
+
+  function piperPayloadWithinHardLimit(payload) {
+    const wordCount = payload?.segments?.length || 0;
+    const charCount = String(payload?.text || "").length;
+    return (
+      charCount <= PIPER_HARD_CLAUSE_CHARS &&
+      wordCount <= PIPER_HARD_CLAUSE_WORDS
+    );
+  }
+
+  function piperPayloadWithinSoftLimit(payload) {
+    const wordCount = payload?.segments?.length || 0;
+    const charCount = String(payload?.text || "").length;
+    return (
+      charCount <= PIPER_SOFT_CLAUSE_CHARS &&
+      wordCount <= PIPER_SOFT_CLAUSE_WORDS
+    );
+  }
+
+  function splitPiperSentenceSegments(segments) {
+    if (!segments?.length) return [];
+
+    const whole = payloadForPiperSegments(segments);
+    if (piperPayloadWithinHardLimit(whole)) {
+      whole.sentenceFinal = true;
+      whole.emergencyClauseSplit = false;
+      return [whole];
+    }
+
+    const units = [];
+    let cursor = 0;
+
+    while (cursor < segments.length) {
+      let bestSoftBreak = -1;
+      let lastHardFit = cursor;
+      let probe = cursor;
+
+      for (; probe < segments.length; probe += 1) {
+        const candidate = payloadForPiperSegments(
+          segments.slice(cursor, probe + 1)
+        );
+
+        if (!piperPayloadWithinHardLimit(candidate)) {
+          break;
+        }
+
+        lastHardFit = probe;
+        if (
+          piperPayloadWithinSoftLimit(candidate) &&
+          isPiperClauseBreak(segments[probe])
+        ) {
+          bestSoftBreak = probe;
+        }
+      }
+
+      let endIndex;
+      if (probe >= segments.length) {
+        endIndex = segments.length - 1;
+      } else if (bestSoftBreak >= cursor) {
+        endIndex = bestSoftBreak;
+      } else {
+        // Prefer the most recent clause boundary that still fits under the hard
+        // ceiling, even when it lands beyond the soft target.
+        let clauseBreak = -1;
+        for (let index = lastHardFit; index >= cursor; index -= 1) {
+          if (isPiperClauseBreak(segments[index])) {
+            clauseBreak = index;
+            break;
+          }
+        }
+        endIndex = clauseBreak >= cursor ? clauseBreak : lastHardFit;
+      }
+
+      if (endIndex < cursor) endIndex = cursor;
+
+      const payload = payloadForPiperSegments(
+        segments.slice(cursor, endIndex + 1)
+      );
+      payload.sentenceFinal = endIndex === segments.length - 1;
+      payload.emergencyClauseSplit = true;
+      units.push(payload);
+      cursor = endIndex + 1;
+    }
+
+    return units;
+  }
+
   function createPiperSentenceChunks(block, startSegmentIndex = 0) {
     const remaining = Array.isArray(block?.segments)
       ? block.segments.slice(Math.max(0, Number(startSegmentIndex) || 0))
@@ -98,7 +194,12 @@
 
     const flush = () => {
       if (!current.length) return;
-      chunks.push(payloadForPiperSegments(current));
+      const sentenceChunks = splitPiperSentenceSegments(current);
+      for (const payload of sentenceChunks) {
+        if (payload?.text?.trim()) {
+          chunks.push(payload);
+        }
+      }
       current = [];
       currentKey = "";
     };
@@ -513,10 +614,14 @@
           return;
         }
 
-        const sentencePauseMs = Math.max(
-          0,
-          Number(this.currentOptions?.sentencePauseMs) || 0
-        );
+        const finishedPayload = prepared.payload;
+        const sentencePauseMs = finishedPayload?.sentenceFinal === false
+          ? 0
+          : Math.max(
+              0,
+              Number(this.currentOptions?.sentencePauseMs) || 0
+            );
+
         if (sentencePauseMs > 0) {
           this.onStatus?.(`Sentence pause ${sentencePauseMs} ms`);
           this.linuxPiperSentencePauseTimer = root.setTimeout(() => {
@@ -713,6 +818,9 @@
     mergeVoices,
     nativeVoiceToCatalogVoice,
     PIPER_SYNTHESIS_TIMEOUT_MS,
+    PIPER_SOFT_CLAUSE_CHARS,
+    PIPER_HARD_CLAUSE_CHARS,
+    splitPiperSentenceSegments,
     createPiperSentenceChunks,
     payloadForPiperSegments
   };
