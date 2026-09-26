@@ -53,3 +53,16 @@ test("options editor exposes all major Lantern Leaf rule classes plus preview", 
     assert.match(optionsHtml, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
 });
+
+
+test("pronunciation editor autosaves rule changes", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+  assert.match(optionsJs, /function scheduleAutosave\(\)/);
+  assert.match(optionsJs, /setTimeout\(async \(\) =>/);
+  assert.match(optionsJs, /Pronunciation\.saveConfig\(draft\)/);
+  assert.match(optionsJs, /Saved automatically\./);
+  assert.match(optionsJs, /function handleRuleChange\(\)/);
+});
