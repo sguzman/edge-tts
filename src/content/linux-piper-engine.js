@@ -10,6 +10,7 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const createUtteranceChunks = speechModule?.createUtteranceChunks;
   const segmentIndexForCharIndex = root.EdgeTtsExtension?.TextModel?.segmentIndexForCharIndex;
+  const pronunciation = root.EdgeTtsExtension?.Pronunciation;
   const PIPER_SYNTHESIS_TIMEOUT_MS = 20_000;
 
   function voiceKey(voice) {
@@ -74,6 +75,13 @@
   }
 
   function payloadForPiperSegments(segments) {
+    if (typeof pronunciation?.projectSegments === "function") {
+      return pronunciation.projectSegments(
+        segments,
+        separatorForPiperSegments
+      );
+    }
+
     const starts = [];
     let text = "";
     for (let index = 0; index < segments.length; index += 1) {
@@ -83,7 +91,7 @@
       starts.push(text.length);
       text += String(segments[index]?.text || "");
     }
-    return { text, starts, segments: [...segments] };
+    return { text, starts, segments: [...segments], transformations: [] };
   }
 
   function createPiperSentenceChunks(block, startSegmentIndex = 0) {
@@ -130,6 +138,7 @@
       this.linuxPiperVoiceListeners = new Set();
       this.linuxPiperVoicesLoaded = false;
       this.linuxPiperVoiceRequest = null;
+      this.linuxPiperPronunciationRequest = null;
 
       this.linuxPiperRequests = new Map();
       this.linuxPiperPrepared = new Map();
@@ -140,6 +149,23 @@
       this.linuxPiperPrefetchDepth = 2;
 
       void this.refreshLinuxPiperVoices();
+      void this.refreshPronunciationConfig();
+    }
+
+    refreshPronunciationConfig() {
+      if (this.linuxPiperPronunciationRequest) {
+        return this.linuxPiperPronunciationRequest;
+      }
+      if (typeof pronunciation?.loadConfig !== "function") {
+        return Promise.resolve(null);
+      }
+
+      this.linuxPiperPronunciationRequest = Promise.resolve(
+        pronunciation.loadConfig()
+      ).finally(() => {
+        this.linuxPiperPronunciationRequest = null;
+      });
+      return this.linuxPiperPronunciationRequest;
     }
 
     getVoices() {
