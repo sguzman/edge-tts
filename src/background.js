@@ -491,6 +491,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       type: "EDGE_TTS_OFFSCREEN_PIPER_PLAY",
       playbackId,
       audioChunks,
+      boundaryOffsets: Array.isArray(message.boundaryOffsets)
+        ? message.boundaryOffsets.map((value) =>
+            Math.max(0, Number(value) || 0)
+          )
+        : [],
       playbackRate: Number(message.playbackRate) || 1,
       volume: Number(message.volume)
     })
