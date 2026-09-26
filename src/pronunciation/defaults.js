@@ -17,6 +17,8 @@
 
   const DEFAULT_CONFIG = {
     schemaVersion: 1,
+    revision: 0,
+    savedAt: 0,
     enabled: true,
     normalization: {
       collapseWhitespace: true,
