@@ -15,7 +15,7 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 - Highlights the currently spoken word and sentence using Microsoft word timing metadata for direct audio, Web Speech boundary events, or `chrome.tts` word events for Windows-local fallback voices.
 - Adjacent short paragraphs are aggregated into a logical speech batch so the reader can plan continuous playback across paragraph boundaries.
 - The **Batch target** control is configurable from 400 to 2400 characters and persists with the other reader settings. The default is 1200 characters.
-- Pause/resume, stop, voice filtering, playback speed, volume, highlight colors, and auto-scroll live in a movable/minimizable toolbar.
+- Pause/resume, stop, voice filtering, playback speed, volume, highlight colors, auto-scroll, and a configurable **Piper sentence pause** live in a movable/minimizable toolbar. The sentence pause is inserted between finished sentence WAVs and never changes Piper synthesis/prosody.
 - Each tab keeps an independent reader session. The existing browser-audio ownership coordinator remains in place while the direct transport is validated.
 - Click-to-seek is optional and is **off by default**. When disabled, the extension does not install a page click listener.
 - Editable controls and rich-text editors are excluded without watching or mutating the page DOM.
@@ -40,7 +40,7 @@ The toolbar's **Voice class** filter can show all voices or any one backend clas
 
 A local voice already exposed by `speechSynthesis` keeps the existing Web Speech playback path. A local voice found only through `chrome.tts` is spoken by the extension-level Windows TTS backend; its start/word/end events are bridged back into the tab so the existing reader cursor and highlighter continue to work.
 
-Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices. Ryan High is warmed opportunistically as soon as the native host starts, and sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency.
+Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices. Ryan High is warmed opportunistically as soon as the native host starts, and sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency. If Chromium rejects the first asynchronously-created WAV because the original extension-click activation has expired, the reader now preserves the prepared audio and enters a recoverable **Ready — press Resume** state instead of reporting a false TTS crash.
 
 ## Direct Natural-voice audio
 
