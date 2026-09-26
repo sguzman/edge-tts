@@ -98,6 +98,8 @@
       this.audioOwner = false;
       this.audioClaimSerial = 0;
       this.lifecycleSerial = 0;
+      this.initialPiperRetryRemaining = 1;
+      this.sessionSpeechStarted = false;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -151,6 +153,8 @@
       this.enabled = true;
       this.stopped = false;
       this.paused = false;
+      this.initialPiperRetryRemaining = 1;
+      this.sessionSpeechStarted = false;
       this.toolbar.mount();
       this.toolbar.setStatus("Starting…");
 
@@ -643,6 +647,7 @@
 
     handleSpeechStart(latencyMs) {
       if (this.stopped || this.paused || !this.audioOwner) return;
+      this.sessionSpeechStarted = true;
       this.clearResumeWatchdog();
       this.toolbar.setStatus("Reading");
       console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
@@ -693,7 +698,46 @@
     handleError(error) {
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
+      const errorMessage = error?.message || String(error);
       console.error("Edge Natural TTS", error);
+
+      const shouldRetryInitialPiper =
+        isLinuxPiperVoice(this.selectedVoice) &&
+        !this.sessionSpeechStarted &&
+        this.initialPiperRetryRemaining > 0 &&
+        this.enabled &&
+        !this.quitRequested &&
+        this.audioOwner;
+
+      if (shouldRetryInitialPiper) {
+        this.initialPiperRetryRemaining -= 1;
+        try {
+          this.discardLocalSpeechState();
+        } catch (cancelError) {
+          console.warn("Could not retire failed Piper startup transport.", cancelError);
+        }
+
+        this.stopped = false;
+        this.paused = false;
+        this.toolbar.setStatus(
+          `Piper startup failed: ${errorMessage} · retrying once…`
+        );
+
+        window.setTimeout(() => {
+          if (
+            this.enabled &&
+            !this.quitRequested &&
+            !this.stopped &&
+            !this.paused &&
+            this.audioOwner &&
+            !this.sessionSpeechStarted
+          ) {
+            this.speakCurrentPosition();
+          }
+        }, 300);
+        return;
+      }
+
       this.stopped = true;
       this.discardLocalSpeechState();
       this.releaseAudioOwnership();
@@ -703,7 +747,7 @@
       // the real error afterwards so backend failures are never hidden behind
       // a generic transport label.
       this.toolbar.setStopped();
-      this.toolbar.setStatus(`Error: ${error?.message || String(error)}`);
+      this.toolbar.setStatus(`Error: ${errorMessage}`);
     }
 
     handlePlaybackBlocked(error) {
