@@ -24,7 +24,7 @@ const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
-const READER_SESSION_REVISION = 2;
+const READER_SESSION_REVISION = 3;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
