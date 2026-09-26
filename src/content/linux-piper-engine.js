@@ -54,6 +54,20 @@
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
 
+  function piperRatePlan(rate) {
+    const requested = Math.min(8, Math.max(0.5, Number(rate) || 1));
+
+    // Let Piper own a conservative amount of timing change so punctuation and
+    // phoneme durations remain model-driven. Browser playback handles only the
+    // residual needed for the wider 0.5x-8x UI range.
+    const nativeRate = Math.min(1.25, Math.max(0.85, requested));
+    return {
+      requestedRate: requested,
+      lengthScale: 1 / nativeRate,
+      playbackRate: requested / nativeRate
+    };
+  }
+
   function fromBase64(value) {
     const binary = root.atob(String(value || ""));
     const bytes = new Uint8Array(binary.length);
@@ -250,10 +264,9 @@
       this.currentChunkIndex = 0;
       this.currentOptions = options;
       this.requestedAt = root.performance?.now?.() ?? Date.now();
-      this.directPlaybackRate = Math.min(
-        16,
-        Math.max(0.25, Number(options.rate) || 1)
-      );
+      const ratePlan = piperRatePlan(options.rate);
+      this.linuxPiperLengthScale = ratePlan.lengthScale;
+      this.directPlaybackRate = ratePlan.playbackRate;
 
       const configuredVolume = Number(root.EdgeTtsExtension?.AudioControls?.currentVolume);
       this.directOutputGain = Number.isFinite(configuredVolume)
@@ -327,7 +340,8 @@
           requestId: request,
           text: payload.text,
           voiceId: this.currentOptions?.voice?.voiceId,
-          lang: this.currentOptions?.voice?.lang
+          lang: this.currentOptions?.voice?.lang,
+          lengthScale: this.linuxPiperLengthScale
         })
       )
         .then((response) => {
@@ -677,6 +691,7 @@
     nativeVoiceToCatalogVoice,
     PIPER_SYNTHESIS_TIMEOUT_MS,
     createPiperSentenceChunks,
-    payloadForPiperSegments
+    payloadForPiperSegments,
+    piperRatePlan
   };
 });
