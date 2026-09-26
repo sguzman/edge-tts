@@ -164,6 +164,10 @@
       config.normalization.dropNumericBracketCitations !== false;
     $("#drop-parenthetical-numeric-citations").checked =
       config.normalization.dropParentheticalNumericCitations !== false;
+    $("#drop-superscript-citations").checked =
+      config.normalization.dropSuperscriptCitations !== false;
+    $("#drop-word-suffix-footnotes").checked =
+      config.normalization.dropWordSuffixNumericFootnotes !== false;
     $("#drop-square-bracket-text").checked =
       config.normalization.dropSquareBracketText !== false;
     $("#drop-curly-brace-text").checked =
@@ -210,6 +214,10 @@
       $("#drop-numeric-bracket-citations").checked;
     next.normalization.dropParentheticalNumericCitations =
       $("#drop-parenthetical-numeric-citations").checked;
+    next.normalization.dropSuperscriptCitations =
+      $("#drop-superscript-citations").checked;
+    next.normalization.dropWordSuffixNumericFootnotes =
+      $("#drop-word-suffix-footnotes").checked;
     next.normalization.dropSquareBracketText = $("#drop-square-bracket-text").checked;
     next.normalization.dropCurlyBraceText = $("#drop-curly-brace-text").checked;
 
