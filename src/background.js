@@ -451,13 +451,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "EDGE_TTS_OFFSCREEN_PIPER_EVENT") {
     const playbackId = String(message.playbackId || "");
     const session = linuxPiperOffscreenSessions.get(playbackId);
-    if (!session) {
+    const eventTabId = Number(message.tabId);
+    const targetTabId = session?.tabId ??
+      (Number.isInteger(eventTabId) ? eventTabId : null);
+
+    if (!Number.isInteger(targetTabId)) {
       sendResponse({ accepted: false });
       return false;
     }
 
+    // Rehydrate in-memory routing after a service-worker restart. The offscreen
+    // audio document survives independently and carries its owning tab id.
+    if (!session) {
+      linuxPiperOffscreenSessions.set(playbackId, { tabId: targetTabId });
+    }
+
     const event = message.event || {};
-    void chrome.tabs.sendMessage(session.tabId, {
+    void chrome.tabs.sendMessage(targetTabId, {
       type: "EDGE_TTS_PIPER_OFFSCREEN_EVENT",
       playbackId,
       event
@@ -490,6 +500,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void sendLinuxPiperOffscreenCommand({
       type: "EDGE_TTS_OFFSCREEN_PIPER_PLAY",
       playbackId,
+      tabId,
       audioChunks,
       boundaryOffsets: Array.isArray(message.boundaryOffsets)
         ? message.boundaryOffsets.map((value) =>
@@ -523,11 +534,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     message?.type === "EDGE_TTS_PIPER_OFFSCREEN_VOLUME"
   ) {
     const playbackId = String(message.playbackId || "");
-    const session = linuxPiperOffscreenSessions.get(playbackId);
-    if (!session || session.tabId !== tabId) {
-      sendResponse({ accepted: false, error: "No matching offscreen Piper playback." });
+    if (!playbackId || !Number.isInteger(tabId)) {
+      sendResponse({
+        accepted: false,
+        error: "Missing Piper playback id or source tab."
+      });
       return false;
     }
+
+    // Do not require the volatile in-memory session map here. Chromium may
+    // restart the service worker while the offscreen document keeps a paused
+    // WAV alive. The offscreen document itself validates playbackId.
+    linuxPiperOffscreenSessions.set(playbackId, { tabId });
 
     const internalType = String(message.type).replace(
       "EDGE_TTS_PIPER_OFFSCREEN_",
@@ -536,6 +554,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     void sendLinuxPiperOffscreenCommand({
       ...message,
+      tabId,
       type: internalType
     })
       .then((response) => {
