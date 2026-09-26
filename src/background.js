@@ -172,9 +172,24 @@ function stopLinuxPiperForTab(tabId, requestId = null) {
     request.tabId === tabId && (!requestId || request.requestId === requestId)
   );
   if (!active) return false;
+
+  const [activeKey, activeRequest] = active;
+  linuxPiperRequests.delete(activeKey);
+
+  // The native helper exits on cancel because onnxruntime inference itself is
+  // not cooperatively cancellable. Forget/disconnect this port immediately so
+  // a click-to-seek or resume cannot race a new synthesis onto a dying helper.
+  const port = linuxPiperPort;
+  linuxPiperPort = null;
+  linuxPiperHandshake = null;
+
   try {
-    linuxPiperPort?.postMessage({ type: "cancel", requestId: active[1].requestId });
+    port?.postMessage({ type: "cancel", requestId: activeRequest.requestId });
   } catch (_error) {}
+  try {
+    port?.disconnect?.();
+  } catch (_error) {}
+
   return true;
 }
 
