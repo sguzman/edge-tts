@@ -695,8 +695,12 @@
       this.discardLocalSpeechState();
       this.releaseAudioOwnership();
       this.highlighter.clear();
-      this.toolbar.setStatus(error.message);
+
+      // setStopped() owns the button state but also writes "Stopped". Apply
+      // the real error afterwards so backend failures are never hidden behind
+      // a generic transport label.
       this.toolbar.setStopped();
+      this.toolbar.setStatus(`Error: ${error?.message || String(error)}`);
     }
 
     handlePlaybackBlocked(error) {
