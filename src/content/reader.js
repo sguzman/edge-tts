@@ -405,6 +405,7 @@
         this.paused = false;
         this.toolbar.setPaused(false);
         this.toolbar.setStatus("Resuming…");
+
         const granted = await this.claimAudioOwnership();
         if (
           lifecycle !== this.lifecycleSerial ||
@@ -415,25 +416,38 @@
           if (granted) this.releaseAudioOwnership();
           return;
         }
+
         if (granted) {
-          this.speakCurrentPosition();
+          if (this.speech?.resumeInPlace?.() === true) {
+            this.toolbar.setStatus("Reading");
+          } else {
+            this.speakCurrentPosition();
+          }
         } else {
           this.paused = true;
           this.toolbar.setPaused(true);
           this.toolbar.setStatus("Paused — audio unavailable");
         }
       } else {
-        // Pause is local state + transport cancellation. Commit the local state
-        // first so a slow or broken native helper can never hold the UI hostage.
         this.clearResumeWatchdog();
         this.paused = true;
         this.toolbar.setPaused(true);
         this.toolbar.setStatus("Paused");
         this.releaseAudioOwnership();
+
+        let pausedInPlace = false;
         try {
-          this.discardLocalSpeechState();
+          pausedInPlace = this.speech?.pauseInPlace?.() === true;
         } catch (error) {
-          console.warn("Edge Natural TTS transport failed while pausing.", error);
+          console.warn("Edge Natural TTS in-place pause failed.", error);
+        }
+
+        if (!pausedInPlace) {
+          try {
+            this.discardLocalSpeechState();
+          } catch (error) {
+            console.warn("Edge Natural TTS transport failed while pausing.", error);
+          }
         }
       }
     }
@@ -693,12 +707,41 @@
       event.preventDefault();
       event.stopImmediatePropagation();
 
+      const lifecycle = ++this.lifecycleSerial;
+      this.clearResumeWatchdog();
+
+      // A click-to-seek is a hard transport replacement, not a second request
+      // layered on top of the current sentence/prefetch pipeline.
+      try {
+        this.discardLocalSpeechState();
+      } catch (error) {
+        console.warn("Edge Natural TTS could not replace speech for click-to-seek.", error);
+      }
+
       this.currentBlockIndex = block.index;
       this.currentSegmentIndex = segment.segmentIndex;
       this.activeBatchEndBlockIndex = -1;
       this.stopped = false;
       this.paused = false;
-      if (await this.claimAudioOwnership()) {
+      this.highlighter.clear();
+
+      if (this.audioOwner) {
+        this.speakCurrentPosition();
+        return;
+      }
+
+      const granted = await this.claimAudioOwnership();
+      if (
+        lifecycle !== this.lifecycleSerial ||
+        this.stopped ||
+        this.paused ||
+        this.quitRequested
+      ) {
+        if (granted) this.releaseAudioOwnership();
+        return;
+      }
+
+      if (granted) {
         this.speakCurrentPosition();
       } else {
         this.paused = true;
