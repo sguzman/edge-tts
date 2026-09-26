@@ -59,6 +59,56 @@
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
 
+  function punctuationPauseWeight(token) {
+    const text = String(token || "");
+    if (/[.!?]["'”’\)\]]*$/.test(text)) return 5;
+    if (/[;:]["'”’\)\]]*$/.test(text)) return 3.5;
+    if (/[,]["'”’\)\]]*$/.test(text)) return 2.25;
+    if (/[—–-]["'”’\)\]]*$/.test(text)) return 1.25;
+    return 0;
+  }
+
+  function approximatePiperBoundaries(payload, durationMs) {
+    const text = String(payload?.text || "");
+    const duration = Math.max(0, Number(durationMs) || 0);
+    if (!text || duration <= 0) return [];
+
+    const matches = [...text.matchAll(/\S+/g)];
+    if (!matches.length) return [];
+
+    const weights = matches.map((match) => {
+      const lexical = String(match[0] || "").replace(/[^\p{L}\p{N}]+/gu, "");
+      const lexicalWeight = Math.max(
+        1,
+        Math.pow([...lexical].length || 1, 0.9)
+      );
+      return lexicalWeight + punctuationPauseWeight(match[0]);
+    });
+    const total = Math.max(
+      1,
+      weights.reduce((sum, weight) => sum + weight, 0)
+    );
+
+    let cursorMs = 0;
+    return matches.map((match, index) => {
+      const spanMs = duration * (weights[index] / total);
+      const charIndex = Number(match.index) || 0;
+      const segmentIndex =
+        typeof segmentIndexForCharIndex === "function"
+          ? segmentIndexForCharIndex(payload.starts || [], charIndex)
+          : 0;
+
+      const boundary = {
+        segment: payload.segments?.[Math.max(0, segmentIndex)],
+        offsetSeconds: cursorMs / 1000,
+        durationSeconds: spanMs / 1000,
+        text: match[0]
+      };
+      cursorMs += spanMs;
+      return boundary;
+    });
+  }
+
 
   function fromBase64(value) {
     const binary = root.atob(String(value || ""));
@@ -727,6 +777,10 @@
     }
 
     _preparedLinuxPiperBoundaries(prepared) {
+      if (prepared?.boundariesArePrepared) {
+        return [...(prepared.boundaries || [])];
+      }
+
       const payload = prepared.payload;
       return prepared.boundaries.map((boundary) => {
         const charIndex = Math.max(0, Number(boundary.charIndex) || 0);
@@ -883,6 +937,9 @@
         type: "EDGE_TTS_PIPER_OFFSCREEN_PLAY",
         playbackId,
         audioChunks: prepared.audioBase64,
+        boundaryOffsets: this.directBoundaries.map(
+          (boundary) => Math.max(0, Number(boundary.offsetSeconds) || 0)
+        ),
         playbackRate: this.directPlaybackRate,
         volume: Math.min(
           1,
@@ -947,10 +1004,43 @@
             )
           );
           this._fillLinuxPiperPrefetch(this.generation);
+
+          // Defensive fallback: even if a backend returned no word boundaries,
+          // never start audible speech with no visible highlight at all.
+          if (
+            this.directBoundaries.length === 0 &&
+            playback.prepared?.payload?.segments?.[0]
+          ) {
+            this.onBoundary?.(
+              playback.prepared.payload.segments[0],
+              {
+                type: "linux-piper-boundary-fallback",
+                directAudio: true,
+                audioOffset: 0,
+                duration: 0,
+                spokenText: ""
+              }
+            );
+          }
         }
 
-        this._startLinuxPiperBoundaryClock(this.generation);
         this.onStatus?.("Reading");
+        return true;
+      }
+
+      if (event.type === "boundary") {
+        const index = Math.max(0, Number(event.index) || 0);
+        const boundary = this.directBoundaries[index];
+        if (boundary?.segment) {
+          this.currentChunkBoundaryIndex = index;
+          this.onBoundary?.(boundary.segment, {
+            type: "linux-piper-offscreen-boundary",
+            directAudio: true,
+            audioOffset: boundary.offsetSeconds,
+            duration: boundary.durationSeconds,
+            spokenText: boundary.text
+          });
+        }
         return true;
       }
 
@@ -1209,13 +1299,22 @@
       this.linuxPiperRequests.delete(request.requestId);
       if (this.linuxPiperRequest === request) this.linuxPiperRequest = null;
 
+      const improvedBoundaries = approximatePiperBoundaries(
+        request.payload,
+        event.durationMs
+      );
+
       const prepared = {
         generation: request.generation,
         chunkIndex: request.chunkIndex,
         payload: request.payload,
         audio: request.audio,
         audioBase64: request.audioBase64,
-        boundaries: request.boundaries,
+        boundaries:
+          improvedBoundaries.length > 0
+            ? improvedBoundaries
+            : request.boundaries,
+        boundariesArePrepared: improvedBoundaries.length > 0,
         prefetch: request.prefetch
       };
       this.linuxPiperPrepared.set(request.chunkIndex, prepared);
@@ -1293,6 +1392,7 @@
     PIPER_SOFT_CLAUSE_CHARS,
     PIPER_HARD_CLAUSE_CHARS,
     splitPiperSentenceSegments,
+    approximatePiperBoundaries,
     createPiperSentenceChunks,
     payloadForPiperSegments
   };
