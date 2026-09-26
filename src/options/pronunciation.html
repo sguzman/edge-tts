@@ -51,6 +51,16 @@
       <div id="last-piper-meta" class="muted"></div>
     </section>
 
+    <section class="card">
+      <div class="section-heading">
+        <h2>Last Piper failure</h2>
+        <button id="copy-piper-diagnostics" type="button">Copy diagnostics</button>
+      </div>
+      <p>This captures the exact failure message and the chunk that was active when playback/synthesis failed.</p>
+      <textarea id="last-piper-failure" rows="7" readonly placeholder="No Piper failure observed in this extension session yet."></textarea>
+      <div id="last-piper-failure-meta" class="muted"></div>
+    </section>
+
     <section class="card preview-card">
       <h2>Live preview</h2>
       <label for="preview-source">Source text</label>
