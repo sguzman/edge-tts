@@ -131,7 +131,15 @@
   }
 
   async function saveConfig(value) {
-    currentConfig = normalizeConfig(value);
+    const next = normalizeConfig(value);
+    const previousRevision = Math.max(
+      Number(currentConfig?.revision) || 0,
+      Number(value?.revision) || 0
+    );
+    next.revision = previousRevision + 1;
+    next.savedAt = Date.now();
+    currentConfig = next;
+
     if (root.chrome?.storage?.local?.set) {
       await root.chrome.storage.local.set({ [STORAGE_KEY]: currentConfig });
     }
@@ -796,7 +804,9 @@
       text: normalizedText,
       starts,
       segments: projectedSegments,
-      transformations
+      transformations,
+      configRevision: Number(cfg.revision) || 0,
+      configSavedAt: Number(cfg.savedAt) || 0
     };
   }
 
