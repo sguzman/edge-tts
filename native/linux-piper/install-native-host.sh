@@ -93,6 +93,12 @@ PY
 
 install -m 0644 "$SOURCE_HOST" "$HOST_PY"
 
+PREFERRED_VOICE_ID="en_US-ryan-high"
+if [[ -f "$VOICE_DIR/$PREFERRED_VOICE_ID.onnx" && -f "$VOICE_DIR/$PREFERRED_VOICE_ID.onnx.json" ]]; then
+  echo "Running private Piper voice self-test for $PREFERRED_VOICE_ID..."
+  EDGE_TTS_PIPER_VOICE_DIR="$VOICE_DIR" CUDA_VISIBLE_DEVICES=""     "$VENV_DIR/bin/python" "$HOST_PY" --self-test "$PREFERRED_VOICE_ID"
+fi
+
 cat > "$HOST_LAUNCHER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
