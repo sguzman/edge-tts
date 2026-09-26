@@ -39,6 +39,33 @@
     element.className = kind;
   }
 
+  const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
+
+  function renderLastPiperRequest(trace) {
+    const textArea = $("#last-piper-request");
+    const meta = $("#last-piper-meta");
+    if (!textArea || !meta) return;
+
+    textArea.value = trace?.text || "";
+    if (!trace?.at) {
+      meta.textContent = "No Piper request observed in this extension session yet.";
+      return;
+    }
+
+    const when = new Date(trace.at);
+    const voice = trace.voiceId ? ` · ${trace.voiceId}` : "";
+    meta.textContent = `${when.toLocaleTimeString()}${voice}`;
+  }
+
+  async function loadLastPiperRequest() {
+    try {
+      const stored = await chrome.storage.session.get(PIPER_TRACE_STORAGE_KEY);
+      renderLastPiperRequest(stored?.[PIPER_TRACE_STORAGE_KEY]);
+    } catch (_error) {
+      renderLastPiperRequest(null);
+    }
+  }
+
   function mapRows(path) {
     return [...document.querySelectorAll(`[data-map="${path}"] tbody tr`)];
   }
@@ -407,6 +434,13 @@
     element.addEventListener("input", handleRuleChange);
     element.addEventListener("change", handleRuleChange);
   }
+
+  chrome.storage.onChanged.addListener((changes, areaName) => {
+    if (areaName !== "session" || !changes?.[PIPER_TRACE_STORAGE_KEY]) return;
+    renderLastPiperRequest(changes[PIPER_TRACE_STORAGE_KEY].newValue);
+  });
+
+  void loadLastPiperRequest();
 
   Pronunciation.loadConfig({ force: true })
     .then((loaded) => {
