@@ -167,10 +167,10 @@
         return;
       }
       this.applySettings();
-      this.rebuildModel();
 
-      // Linux development branch: resolve both the app-private Piper catalog
-      // and pronunciation projection before the first speech request.
+      // Sentence boundaries and Piper speech projection both depend on the
+      // persisted pronunciation config. Load it before building the readable
+      // model so the base startup path matches the optimized fast path.
       await Promise.all([
         this.speech.refreshLinuxPiperVoices?.() || Promise.resolve(),
         this.speech.refreshPronunciationConfig?.() || Promise.resolve()
@@ -184,6 +184,8 @@
       ) {
         return;
       }
+
+      this.rebuildModel();
       this.refreshVoices();
       if (!this.voices.some((voice) =>
         isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
