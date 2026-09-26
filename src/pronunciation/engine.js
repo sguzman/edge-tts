@@ -336,7 +336,7 @@
 
   function transformToken(input, config = currentConfig) {
     const transformations = [];
-    const cfg = normalizeConfig(config);
+    const cfg = config || currentConfig;
 
     if (!cfg.enabled) {
       return { spokenText: String(input || ""), transformations };
@@ -370,6 +370,16 @@
       /^\(\d+\)[.,;:!?]?$/.test(text)
     ) {
       text = recordTransform(transformations, "drop", "parenthetical-numeric-citation", text, "");
+    }
+
+    if (text && cfg.normalization?.dropSuperscriptCitations) {
+      next = text.replace(/[⁰¹²³⁴⁵⁶⁷⁸⁹]+/g, "");
+      text = recordTransform(transformations, "drop", "superscript-citation", text, next);
+    }
+
+    if (text && cfg.normalization?.dropWordSuffixNumericFootnotes) {
+      next = text.replace(/(\p{L})\d{1,3}\b/gu, "$1");
+      text = recordTransform(transformations, "drop", "word-suffix-footnote", text, next);
     }
 
     if (
@@ -480,6 +490,7 @@
   }
 
   function projectSegments(segments, separatorForSegments, config = currentConfig) {
+    const cfg = config === currentConfig ? currentConfig : normalizeConfig(config);
     const projectedSegments = [];
     const starts = [];
     const transformations = [];
@@ -487,7 +498,7 @@
     let previousSourceSegment = null;
 
     for (const segment of segments || []) {
-      const result = transformToken(segment?.text || "", config);
+      const result = transformToken(segment?.text || "", cfg);
       if (!result.spokenText) continue;
 
       if (projectedSegments.length > 0) {
@@ -512,8 +523,37 @@
       previousSourceSegment = segment;
     }
 
+    const normalizedText = text.trim();
+    const minimumChars = Math.max(
+      0,
+      Number(cfg.normalization?.minSentenceChars) || 0
+    );
+    const hasRequiredContent =
+      cfg.normalization?.requireAlphanumeric === false ||
+      /[\p{L}\p{N}]/u.test(normalizedText);
+
+    if (
+      !hasRequiredContent ||
+      (minimumChars > 0 && normalizedText.length < minimumChars)
+    ) {
+      return {
+        text: "",
+        starts: [],
+        segments: [],
+        transformations: [
+          ...transformations,
+          {
+            ruleClass: "drop",
+            ruleId: "sentence-content-filter",
+            sourceText: text,
+            spokenText: ""
+          }
+        ]
+      };
+    }
+
     return {
-      text,
+      text: normalizedText,
       starts,
       segments: projectedSegments,
       transformations
