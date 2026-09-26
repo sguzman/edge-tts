@@ -34,7 +34,7 @@
   const DEFAULT_BATCH_CHARS = 1200;
 
   const DEFAULT_SETTINGS = {
-    settingsVersion: 2,
+    settingsVersion: 3,
     rate: 1,
     voiceName: "",
     minBatchChars: DEFAULT_BATCH_CHARS,
@@ -791,11 +791,15 @@
       try {
         const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
         const toolbarPosition = stored.toolbarPosition;
-        const requiresSafetyMigration = Number(stored.settingsVersion || 0) < 2;
+        const storedSettingsVersion = Number(stored.settingsVersion || 0);
+        const requiresSafetyMigration = storedSettingsVersion < 2;
+        const requiresRyanDefaultMigration = storedSettingsVersion < 3;
         this.settings = {
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
-          voiceName: stored.voiceName || "",
+          voiceName: requiresRyanDefaultMigration
+            ? "Ryan High"
+            : (stored.voiceName || "Ryan High"),
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
@@ -810,10 +814,13 @@
               : null
         };
 
-        if (requiresSafetyMigration) {
+        if (requiresSafetyMigration || requiresRyanDefaultMigration) {
           await chrome.storage.local.set({
             settingsVersion: DEFAULT_SETTINGS.settingsVersion,
-            clickToSeek: false
+            clickToSeek: requiresSafetyMigration ? false : this.settings.clickToSeek,
+            voiceName: requiresRyanDefaultMigration
+              ? "Ryan High"
+              : this.settings.voiceName
           });
         }
       } catch (error) {
