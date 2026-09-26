@@ -227,14 +227,20 @@ def approximate_boundaries(text: str, duration_ms: float) -> list[dict[str, Any]
     return boundaries
 
 
-def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threading.Event) -> None:
+def synthesize_worker(
+    request_id: str,
+    voice_id: str,
+    text: str,
+    length_scale: float,
+    cancel: threading.Event,
+) -> None:
     global _active_request_id, _active_cancel, _active_thread
 
     try:
         send_message({"type": "status", "requestId": request_id, "status": "Loading Piper model..."})
         voice = get_voice(voice_id)
         send_message({"type": "status", "requestId": request_id, "status": "Synthesizing with Piper..."})
-        config = SynthesisConfig(length_scale=1.0)
+        config = SynthesisConfig(length_scale=length_scale)
         pcm = bytearray()
         sample_rate: int | None = None
         sample_width: int | None = None
@@ -321,6 +327,12 @@ def start_synthesis(message: dict[str, Any]) -> None:
     request_id = str(message.get("requestId") or "")
     voice_id = str(message.get("voiceId") or "")
     text = str(message.get("text") or "")
+    try:
+        length_scale = float(message.get("lengthScale") or 1.0)
+    except (TypeError, ValueError):
+        length_scale = 1.0
+    length_scale = min(1.25, max(0.8, length_scale))
+
     if not request_id or not voice_id or not text:
         send_message({"type": "error", "requestId": request_id, "message": "Missing requestId, voiceId, or text"})
         return
@@ -339,7 +351,7 @@ def start_synthesis(message: dict[str, Any]) -> None:
         cancel = threading.Event()
         thread = threading.Thread(
             target=synthesize_worker,
-            args=(request_id, voice_id, text, cancel),
+            args=(request_id, voice_id, text, length_scale, cancel),
             name=f"piper-{request_id}",
             daemon=True,
         )
