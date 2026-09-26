@@ -105,10 +105,6 @@
         )
       );
 
-      const modelStartedAt = now();
-      this.rebuildModel();
-      trace.modelMs = now() - modelStartedAt;
-
       await Promise.all([
         settingsReady,
         extensionVoicesReady,
@@ -119,6 +115,13 @@
         trace.active = false;
         return;
       }
+
+      // Sentence boundaries are pronunciation-config aware on the Piper branch.
+      // Never build the readable model against defaults and load the user's
+      // saved abbreviation rules afterwards.
+      const modelStartedAt = now();
+      this.rebuildModel();
+      trace.modelMs = now() - modelStartedAt;
 
       this.applySettings();
       this.refreshVoices();
