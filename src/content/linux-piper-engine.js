@@ -368,8 +368,6 @@
         this.linuxPiperPlaybackIndex !== this.currentChunkIndex
       ) {
         this._failLinuxPiper(message);
-      } else {
-        root.setTimeout(() => this._fillLinuxPiperPrefetch(this.generation), 0);
       }
     }
 
