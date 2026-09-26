@@ -3,6 +3,8 @@
   let playbackId = "";
   let objectUrl = "";
   let tickTimer = null;
+  let boundaryOffsets = [];
+  let boundaryIndex = 0;
 
   audio.preservesPitch = true;
   if ("webkitPreservesPitch" in audio) {
@@ -39,12 +41,20 @@
     clearTick();
     tickTimer = setInterval(() => {
       if (!playbackId || audio.paused || audio.ended) return;
-      send({
-        type: "time",
-        currentTime: Number(audio.currentTime) || 0,
-        duration: Number(audio.duration) || 0
-      });
-    }, 50);
+
+      const currentTime = Math.max(0, Number(audio.currentTime) || 0);
+      while (
+        boundaryIndex < boundaryOffsets.length &&
+        boundaryOffsets[boundaryIndex] <= currentTime + 0.02
+      ) {
+        send({
+          type: "boundary",
+          index: boundaryIndex,
+          currentTime
+        });
+        boundaryIndex += 1;
+      }
+    }, 20);
   }
 
   function stopCurrent({ emit = false } = {}) {
@@ -61,6 +71,8 @@
 
     revokeUrl();
     playbackId = "";
+    boundaryOffsets = [];
+    boundaryIndex = 0;
 
     if (emit && previousId) {
       try {
@@ -96,6 +108,12 @@
     if (!chunks.length) {
       throw new Error("No Piper WAV data was supplied to offscreen playback.");
     }
+    boundaryOffsets = (Array.isArray(message.boundaryOffsets)
+      ? message.boundaryOffsets
+      : []
+    )
+      .map((value) => Math.max(0, Number(value) || 0));
+    boundaryIndex = 0;
 
     const blob = new Blob(chunks, { type: "audio/wav" });
     objectUrl = URL.createObjectURL(blob);
