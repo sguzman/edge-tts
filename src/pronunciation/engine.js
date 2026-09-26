@@ -270,18 +270,18 @@
 
     if (!looksLikeFilesystemPath(text)) return value;
 
-    let prefix = "";
+    let rootLabel = "";
     if (text.startsWith("~/")) {
-      prefix = "home directory slash ";
+      rootLabel = "home directory";
       text = text.slice(2);
     } else if (text.startsWith("../")) {
-      prefix = "parent directory slash ";
+      rootLabel = "parent directory";
       text = text.slice(3);
     } else if (text.startsWith("./")) {
-      prefix = "current directory slash ";
+      rootLabel = "current directory";
       text = text.slice(2);
     } else if (text.startsWith("/")) {
-      prefix = "root slash ";
+      rootLabel = "root";
       text = text.slice(1);
     }
 
@@ -290,6 +290,9 @@
     const dot = words["."] || "dot";
     const underscore = words["_"] || "underscore";
     const dash = words["-"] || "dash";
+    const separator = technical?.pauseBetweenPathComponents === false
+      ? ` ${slash} `
+      : `, ${slash}, `;
 
     const components = text.split("/").map((component) => {
       if (!component) return "";
@@ -306,13 +309,21 @@
         .replace(/\s+/g, " ")
         .trim();
       return spoken;
-    });
+    }).filter(Boolean);
 
-    return (
-      prefix +
-      components.filter(Boolean).join(` ${slash} `) +
-      (trailing ? ` ${trailing}` : "")
-    ).trim();
+    const parts = [];
+    if (rootLabel) parts.push(rootLabel);
+    if (components.length > 0) {
+      if (parts.length > 0) {
+        parts.push(components.join(separator));
+      } else {
+        parts.push(components.join(separator));
+      }
+    }
+
+    let spokenPath = parts.join(rootLabel ? separator : "");
+    if (trailing) spokenPath += ` ${trailing}`;
+    return spokenPath.trim();
   }
 
   function expandShellFlag(value) {
