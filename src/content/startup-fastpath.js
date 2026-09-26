@@ -40,6 +40,7 @@
     const firstBlockNearViewport = textModel?.firstBlockNearViewport;
     const isNaturalVoice = speechModule?.isNaturalVoice;
     const isWinNaturalVoice = (voice) => voice?.__edgeTtsSource === "win-natural";
+    const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
     const originalHandleSpeechStart = prototype.handleSpeechStart;
 
     if (typeof firstBlockNearViewport !== "function" || typeof isNaturalVoice !== "function") {
@@ -80,18 +81,35 @@
       // the toolbar whenever the native catalog arrives.
       const settingsReady = this.loadSettings();
       const extensionVoicesReady = this.speech.refreshExtensionVoices?.() || Promise.resolve();
+
+      // Piper is a first-class startup backend on Linux. Unlike optional
+      // Windows Natural discovery, its catalog must settle before the initial
+      // voice choice when Ryan is the saved/default voice; otherwise the first
+      // auto-start races discovery and can stall until Stop -> Play.
+      const linuxPiperVoicesReady =
+        this.speech.refreshLinuxPiperVoices?.() || Promise.resolve();
+
       const winNaturalVoicesReady = this.speech.refreshWinNaturalVoices?.() || Promise.resolve();
       Promise.resolve(winNaturalVoicesReady).catch(() => {});
+
       const naturalVoicesReady = this.speech.waitForVoices(
         350,
-        (voices) => voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))
+        (voices) => voices.some((voice) =>
+          isNaturalVoice(voice) ||
+          isWinNaturalVoice(voice) ||
+          isLinuxPiperVoice(voice)
+        )
       );
 
       const modelStartedAt = now();
       this.rebuildModel();
       trace.modelMs = now() - modelStartedAt;
 
-      await Promise.all([settingsReady, extensionVoicesReady]);
+      await Promise.all([
+        settingsReady,
+        extensionVoicesReady,
+        linuxPiperVoicesReady
+      ]);
       if (!this.enabled || this.quitRequested) {
         trace.active = false;
         return;
@@ -100,8 +118,12 @@
       this.applySettings();
       this.refreshVoices();
 
-      if (!this.voices.some((voice) => isNaturalVoice(voice) || isWinNaturalVoice(voice))) {
-        this.toolbar.setStatus("Loading Natural voice…");
+      if (!this.voices.some((voice) =>
+        isNaturalVoice(voice) ||
+        isWinNaturalVoice(voice) ||
+        isLinuxPiperVoice(voice)
+      )) {
+        this.toolbar.setStatus("Loading voice…");
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
         trace.extraVoiceWaitMs = now() - voiceWaitStartedAt;
