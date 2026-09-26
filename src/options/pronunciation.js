@@ -154,6 +154,9 @@
     $("#brand-map-enabled").checked = config.pronunciation.enableBrandMap !== false;
     $("#year-mode").value = config.pronunciation.yearMode || "american";
     $("#insert-and").checked = config.pronunciation.insertAnd === true;
+    $("#number-separator").value = config.pronunciation.numberSeparator ?? " ";
+    $("#min-sentence-chars").value = String(config.normalization.minSentenceChars ?? 2);
+    $("#require-alphanumeric").checked = config.normalization.requireAlphanumeric !== false;
 
     $("#collapse-whitespace").checked = config.normalization.collapseWhitespace !== false;
     $("#remove-space-before-punctuation").checked =
@@ -204,6 +207,12 @@
     next.pronunciation.enableBrandMap = $("#brand-map-enabled").checked;
     next.pronunciation.yearMode = $("#year-mode").value;
     next.pronunciation.insertAnd = $("#insert-and").checked;
+    next.pronunciation.numberSeparator = $("#number-separator").value;
+    next.normalization.minSentenceChars = Math.max(
+      0,
+      Number($("#min-sentence-chars").value) || 0
+    );
+    next.normalization.requireAlphanumeric = $("#require-alphanumeric").checked;
 
     next.normalization.collapseWhitespace = $("#collapse-whitespace").checked;
     next.normalization.removeSpaceBeforePunctuation =
