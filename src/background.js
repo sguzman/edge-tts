@@ -493,6 +493,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
+    // If this tab already has native Piper work in flight (for example a
+    // prefetch while the user click-seeks), retire that helper before starting
+    // the replacement request. This makes seek authoritative regardless of
+    // message ordering from the content script.
+    stopLinuxPiperForTab(tabId);
+
     void ensureLinuxPiperPort()
       .then((port) => {
         linuxPiperRequests.set(requestId, {
