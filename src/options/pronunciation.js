@@ -40,8 +40,12 @@
   }
 
   const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
+  const PIPER_FAILURE_STORAGE_KEY = "edgeTtsLastPiperFailureV1";
+  let lastPiperRequest = null;
+  let lastPiperFailure = null;
 
   function renderLastPiperRequest(trace) {
+    lastPiperRequest = trace || null;
     const textArea = $("#last-piper-request");
     const meta = $("#last-piper-meta");
     if (!textArea || !meta) return;
@@ -63,6 +67,57 @@
       renderLastPiperRequest(stored?.[PIPER_TRACE_STORAGE_KEY]);
     } catch (_error) {
       renderLastPiperRequest(null);
+    }
+  }
+
+  function renderLastPiperFailure(failure) {
+    lastPiperFailure = failure || null;
+    const textArea = $("#last-piper-failure");
+    const meta = $("#last-piper-failure-meta");
+    if (!textArea || !meta) return;
+
+    if (!failure) {
+      textArea.value = "";
+      meta.textContent = "No Piper failure observed in this extension session yet.";
+      return;
+    }
+
+    textArea.value = [
+      failure.message || "Unknown Piper failure",
+      "",
+      `chunkIndex: ${failure.chunkIndex ?? "?"}`,
+      `textLength: ${failure.textLength ?? "?"}`,
+      `playbackIndex: ${failure.playbackIndex ?? "?"}`,
+      `preparedChunks: ${failure.preparedChunks ?? "?"}`,
+      `activeRequests: ${failure.activeRequests ?? "?"}`,
+      "",
+      failure.text || ""
+    ].join("\n");
+
+    meta.textContent = failure.at
+      ? new Date(failure.at).toLocaleTimeString()
+      : "";
+  }
+
+  async function loadLastPiperFailure() {
+    try {
+      const stored = await chrome.storage.session.get(PIPER_FAILURE_STORAGE_KEY);
+      renderLastPiperFailure(stored?.[PIPER_FAILURE_STORAGE_KEY]);
+    } catch (_error) {
+      renderLastPiperFailure(null);
+    }
+  }
+
+  async function copyPiperDiagnostics() {
+    const payload = {
+      request: lastPiperRequest,
+      failure: lastPiperFailure
+    };
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
+      setStatus("Copied Piper diagnostics.", "ok");
+    } catch (error) {
+      setStatus(`Could not copy diagnostics: ${error.message}`, "error");
     }
   }
 
@@ -430,6 +485,7 @@
   $("#reset").addEventListener("click", reset);
   $("#load-json").addEventListener("click", loadRawJson);
   $("#copy-json").addEventListener("click", copyRawJson);
+  $("#copy-piper-diagnostics").addEventListener("click", copyPiperDiagnostics);
   $("#preview-source").addEventListener("input", updatePreview);
 
   for (const element of document.querySelectorAll(
@@ -440,11 +496,17 @@
   }
 
   chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== "session" || !changes?.[PIPER_TRACE_STORAGE_KEY]) return;
-    renderLastPiperRequest(changes[PIPER_TRACE_STORAGE_KEY].newValue);
+    if (areaName !== "session") return;
+    if (changes?.[PIPER_TRACE_STORAGE_KEY]) {
+      renderLastPiperRequest(changes[PIPER_TRACE_STORAGE_KEY].newValue);
+    }
+    if (changes?.[PIPER_FAILURE_STORAGE_KEY]) {
+      renderLastPiperFailure(changes[PIPER_FAILURE_STORAGE_KEY].newValue);
+    }
   });
 
   void loadLastPiperRequest();
+  void loadLastPiperFailure();
 
   Pronunciation.loadConfig({ force: true })
     .then((loaded) => {
