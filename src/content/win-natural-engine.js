@@ -136,7 +136,13 @@
       return true;
     }
     cancel() { if (this.directSessionMode) { try { root.chrome?.runtime?.sendMessage?.({ type: "EDGE_TTS_WIN_NATURAL_STOP", requestId: this.winNaturalRequest?.requestId || null }); } catch (_error) {} this.winNaturalRequest = null; } return super.cancel?.(); }
-    abandon() { return this.cancel(); }
+    abandon() {
+      // Do not call this.cancel() from abandon(): ReliableSpeechEngine can
+      // invoke abandon() while canceling an idle engine, and virtual dispatch
+      // would recurse through the wrapper chain.
+      this.winNaturalRequest = null;
+      return super.abandon?.();
+    }
   }
   return { WinNaturalSpeechEngine, isWinNaturalVoice, mergeVoices, nativeVoiceToCatalogVoice };
 });
