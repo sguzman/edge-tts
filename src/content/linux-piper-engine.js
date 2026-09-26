@@ -440,6 +440,14 @@
       return super.setPlaybackRate?.(rate) ?? false;
     }
 
+    setSentencePauseMs(ms) {
+      const value = Math.max(0, Math.min(1200, Number(ms) || 0));
+      if (this.currentOptions) {
+        this.currentOptions.sentencePauseMs = value;
+      }
+      return value;
+    }
+
     setOutputVolume(volume) {
       if (this.directSessionMode && this._hasLinuxPiperOffscreenPlayback()) {
         this.directOutputGain = Math.min(
@@ -929,24 +937,11 @@
         return;
       }
 
-      const finishedPayload = prepared.payload;
-      const sentencePauseMs = finishedPayload?.sentenceFinal === false
-        ? 0
-        : Math.max(
-            0,
-            Number(this.currentOptions?.sentencePauseMs) || 0
-          );
-
-      if (sentencePauseMs > 0) {
-        this.onStatus?.(`Sentence pause ${sentencePauseMs} ms`);
-        this.linuxPiperSentencePauseTimer = root.setTimeout(() => {
-          this.linuxPiperSentencePauseTimer = null;
-          if (activeGeneration !== this.generation) return;
-          this._speakLinuxPiperChunk(activeGeneration);
-        }, sentencePauseMs);
-      } else {
-        this._speakLinuxPiperChunk(activeGeneration);
-      }
+      // The extension-owned audio document now owns the inter-sentence
+      // wall-clock pause and emits "ended" only after that gap. Continue
+      // immediately here so background-tab throttling cannot collapse or
+      // stretch the configured sentence pause.
+      this._speakLinuxPiperChunk(activeGeneration);
     }
 
     _playLinuxPiperPreparedOffscreen(generation, prepared, reason) {
@@ -996,6 +991,12 @@
         boundaryOffsets: this.directBoundaries.map(
           (boundary) => Math.max(0, Number(boundary.offsetSeconds) || 0)
         ),
+        sentencePauseMs: prepared.payload?.sentenceFinal === false
+          ? 0
+          : Math.max(
+              0,
+              Number(this.currentOptions?.sentencePauseMs) || 0
+            ),
         playbackRate: this.directPlaybackRate,
         volume: Math.min(
           1,
