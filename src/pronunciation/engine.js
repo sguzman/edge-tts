@@ -60,8 +60,49 @@
     return result;
   }
 
+  const REPLACE_MAP_PATHS = [
+    ["technical", "pathWords"],
+    ["abbreviations", "case"],
+    ["abbreviations", "nocase"],
+    ["acronyms", "letterSounds"],
+    ["pronunciation", "brandMap"],
+    ["pronunciation", "customPronunciations"],
+    ["normalization", "replacements"]
+  ];
+
+  function objectAtPath(object, path) {
+    let cursor = object;
+    for (const key of path) {
+      if (!isPlainObject(cursor) || !(key in cursor)) return undefined;
+      cursor = cursor[key];
+    }
+    return cursor;
+  }
+
+  function setObjectAtPath(object, path, value) {
+    let cursor = object;
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const key = path[index];
+      if (!isPlainObject(cursor[key])) cursor[key] = {};
+      cursor = cursor[key];
+    }
+    cursor[path.at(-1)] = clone(value);
+  }
+
   function normalizeConfig(value) {
-    return mergeConfig(cloneDefaults(), value);
+    const normalized = mergeConfig(cloneDefaults(), value);
+
+    // Rule maps are user-owned collections, not additive patches over the
+    // defaults. Deep-merging them made deleted/default rules silently reappear
+    // after Save, which made the Options page look like it was ignoring edits.
+    for (const path of REPLACE_MAP_PATHS) {
+      const override = objectAtPath(value, path);
+      if (isPlainObject(override)) {
+        setObjectAtPath(normalized, path, override);
+      }
+    }
+
+    return normalized;
   }
 
   function getConfig() {
@@ -145,6 +186,192 @@
       }
     }
     return out;
+  }
+
+  function compiledBoundaryRegexes(config) {
+    const out = [];
+    for (const rule of config?.abbreviations?.regex || []) {
+      if (!rule?.pattern) continue;
+      try {
+        const flags = rule.caseSensitive ? "g" : "gi";
+        out.push(new RegExp(rule.pattern, flags));
+      } catch (_error) {}
+    }
+    return out;
+  }
+
+  function protectedPeriodIndices(text, config) {
+    const protectedIndices = new Set();
+    for (const regex of compiledBoundaryRegexes(config)) {
+      regex.lastIndex = 0;
+      let match;
+      while ((match = regex.exec(text)) !== null) {
+        const start = match.index;
+        const end = start + match[0].length;
+        for (let index = start; index < end; index += 1) {
+          if (text[index] === ".") protectedIndices.add(index);
+        }
+        if (match[0].length === 0) regex.lastIndex += 1;
+      }
+    }
+    return protectedIndices;
+  }
+
+  function isAsciiDomainPeriod(text, dotIndex) {
+    if (
+      dotIndex <= 0 ||
+      dotIndex + 1 >= text.length ||
+      text[dotIndex] !== "." ||
+      !/[A-Za-z]/.test(text[dotIndex + 1])
+    ) {
+      return false;
+    }
+
+    let labelStart = dotIndex;
+    while (
+      labelStart > 0 &&
+      /[A-Za-z0-9-]/.test(text[labelStart - 1])
+    ) {
+      labelStart -= 1;
+    }
+    if (labelStart === dotIndex) return false;
+
+    let end = dotIndex + 1;
+    while (end < text.length && /[A-Za-z]/.test(text[end])) end += 1;
+    const tld = text.slice(dotIndex + 1, end).toLowerCase();
+    return new Set([
+      "net", "com", "gov", "org", "uk", "mx", "cn", "de", "ru", "br"
+    ]).has(tld);
+  }
+
+  function tokenBoundsAt(text, index) {
+    let start = index;
+    while (start > 0 && !/\s/.test(text[start - 1])) start -= 1;
+    let end = index + 1;
+    while (end < text.length && !/\s/.test(text[end])) end += 1;
+    return { start, end, token: text.slice(start, end) };
+  }
+
+  function periodIsProtected(text, dotIndex, config, regexProtected) {
+    if (text[dotIndex] !== ".") return false;
+    if (regexProtected?.has(dotIndex)) return true;
+
+    const previous = text[dotIndex - 1] || "";
+    const next = text[dotIndex + 1] || "";
+
+    // Any interior period is not a sentence boundary. This protects decimal
+    // numbers, domains, filenames, dotfiles, and filesystem paths before the
+    // more specific Lantern Leaf abbreviation checks below.
+    if (next && !/\s/.test(next) && !/["'”’\)\]]/.test(next)) {
+      return true;
+    }
+
+    if (/\d/.test(previous) && /\d/.test(next)) return true;
+    if (isAsciiDomainPeriod(text, dotIndex)) return true;
+
+    const bounds = tokenBoundsAt(text, dotIndex);
+    if (/[\\/]/.test(bounds.token)) {
+      return true;
+    }
+
+    let start = dotIndex;
+    while (start > 0 && /\p{L}/u.test(text[start - 1])) start -= 1;
+    if (start === dotIndex) return false;
+
+    const token = text.slice(start, dotIndex);
+    const caseKey = `${token}.`;
+    const nocaseKey = caseKey.toLowerCase();
+
+    const caseMap = config?.abbreviations?.case || {};
+    if (Object.prototype.hasOwnProperty.call(caseMap, caseKey)) {
+      return true;
+    }
+
+    const nocaseMap = config?.abbreviations?.nocase || {};
+    if (
+      Object.keys(nocaseMap).some(
+        (key) => String(key).toLowerCase() === nocaseKey
+      )
+    ) {
+      return true;
+    }
+
+    if (token.length === 1) {
+      // Lantern Leaf: interior initialism periods such as U.S.
+      if (
+        start >= 2 &&
+        text[start - 1] === "." &&
+        /\p{L}/u.test(text[start - 2])
+      ) {
+        return true;
+      }
+
+      // Lantern Leaf: first period when another X. follows.
+      let cursor = dotIndex + 1;
+      while (cursor < text.length && /\s/.test(text[cursor])) cursor += 1;
+      if (
+        cursor + 1 < text.length &&
+        /\p{L}/u.test(text[cursor]) &&
+        text[cursor + 1] === "."
+      ) {
+        return true;
+      }
+
+      // Lantern Leaf: middle initials such as James B. Allen.
+      if (cursor < text.length && /\p{Lu}/u.test(text[cursor])) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  function trimRange(text, start, end) {
+    while (start < end && /\s/.test(text[start])) start += 1;
+    while (end > start && /\s/.test(text[end - 1])) end -= 1;
+    return start < end ? { start, end } : null;
+  }
+
+  function sentenceRanges(text, config = currentConfig) {
+    const cfg = config === currentConfig ? currentConfig : normalizeConfig(config);
+    const source = String(text || "");
+    const ranges = [];
+    const regexProtected = protectedPeriodIndices(source, cfg);
+    let start = 0;
+
+    for (let index = 0; index < source.length; index += 1) {
+      const ch = source[index];
+      if (ch !== "." && ch !== "!" && ch !== "?") continue;
+      if (
+        ch === "." &&
+        periodIsProtected(source, index, cfg, regexProtected)
+      ) {
+        continue;
+      }
+
+      let end = index + 1;
+      while (
+        end < source.length &&
+        /["'”’\)\]]/.test(source[end])
+      ) {
+        end += 1;
+      }
+
+      const range = trimRange(source, start, end);
+      if (range) ranges.push(range);
+      start = end;
+      index = end - 1;
+    }
+
+    const tail = trimRange(source, start, source.length);
+    if (tail) ranges.push(tail);
+
+    if (ranges.length === 0 && /\S/.test(source)) {
+      const whole = trimRange(source, 0, source.length);
+      if (whole) ranges.push(whole);
+    }
+
+    return ranges;
   }
 
   function yearToWords(year, cfg) {
@@ -600,6 +827,8 @@
     resetConfig,
     setConfigForTests,
     normalizeUnicodePunctuation,
+    sentenceRanges,
+    periodIsProtected,
     looksLikeFilesystemPath,
     expandFilesystemPath,
     expandShellFlag,
