@@ -7,10 +7,8 @@ const reader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "rea
 const piperEngine = fs.readFileSync(path.join(__dirname, "..", "src", "content", "linux-piper-engine.js"), "utf8");
 const piperHost = fs.readFileSync(path.join(__dirname, "..", "native", "linux-piper", "linux_piper_host.py"), "utf8");
 
-test("Piper uses short CPU-sized chunks instead of online-sized batches", () => {
-  assert.match(piperEngine, /firstChunkMaxChars:\s*Math\.min\(\s*180/);
-  assert.match(piperEngine, /maxChars:\s*Math\.min\(\s*260/);
-  assert.match(piperEngine, /emergencyMaxChars:\s*Math\.min\(\s*500/);
+test("Piper uses real sentence chunks with bounded synthesis time", () => {
+  assert.match(piperEngine, /createPiperSentenceChunks/);
   assert.match(piperEngine, /PIPER_SYNTHESIS_TIMEOUT_MS = 20_000/);
   assert.match(piperEngine, /native synthesis timed out/);
 });
@@ -44,21 +42,27 @@ test("reader invalidates stale startup work on lifecycle changes", () => {
   assert.match(reader, /this\.lifecycleSerial \+= 1/);
 });
 
-test("Piper bypasses Web Audio and plays through a fresh direct media element", () => {
-  assert.match(piperEngine, /Piper deliberately bypasses the shared Web Audio gain graph/);
+test("Piper uses fresh direct media playback with two-sentence look-ahead", () => {
+  assert.match(piperEngine, /linuxPiperPrefetchDepth = 2/);
+  assert.match(piperEngine, /_fillLinuxPiperPrefetch/);
   assert.match(piperEngine, /const audio = root\.document\?\.createElement\?\.\("audio"\)/);
   assert.match(piperEngine, /audio\.volume = Math\.min/);
-  assert.match(piperEngine, /Playing Piper audio/);
 });
 
-
-test("Piper reactivates the highlight media clock for every sentence", () => {
+test("Piper reactivates and clears the highlight media clock per prepared sentence", () => {
   assert.match(
     piperEngine,
-    /_speakLinuxPiperChunk\(generation\)[\s\S]*?this\.directActive = true/
+    /_playLinuxPiperPrepared\(generation, prepared\)[\s\S]*?this\.directActive = true/
   );
   assert.match(
     piperEngine,
     /audio\.onended = \(\) => \{[\s\S]*?this\.directActive = false/
   );
+});
+
+test("Piper supports in-place pause and resume", () => {
+  assert.match(piperEngine, /pauseInPlace\(\)/);
+  assert.match(piperEngine, /resumeInPlace\(\)/);
+  assert.match(reader, /this\.speech\?\.pauseInPlace\?\.\(\)/);
+  assert.match(reader, /this\.speech\?\.resumeInPlace\?\.\(\)/);
 });
