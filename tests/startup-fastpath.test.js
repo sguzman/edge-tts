@@ -45,8 +45,8 @@ test("startup waits for Piper catalog but still does not block on WIN-NATURAL", 
   assert.ok(pronunciationWait > piperVoiceWait);
   assert.ok(nativeVoiceWait > pronunciationWait);
   assert.ok(naturalVoiceWait > nativeVoiceWait);
-  assert.ok(modelBuild > naturalVoiceWait);
-  assert.ok(awaitPrep > modelBuild);
+  assert.ok(awaitPrep > naturalVoiceWait);
+  assert.ok(modelBuild > awaitPrep);
   assert.equal(forbiddenNativeAwait, -1);
   assert.ok(firstRefresh > awaitPrep);
   assert.ok(awaitNaturalFallback > firstRefresh);
@@ -74,4 +74,18 @@ test("startup waits for pronunciation projection before first Piper speech", () 
   assert.ok(readyAt >= 0);
   assert.ok(awaitAt > readyAt);
   assert.match(source.slice(awaitAt, applyAt), /pronunciationReady/);
+});
+
+
+test("saved pronunciation config resolves before readable-model sentence boundaries", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
+    "utf8"
+  );
+  const awaitAt = source.indexOf("await Promise.all([");
+  const modelAt = source.indexOf("this.rebuildModel();");
+  const applyAt = source.indexOf("this.applySettings();");
+  assert.ok(awaitAt >= 0);
+  assert.ok(modelAt > awaitAt);
+  assert.ok(applyAt > modelAt);
 });
