@@ -468,7 +468,9 @@
           ) {
             this._handleLinuxPiperRequestFailure(
               state,
-              "Linux Piper helper refused the request."
+              response?.error
+                ? `Linux Piper helper refused the request: ${response.error}`
+                : "Linux Piper helper refused the request."
             );
           }
         })
