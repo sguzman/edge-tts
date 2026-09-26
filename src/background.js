@@ -527,8 +527,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           requestId,
           voiceId: String(message.voiceId || ""),
           text: String(message.text || ""),
-          lang: String(message.lang || ""),
-          lengthScale: Number(message.lengthScale) || 1
+          lang: String(message.lang || "")
         });
         sendResponse({ accepted: true });
       })
