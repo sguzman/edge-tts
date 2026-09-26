@@ -505,12 +505,22 @@
         playback.resumePending = true;
         this.onStatus?.("Resuming...");
 
-        return Promise.resolve(
+        const resumeCommand = Promise.resolve(
           root.chrome?.runtime?.sendMessage?.({
             type: "EDGE_TTS_PIPER_OFFSCREEN_RESUME",
             playbackId
           })
-        )
+        );
+        const resumeTimeout = new Promise((resolve) => {
+          root.setTimeout(() => {
+            resolve({
+              accepted: false,
+              error: "Offscreen Piper resume acknowledgement timed out."
+            });
+          }, 1500);
+        });
+
+        return Promise.race([resumeCommand, resumeTimeout])
           .then((response) => {
             if (
               this.linuxPiperOffscreenPlayback?.playbackId !== playbackId ||
