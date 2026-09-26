@@ -929,6 +929,8 @@
         started: false,
         prepared
       };
+      this.directBoundaryIndex = 0;
+      this.currentChunkBoundaryIndex = -1;
       this.directActive = false;
       this.linuxPiperPausedInPlace = false;
       this.onStatus?.("Using extension audio fallback...");
