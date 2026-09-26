@@ -24,6 +24,7 @@ const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
+const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
 const READER_SESSION_REVISION = 3;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
@@ -505,6 +506,20 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       sendResponse({ accepted: false });
       return false;
     }
+
+    // Record the exact text that is about to cross the browser/native boundary.
+    // Keep it in session storage only: this is a local diagnostic surface for
+    // pronunciation/projection debugging, not durable history.
+    try {
+      void chrome.storage.session.set({
+        [PIPER_TRACE_STORAGE_KEY]: {
+          at: Date.now(),
+          requestId,
+          voiceId: String(message.voiceId || ""),
+          text: String(message.text || "")
+        }
+      });
+    } catch (_error) {}
 
     // If this tab already has native Piper work in flight (for example a
     // prefetch while the user click-seeks), retire that helper before starting
