@@ -71,6 +71,8 @@
       this.enabled = true;
       this.stopped = false;
       this.paused = false;
+      this.initialPiperRetryRemaining = 1;
+      this.sessionSpeechStarted = false;
       this.toolbar.mount();
       this.toolbar.setStatus("Starting…");
 
