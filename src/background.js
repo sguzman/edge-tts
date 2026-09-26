@@ -531,7 +531,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         });
         sendResponse({ accepted: true });
       })
-      .catch(() => sendResponse({ accepted: false }));
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
     return true;
   }
 
