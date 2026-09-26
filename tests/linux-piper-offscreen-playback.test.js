@@ -148,3 +148,21 @@ test("Piper resume acknowledgement is bounded and falls back instead of hanging"
   assert.match(body, /1500/);
   assert.match(body, /resume acknowledgement timed out/);
 });
+
+
+test("sentence pause is carried all the way into the extension-owned audio player", () => {
+  assert.match(piper, /sentencePauseMs: prepared\.payload\?\.sentenceFinal === false/);
+  assert.match(background, /sentencePauseMs: Math\.max/);
+  assert.match(offscreen, /let sentencePauseMs = 0/);
+  assert.match(offscreen, /type: "sentencePause"/);
+  assert.match(offscreen, /setTimeout\(\(\) =>/);
+  assert.match(offscreen, /sentencePauseMs/);
+});
+
+test("page reader no longer owns the inter-sentence timer", () => {
+  const start = piper.indexOf("    _finishLinuxPiperPreparedPlayback");
+  const end = piper.indexOf("    _playLinuxPiperPreparedOffscreen", start);
+  const body = piper.slice(start, end);
+  assert.doesNotMatch(body, /setTimeout/);
+  assert.match(body, /_speakLinuxPiperChunk\(activeGeneration\)/);
+});
