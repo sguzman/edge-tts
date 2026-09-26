@@ -81,7 +81,7 @@ test("Lantern Leaf citation and footnote cleanup rules remain available", () => 
     "word12 [1,2] other⁴ 【citation】 {aside} keep"
   );
 
-  assert.equal(source.text, "word keep");
+  assert.equal(source.text, "word other keep");
 });
 
 test("normalization can be disabled without changing canonical token text", () => {
