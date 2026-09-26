@@ -656,8 +656,11 @@
       audio.onerror = () => {
         if (activeGeneration !== this.generation) return;
         const mediaCode = audio.error?.code;
+        const mediaMessage = String(audio.error?.message || "").trim();
         this._failLinuxPiper(
-          `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}`
+          `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}` +
+          `${mediaMessage ? `: ${mediaMessage}` : ""}; ` +
+          `readyState=${audio.readyState}; networkState=${audio.networkState}`
         );
       };
 
@@ -665,38 +668,79 @@
         prepared.prefetch ? "Playing prefetched Piper audio..." : "Playing Piper audio..."
       );
 
-      void audio.play()
-        .then(() => {
-          if (activeGeneration !== this.generation) return;
-          this.onStart?.(
-            payload.segments?.[0],
-            Math.max(
-              0,
-              (root.performance?.now?.() ?? Date.now()) - this.requestedAt
-            )
-          );
-          this._startBoundaryClock(activeGeneration);
-          this._fillLinuxPiperPrefetch(activeGeneration);
-        })
-        .catch((error) => {
-          if (error?.name === "NotAllowedError") {
-            // Extension-action activation can expire while CPU synthesis is
-            // running. Keep this prepared WAV intact and let the next explicit
-            // toolbar Resume click provide a fresh user activation.
-            this._clearBoundaryClock();
-            this.directActive = false;
-            this.linuxPiperPausedInPlace = true;
-            this.onPlaybackBlocked?.(error);
-            return;
-          }
+      const startMediaPlayback = (attempt = 0) => {
+        void audio.play()
+          .then(() => {
+            if (activeGeneration !== this.generation) return;
+            this.onStart?.(
+              payload.segments?.[0],
+              Math.max(
+                0,
+                (root.performance?.now?.() ?? Date.now()) - this.requestedAt
+              )
+            );
+            this._startBoundaryClock(activeGeneration);
+            this._fillLinuxPiperPrefetch(activeGeneration);
+          })
+          .catch((error) => {
+            if (activeGeneration !== this.generation) return;
 
-          this._failLinuxPiper(
-            `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}`
-          );
-        });
+            if (error?.name === "NotAllowedError") {
+              // Extension-action activation can expire while CPU synthesis is
+              // running. Keep this prepared WAV intact and let the next explicit
+              // toolbar Resume click provide a fresh user activation.
+              this._clearBoundaryClock();
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.onPlaybackBlocked?.(error);
+              return;
+            }
+
+            if (
+              error?.name === "AbortError" &&
+              attempt < 1 &&
+              this.directAudio === audio
+            ) {
+              this.onStatus?.("Retrying Piper media start...");
+              root.setTimeout(() => {
+                if (
+                  activeGeneration === this.generation &&
+                  this.directAudio === audio &&
+                  !this.linuxPiperPausedInPlace
+                ) {
+                  startMediaPlayback(attempt + 1);
+                }
+              }, 150);
+              return;
+            }
+
+            this._failLinuxPiper(
+              `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}; ` +
+              `readyState=${audio.readyState}; networkState=${audio.networkState}`
+            );
+          });
+      };
+
+      startMediaPlayback();
     }
 
     _failLinuxPiper(message) {
+      const failedPayload = this.currentChunks?.[this.currentChunkIndex];
+      try {
+        void root.chrome?.storage?.session?.set?.({
+          edgeTtsLastPiperFailureV1: {
+            at: Date.now(),
+            message: String(message || "Unknown Piper failure"),
+            chunkIndex: this.currentChunkIndex,
+            textLength: String(failedPayload?.text || "").length,
+            text: String(failedPayload?.text || ""),
+            playbackIndex: this.linuxPiperPlaybackIndex,
+            preparedChunks: this.linuxPiperPrepared?.size || 0,
+            activeRequests: this.linuxPiperRequests?.size || 0
+          }
+        });
+      } catch (_error) {}
+
       this._clearLinuxPiperSentencePause();
       for (const request of this.linuxPiperRequests.values()) {
         if (request.timeoutId) root.clearTimeout(request.timeoutId);
