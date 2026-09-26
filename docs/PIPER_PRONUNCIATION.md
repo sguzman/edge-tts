@@ -153,3 +153,41 @@ Configuration is persisted in `chrome.storage.local` under
 `edgeTtsPronunciationConfigV1`. Active content-script instances observe
 storage changes and use the new rules for subsequent Piper sentence
 generation.
+
+
+## Sentence boundaries
+
+The pronunciation branch does not trust `Intl.Segmenter` as the authoritative
+sentence splitter. The readable-text model now uses a JavaScript port of
+Lantern Leaf's abbreviation-aware boundary policy before TTS chunking.
+
+Protected periods include configured abbreviations, U.S.-style initialisms,
+middle initials, decimals, known domain TLDs, filename-extension patterns,
+regex abbreviation spans, and periods inside filesystem/path-like tokens.
+This keeps punctuation from creating fake sentence pauses before
+normalization can run.
+
+## Saved configuration authority
+
+Rule-map collections are replacement collections, not patches over the
+defaults. Deleting a default rule therefore keeps it deleted.
+
+Each persisted config carries a monotonic `revision` and `savedAt` value.
+The Piper engine force-loads `chrome.storage.local` before each new speech
+batch, and the Last actual Piper request diagnostic records the exact
+pronunciation revision used to build that request.
+
+Startup also waits for the saved pronunciation config before constructing the
+readable sentence model.
+
+## Offscreen highlighting
+
+When a page rejects its own `blob:` media URL, extension-owned offscreen
+audio owns both WAV playback and highlight-boundary scheduling. Boundary
+indices are emitted directly from the real offscreen media clock rather than
+reconstructing time from periodic current-time messages in the page.
+
+The browser-side approximate word timeline is punctuation-aware so clause
+pauses contribute to the next-word offset. This is still approximate timing,
+not phoneme-perfect alignment, but it avoids cumulative drift caused by
+ignoring punctuation pauses.
