@@ -39,6 +39,8 @@
       this.rateValue = null;
       this.batchCharsInput = null;
       this.batchCharsValue = null;
+      this.sentencePauseInput = null;
+      this.sentencePauseValue = null;
       this.status = null;
       this.wordColorInput = null;
       this.sentenceColorInput = null;
@@ -102,6 +104,13 @@
               <output data-edge-tts-batch-chars-value>1200</output>
             </label>
           </div>
+          <div class="edge-tts-row">
+            <label class="edge-tts-rate-label" title="Extra real-time pause inserted between Piper sentence WAVs. This does not alter Piper synthesis or prosody.">
+              Sentence pause
+              <input data-edge-tts-sentence-pause type="range" min="0" max="1200" step="50" value="300">
+              <output data-edge-tts-sentence-pause-value>300 ms</output>
+            </label>
+          </div>
           <div class="edge-tts-row edge-tts-color-row">
             <label>
               Word highlight
@@ -143,6 +152,8 @@
       this.rateValue = element.querySelector("[data-edge-tts-rate-value]");
       this.batchCharsInput = element.querySelector("[data-edge-tts-batch-chars]");
       this.batchCharsValue = element.querySelector("[data-edge-tts-batch-chars-value]");
+      this.sentencePauseInput = element.querySelector("[data-edge-tts-sentence-pause]");
+      this.sentencePauseValue = element.querySelector("[data-edge-tts-sentence-pause-value]");
       this.status = element.querySelector("[data-edge-tts-status]");
       this.wordColorInput = element.querySelector("[data-edge-tts-word-color]");
       this.sentenceColorInput = element.querySelector("[data-edge-tts-sentence-color]");
@@ -175,6 +186,12 @@
       });
       this.batchCharsInput.addEventListener("change", () => {
         this.handlers.onBatchChars(Number(this.batchCharsInput.value));
+      });
+      this.sentencePauseInput.addEventListener("input", () => {
+        this.sentencePauseValue.value = `${Number(this.sentencePauseInput.value)} ms`;
+      });
+      this.sentencePauseInput.addEventListener("change", () => {
+        this.handlers.onSentencePause?.(Number(this.sentencePauseInput.value));
       });
       this.wordColorInput.addEventListener("input", () => {
         this.handlers.onWordColor(this.wordColorInput.value);
@@ -221,6 +238,8 @@
       this.rateValue = null;
       this.batchCharsInput = null;
       this.batchCharsValue = null;
+      this.sentencePauseInput = null;
+      this.sentencePauseValue = null;
       this.status = null;
       this.wordColorInput = null;
       this.sentenceColorInput = null;
@@ -262,6 +281,13 @@
       const numeric = Number(chars);
       this.batchCharsInput.value = String(numeric);
       this.batchCharsValue.value = String(numeric);
+    }
+
+    setSentencePause(ms) {
+      if (!this.sentencePauseInput || !this.sentencePauseValue) return;
+      const numeric = Number(ms);
+      this.sentencePauseInput.value = String(numeric);
+      this.sentencePauseValue.value = `${numeric} ms`;
     }
 
     setVoices(voices, selectedName) {
