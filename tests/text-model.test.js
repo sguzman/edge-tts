@@ -35,5 +35,23 @@ test("ChatGPT hosts use the message-only reading profile", () => {
   assert.equal(siteProfileForHostname("chatgpt.com"), "chatgpt");
   assert.equal(siteProfileForHostname("www.chatgpt.com"), "chatgpt");
   assert.equal(siteProfileForHostname("chat.openai.com"), "chatgpt");
+  assert.equal(siteProfileForHostname("x.com"), "x");
+  assert.equal(siteProfileForHostname("www.x.com"), "x");
+  assert.equal(siteProfileForHostname("twitter.com"), "x");
+  assert.equal(siteProfileForHostname("mobile.twitter.com"), "x");
   assert.equal(siteProfileForHostname("example.com"), "generic");
+});
+
+
+test("X profile targets tweetText application containers", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "text-model.js"),
+    "utf8"
+  );
+
+  assert.match(source, /\[data-testid='tweetText'\]/);
+  assert.match(source, /function collectXCandidates/);
+  assert.match(source, /profile === "x"/);
 });
