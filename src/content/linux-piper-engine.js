@@ -225,7 +225,7 @@
           this.onStatus?.("Reading");
         })
         .catch((error) => this._failLinuxPiper(
-          \`resume failed: \${error?.message || String(error)}\`
+          `resume failed: ${error?.message || String(error)}`
         ));
       return true;
     }
@@ -512,7 +512,7 @@
         if (activeGeneration !== this.generation) return;
         const mediaCode = audio.error?.code;
         this._failLinuxPiper(
-          \`WAV playback failed\${mediaCode ? \` (media \${mediaCode})\` : ""}\`
+          `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}`
         );
       };
 
@@ -535,7 +535,7 @@
         })
         .catch((error) => {
           this._failLinuxPiper(
-            \`audio.play() failed: \${error?.name || "Error"}: \${error?.message || String(error)}\`
+            `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}`
           );
         });
     }
@@ -550,7 +550,7 @@
       this.linuxPiperPlaybackIndex = -1;
       this.linuxPiperPausedInPlace = false;
       this._resetDirectState({ keepMode: true });
-      this.onError?.(new Error(\`Linux Piper TTS failed: \${message}\`));
+      this.onError?.(new Error(`Linux Piper TTS failed: ${message}`));
     }
 
     handleLinuxPiperEvent(message) {
