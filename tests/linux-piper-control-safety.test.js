@@ -78,3 +78,13 @@ test("playback failures keep the actual error visible after button state becomes
       body.indexOf("this.toolbar.setStopped()")
   );
 });
+
+
+test("cold Piper startup gets exactly one automatic retry before surfacing failure", () => {
+  assert.match(reader, /this\.initialPiperRetryRemaining = 1/);
+  assert.match(reader, /!this\.sessionSpeechStarted/);
+  assert.match(reader, /this\.initialPiperRetryRemaining > 0/);
+  assert.match(reader, /this\.initialPiperRetryRemaining -= 1/);
+  assert.match(reader, /retrying once/);
+  assert.match(reader, /}, 300\);/);
+});
