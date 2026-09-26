@@ -1,6 +1,7 @@
 (function piperOffscreenAudio() {
   const audio = document.getElementById("piper-audio");
   let playbackId = "";
+  let ownerTabId = null;
   let objectUrl = "";
   let tickTimer = null;
   let boundaryOffsets = [];
@@ -32,6 +33,7 @@
       void chrome.runtime.sendMessage({
         type: "EDGE_TTS_OFFSCREEN_PIPER_EVENT",
         playbackId,
+        tabId: ownerTabId,
         event
       });
     } catch (_error) {}
@@ -59,6 +61,7 @@
 
   function stopCurrent({ emit = false } = {}) {
     const previousId = playbackId;
+    const previousTabId = ownerTabId;
     clearTick();
 
     try {
@@ -71,6 +74,7 @@
 
     revokeUrl();
     playbackId = "";
+    ownerTabId = null;
     boundaryOffsets = [];
     boundaryIndex = 0;
 
@@ -79,6 +83,7 @@
         void chrome.runtime.sendMessage({
           type: "EDGE_TTS_OFFSCREEN_PIPER_EVENT",
           playbackId: previousId,
+          tabId: previousTabId,
           event: { type: "stopped" }
         });
       } catch (_error) {}
@@ -98,8 +103,11 @@
     stopCurrent();
 
     playbackId = String(message.playbackId || "");
-    if (!playbackId) {
-      throw new Error("Missing offscreen Piper playbackId.");
+    ownerTabId = Number.isInteger(Number(message.tabId))
+      ? Number(message.tabId)
+      : null;
+    if (!playbackId || !Number.isInteger(ownerTabId)) {
+      throw new Error("Missing offscreen Piper playbackId or owner tab.");
     }
 
     const chunks = Array.isArray(message.audioChunks)
