@@ -380,6 +380,12 @@ async function speakLocalTtsForTab(tabId, message) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
+  if (message?.type === "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS") {
+    void chrome.runtime.openOptionsPage();
+    sendResponse({ opened: true });
+    return false;
+  }
+
   if (message?.type === "EDGE_TTS_AUDIO_CLAIM") {
     if (!Number.isInteger(tabId)) {
       sendResponse({ granted: false });
