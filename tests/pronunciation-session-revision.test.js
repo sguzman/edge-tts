@@ -13,8 +13,8 @@ const bootstrap = fs.readFileSync(
 );
 
 test("pronunciation branch invalidates pre-projection page readers", () => {
-  assert.match(background, /const READER_SESSION_REVISION = 8;/);
-  assert.match(bootstrap, /const SESSION_REVISION = 8;/);
+  assert.match(background, /const READER_SESSION_REVISION = 9;/);
+  assert.match(bootstrap, /const SESSION_REVISION = 9;/);
   assert.match(
     background,
     /response\?\.revision === READER_SESSION_REVISION/
