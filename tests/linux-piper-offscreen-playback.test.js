@@ -137,3 +137,14 @@ test("Piper in-place resume waits for confirmed audio playback", () => {
   assert.match(body, /Resume session expired — restarting/);
   assert.match(body, /return false/);
 });
+
+
+test("Piper resume acknowledgement is bounded and falls back instead of hanging", () => {
+  const start = piper.indexOf("    resumeInPlace() {");
+  const end = piper.indexOf("    speak(block, startSegmentIndex, options = {}) {", start);
+  const body = piper.slice(start, end);
+
+  assert.match(body, /Promise\.race\(\[resumeCommand, resumeTimeout\]\)/);
+  assert.match(body, /1500/);
+  assert.match(body, /resume acknowledgement timed out/);
+});
