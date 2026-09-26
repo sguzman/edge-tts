@@ -87,3 +87,13 @@ test("primary offscreen playback cannot trigger the page-media blocked state rac
   assert.match(body, /this\.directBoundaryIndex = 0/);
   assert.match(body, /this\.currentChunkBoundaryIndex = -1/);
 });
+
+
+test("background relay preserves Piper boundary offsets for offscreen highlighting", () => {
+  const routeAt = background.indexOf('message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PLAY"');
+  const nextRoute = background.indexOf('message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE"', routeAt);
+  const body = background.slice(routeAt, nextRoute);
+  assert.match(body, /boundaryOffsets:/);
+  assert.match(body, /message\.boundaryOffsets/);
+  assert.match(body, /EDGE_TTS_OFFSCREEN_PIPER_PLAY/);
+});
