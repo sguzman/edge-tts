@@ -42,6 +42,7 @@
     technical: {
       expandFilesystemPaths: true,
       expandShellFlags: true,
+      pauseBetweenPathComponents: true,
       pathWords: {
         "~": "home directory",
         "/": "slash",
