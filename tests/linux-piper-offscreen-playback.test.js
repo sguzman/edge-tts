@@ -53,3 +53,20 @@ test("extension-owned player supports transport and timing", () => {
   assert.match(offscreen, /EDGE_TTS_OFFSCREEN_PIPER_VOLUME/);
   assert.match(offscreen, /type: "time"/);
 });
+
+
+test("offscreen media clock emits canonical boundary indices", () => {
+  assert.match(offscreen, /boundaryOffsets/);
+  assert.match(offscreen, /type: "boundary"/);
+  assert.match(offscreen, /boundaryIndex \+= 1/);
+  assert.match(piper, /boundaryOffsets: this\.directBoundaries\.map/);
+  assert.match(piper, /linux-piper-offscreen-boundary/);
+});
+
+test("Piper force-loads persisted pronunciation config before creating chunks", () => {
+  const speakAt = piper.indexOf("    speak(block, startSegmentIndex, options = {}) {");
+  const beginAt = piper.indexOf("    _beginLinuxPiperSpeak", speakAt);
+  const body = piper.slice(speakAt, beginAt);
+  assert.match(body, /loadConfig\?\.\(\{ force: true \}\)/);
+  assert.match(body, /Loading pronunciation rules/);
+});
