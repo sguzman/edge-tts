@@ -35,6 +35,7 @@ VOICE_ROOT = Path(
 
 _write_lock = threading.Lock()
 _state_lock = threading.Lock()
+_voice_load_lock = threading.Lock()
 _loaded_voice_id: str | None = None
 _loaded_voice: PiperVoice | None = None
 _active_request_id: str | None = None
@@ -149,14 +150,43 @@ def get_voice(voice_id: str) -> PiperVoice:
         if _loaded_voice is not None and _loaded_voice_id == voice_id:
             return _loaded_voice
 
-    model_path = voice_model_path(voice_id)
-    # Hard invariant: CPU inference only.
-    voice = PiperVoice.load(str(model_path), use_cuda=False)
+    # Model loading is expensive. Startup warming and first synthesis may race,
+    # so serialize the load and re-check after acquiring the load lock.
+    with _voice_load_lock:
+        with _state_lock:
+            if _loaded_voice is not None and _loaded_voice_id == voice_id:
+                return _loaded_voice
 
-    with _state_lock:
-        _loaded_voice_id = voice_id
-        _loaded_voice = voice
-    return voice
+        model_path = voice_model_path(voice_id)
+        # Hard invariant: CPU inference only.
+        voice = PiperVoice.load(str(model_path), use_cuda=False)
+
+        with _state_lock:
+            _loaded_voice_id = voice_id
+            _loaded_voice = voice
+        return voice
+
+
+def warm_default_voice() -> None:
+    voice_id = "en_US-ryan-high"
+    try:
+        voice_model_path(voice_id)
+    except Exception:
+        return
+
+    try:
+        get_voice(voice_id)
+    except Exception:
+        # Warm-up is opportunistic. Normal synthesis reports actionable errors.
+        return
+
+
+def start_default_voice_warmup() -> None:
+    threading.Thread(
+        target=warm_default_voice,
+        name="piper-warm-default",
+        daemon=True,
+    ).start()
 
 
 _WORD_RE = re.compile(r"\S+")
@@ -403,6 +433,10 @@ def run_self_test(voice_id: str) -> int:
 
 
 def main() -> None:
+    # Start loading Ryan immediately when Edge launches the native host. This
+    # overlaps model I/O with handshake, voice discovery, and page modeling.
+    start_default_voice_warmup()
+
     while True:
         try:
             message = read_message()
