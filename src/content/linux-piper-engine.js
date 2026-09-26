@@ -287,10 +287,41 @@
       const blob = new Blob(request.audio, { type: "audio/wav" });
       this._revokeObjectUrl();
       this.directObjectUrl = root.URL.createObjectURL(blob);
-      const audio = this._ensureAudioElement();
+
+      // Piper deliberately bypasses the shared Web Audio gain graph. Chromium
+      // can leave an AudioContext suspended even while a media element appears
+      // to advance, producing silent playback. A fresh unrouted media element
+      // is the smallest reliable Linux path; Piper volume is therefore capped
+      // at 100% until the native backend is proven stable.
+      try {
+        this.directAudio?.pause?.();
+        this.directAudio?.removeAttribute?.("src");
+        this.directAudio?.load?.();
+      } catch (_error) {}
+      try {
+        this.directMediaSource?.disconnect?.();
+      } catch (_error) {}
+      try {
+        this.directGain?.disconnect?.();
+      } catch (_error) {}
+      try {
+        this.directAudioContext?.close?.();
+      } catch (_error) {}
+      this.directMediaSource = null;
+      this.directGain = null;
+      this.directAudioContext = null;
+
+      const audio = root.document?.createElement?.("audio") || new root.Audio();
+      audio.preload = "auto";
+      audio.preservesPitch = true;
+      if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
       audio.src = this.directObjectUrl;
       audio.playbackRate = this.directPlaybackRate;
-      this._applyDirectGain();
+      audio.volume = Math.min(
+        1,
+        Math.max(0, Number(this.directOutputGain) || 0)
+      );
+      this.directAudio = audio;
 
       const activeGeneration = request.generation;
       audio.onended = () => {
@@ -309,65 +340,27 @@
       };
       audio.onerror = () => {
         if (activeGeneration === this.generation) {
-          this._failLinuxPiper("WAV playback failed");
+          const mediaCode = audio.error?.code;
+          this._failLinuxPiper(
+            `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}`
+          );
         }
       };
 
-      void (async () => {
-        if (this.directAudioContext?.state === "suspended") {
-          try {
-            await this.directAudioContext.resume();
-          } catch (error) {
-            console.warn(
-              "Edge Natural TTS could not resume Web Audio for Piper playback; falling back to direct media output.",
-              error
-            );
-
-            try {
-              this.directMediaSource?.disconnect?.();
-            } catch (_error) {}
-            try {
-              this.directGain?.disconnect?.();
-            } catch (_error) {}
-            try {
-              audio.pause?.();
-              audio.removeAttribute?.("src");
-              audio.load?.();
-            } catch (_error) {}
-
-            this.directMediaSource = null;
-            this.directGain = null;
-            this.directAudioContext = null;
-
-            const fallbackAudio =
-              root.document?.createElement?.("audio") || new root.Audio();
-            fallbackAudio.preload = "auto";
-            fallbackAudio.preservesPitch = true;
-            if ("webkitPreservesPitch" in fallbackAudio) {
-              fallbackAudio.webkitPreservesPitch = true;
-            }
-            fallbackAudio.src = this.directObjectUrl;
-            fallbackAudio.playbackRate = this.directPlaybackRate;
-            fallbackAudio.volume = Math.min(
-              1,
-              Math.max(0, Number(this.directOutputGain) || 0)
-            );
-            fallbackAudio.onended = audio.onended;
-            fallbackAudio.onerror = audio.onerror;
-            this.directAudio = fallbackAudio;
-            audio = fallbackAudio;
-          }
-        }
-
-        await audio.play();
-        if (activeGeneration !== this.generation) return;
-
-        this.onStart?.(
-          payload.segments?.[0],
-          Math.max(0, (root.performance?.now?.() ?? Date.now()) - this.requestedAt)
-        );
-        this._startBoundaryClock(activeGeneration);
-      })().catch((error) => this._failLinuxPiper(error?.message || String(error)));
+      void audio.play()
+        .then(() => {
+          if (activeGeneration !== this.generation) return;
+          this.onStart?.(
+            payload.segments?.[0],
+            Math.max(0, (root.performance?.now?.() ?? Date.now()) - this.requestedAt)
+          );
+          this._startBoundaryClock(activeGeneration);
+        })
+        .catch((error) => {
+          this._failLinuxPiper(
+            `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}`
+          );
+        });
 
       return true;
     }
