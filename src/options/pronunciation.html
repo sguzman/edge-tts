@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Edge Natural TTS — Pronunciation</title>
+  <link rel="stylesheet" href="pronunciation.css">
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <div>
+        <h1>Piper pronunciation & text mapping</h1>
+        <p>Edit the spoken projection only. Page text, click-to-seek coordinates, and highlights remain canonical.</p>
+      </div>
+      <div class="actions">
+        <button id="save" class="primary">Save rules</button>
+        <button id="reset">Reset to Lantern Leaf defaults</button>
+      </div>
+    </header>
+
+    <div id="status" role="status" aria-live="polite"></div>
+
+    <section class="card">
+      <h2>Pipeline switches</h2>
+      <div class="grid">
+        <label><input id="enabled" type="checkbox"> Enable Piper preprocessing</label>
+        <label><input id="filesystem-paths" type="checkbox"> Expand Linux filesystem paths</label>
+        <label><input id="shell-flags" type="checkbox"> Expand shell flags</label>
+        <label><input id="acronyms-enabled" type="checkbox"> Expand configured acronyms</label>
+        <label><input id="brand-map-enabled" type="checkbox"> Enable brand map</label>
+        <label>
+          Year mode
+          <select id="year-mode">
+            <option value="american">American</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label><input id="insert-and" type="checkbox"> Insert “and” in year pronunciation</label>
+      </div>
+    </section>
+
+    <section class="card preview-card">
+      <h2>Live preview</h2>
+      <label for="preview-source">Source text</label>
+      <textarea id="preview-source" rows="5">readlink -f ~/.config/fish/config.fish and GPU JSON SQLite in 2026.</textarea>
+      <label for="preview-spoken">Piper receives</label>
+      <textarea id="preview-spoken" rows="5" readonly></textarea>
+      <h3>Applied transformations</h3>
+      <div id="preview-ledger" class="ledger"></div>
+    </section>
+
+    <section class="card">
+      <h2>Acronyms</h2>
+      <label for="acronym-tokens">Tokens, one per line</label>
+      <textarea id="acronym-tokens" rows="8"></textarea>
+      <label>Letter separator <input id="letter-separator" type="text"></label>
+      <label>Digit separator <input id="digit-separator" type="text"></label>
+      <div class="map-section" data-map="acronyms.letterSounds">
+        <div class="section-heading"><h3>Letter / digit sounds</h3><button data-add-map="acronyms.letterSounds">Add</button></div>
+        <table><thead><tr><th>Token</th><th>Spoken as</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Custom pronunciations</h2><button data-add-map="pronunciation.customPronunciations">Add</button></div>
+      <div class="map-section" data-map="pronunciation.customPronunciations">
+        <table><thead><tr><th>Visible token</th><th>Piper hears</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Brand map</h2><button data-add-map="pronunciation.brandMap">Add</button></div>
+      <div class="map-section" data-map="pronunciation.brandMap">
+        <table><thead><tr><th>Visible token</th><th>Piper hears</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Case-sensitive abbreviations</h2><button data-add-map="abbreviations.case">Add</button></div>
+      <div class="map-section" data-map="abbreviations.case">
+        <table><thead><tr><th>Token</th><th>Expansion</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Case-insensitive abbreviations</h2><button data-add-map="abbreviations.nocase">Add</button></div>
+      <div class="map-section" data-map="abbreviations.nocase">
+        <table><thead><tr><th>Token</th><th>Expansion</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Regex abbreviation rules</h2><button id="add-regex">Add</button></div>
+      <table id="regex-table">
+        <thead><tr><th>Pattern</th><th>Replacement</th><th>Case-sensitive</th><th></th></tr></thead>
+        <tbody></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Literal replacements</h2><button data-add-map="normalization.replacements">Add</button></div>
+      <div class="map-section" data-map="normalization.replacements">
+        <table><thead><tr><th>Find</th><th>Replace with</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+      <label for="drop-tokens">Drop tokens, one per line</label>
+      <textarea id="drop-tokens" rows="5"></textarea>
+    </section>
+
+    <section class="card">
+      <div class="section-heading"><h2>Linux path vocabulary</h2><button data-add-map="technical.pathWords">Add</button></div>
+      <div class="map-section" data-map="technical.pathWords">
+        <table><thead><tr><th>Symbol</th><th>Spoken as</th><th></th></tr></thead><tbody></tbody></table>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Cleanup transformations</h2>
+      <div class="grid">
+        <label><input id="collapse-whitespace" type="checkbox"> Collapse whitespace</label>
+        <label><input id="remove-space-before-punctuation" type="checkbox"> Remove spaces before punctuation</label>
+        <label><input id="strip-inline-code" type="checkbox"> Strip Markdown backticks</label>
+        <label><input id="strip-markdown-links" type="checkbox"> Strip Markdown link destinations</label>
+        <label><input id="drop-numeric-bracket-citations" type="checkbox"> Drop [123] citations</label>
+        <label><input id="drop-parenthetical-numeric-citations" type="checkbox"> Drop (123) citations</label>
+        <label><input id="drop-square-bracket-text" type="checkbox"> Drop bracketed tokens</label>
+        <label><input id="drop-curly-brace-text" type="checkbox"> Drop braced tokens</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Raw JSON import / export</h2>
+      <p>This is the complete stored rule set. Structured controls above and this JSON describe the same configuration.</p>
+      <textarea id="raw-json" rows="18" spellcheck="false"></textarea>
+      <div class="actions">
+        <button id="load-json">Load JSON into editor</button>
+        <button id="copy-json">Copy current JSON</button>
+      </div>
+    </section>
+  </main>
+
+  <script src="../pronunciation/defaults.js"></script>
+  <script src="../pronunciation/engine.js"></script>
+  <script src="pronunciation.js"></script>
+</body>
+</html>
