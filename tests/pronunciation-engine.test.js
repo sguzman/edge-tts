@@ -104,3 +104,12 @@ test("path ellipsis is spoken as ellipsis rather than dot dot dot", () => {
     "home directory, slash, dot config, slash, ellipsis"
   );
 });
+
+
+test("ordinary English words are not rewritten by the default pronunciation layer", () => {
+  const source =
+    "The quick brown fox jumps over the lazy dog. This is easy normal English and should stay unchanged.";
+  const result = pronunciation.transformText(source);
+  assert.equal(result.text, source);
+  assert.deepEqual(result.transformations, []);
+});
