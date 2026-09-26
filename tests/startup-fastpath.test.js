@@ -32,7 +32,7 @@ test("startup waits for Piper catalog but still does not block on WIN-NATURAL", 
   const nativeVoiceWait = source.indexOf("this.speech.refreshWinNaturalVoices?.()");
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
-  const awaitPrep = source.indexOf("linuxPiperVoicesReady");
+  const awaitPrep = source.indexOf("await Promise.all([");
   const forbiddenNativeAwait = source.indexOf(
     "winNaturalVoicesReady\n      ]"
   );
