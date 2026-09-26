@@ -87,7 +87,12 @@
         onBoundary: (segment) => this.handleBoundary(segment),
         onEnd: () => this.handleBlockEnd(),
         onError: (error) => this.handleError(error),
-        onStart: (_segment, latencyMs) => this.handleSpeechStart(latencyMs)
+        onStart: (_segment, latencyMs) => this.handleSpeechStart(latencyMs),
+        onStatus: (status) => {
+          if (!this.stopped && !this.paused && this.enabled) {
+            this.toolbar?.setStatus?.(status);
+          }
+        }
       });
       this.toolbar = new Toolbar({
         onPlayPause: () => this.playPause(),
