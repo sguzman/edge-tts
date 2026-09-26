@@ -106,7 +106,10 @@
 
     const flush = () => {
       if (!current.length) return;
-      chunks.push(payloadForPiperSegments(current));
+      const payload = payloadForPiperSegments(current);
+      if (payload?.text?.trim()) {
+        chunks.push(payload);
+      }
       current = [];
       currentKey = "";
     };
