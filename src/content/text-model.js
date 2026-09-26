@@ -1,5 +1,5 @@
 (function attachTextModel(root, factory) {
-  const api = factory();
+  const api = factory(root);
 
   if (typeof module === "object" && module.exports) {
     module.exports = api;
@@ -8,7 +8,7 @@
   if (root.EdgeTtsExtension) {
     root.EdgeTtsExtension.TextModel = api;
   }
-})(globalThis, function createTextModelApi() {
+})(globalThis, function createTextModelApi(root) {
   const BLOCK_SELECTOR = [
     "h1",
     "h2",
@@ -99,12 +99,22 @@
   }
 
   function sentenceRanges(text, language) {
+    const lanternLeafRanges =
+      root.EdgeTtsExtension?.Pronunciation?.sentenceRanges?.(text);
+    if (Array.isArray(lanternLeafRanges) && lanternLeafRanges.length > 0) {
+      return lanternLeafRanges;
+    }
+
+    // Non-Piper/minimal test fallback only. Runtime pronunciation builds load
+    // the Lantern Leaf-derived boundary model before this module.
     const ranges = [];
-    const Segmenter = globalThis.Intl?.Segmenter;
+    const Segmenter = root.Intl?.Segmenter;
 
     if (typeof Segmenter === "function") {
       try {
-        const segmenter = new Segmenter(language || undefined, { granularity: "sentence" });
+        const segmenter = new Segmenter(language || undefined, {
+          granularity: "sentence"
+        });
         for (const sentence of segmenter.segment(text)) {
           const range = trimSentenceRange(
             text,
@@ -113,19 +123,19 @@
           );
           if (range) ranges.push(range);
         }
-      } catch (_error) {
-        // Fall through to punctuation segmentation below.
-      }
+      } catch (_error) {}
     }
 
-    if (ranges.length > 0) {
-      return ranges;
-    }
+    if (ranges.length > 0) return ranges;
 
     const expression = /[^.!?]+(?:[.!?]+(?:["'”’\)\]]+)?(?=\s|$)|$)/g;
     let match;
     while ((match = expression.exec(text)) !== null) {
-      const range = trimSentenceRange(text, match.index, match.index + match[0].length);
+      const range = trimSentenceRange(
+        text,
+        match.index,
+        match.index + match[0].length
+      );
       if (range) ranges.push(range);
       if (match[0].length === 0) expression.lastIndex += 1;
     }
