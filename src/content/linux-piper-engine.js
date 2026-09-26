@@ -126,7 +126,7 @@
     if (!segments?.length) return [];
 
     const whole = payloadForPiperSegments(segments);
-    if (piperPayloadWithinHardLimit(whole)) {
+    if (piperPayloadWithinSoftLimit(whole)) {
       whole.sentenceFinal = true;
       whole.emergencyClauseSplit = false;
       return [whole];
@@ -156,13 +156,32 @@
         ) {
           bestSoftBreak = probe;
         }
+
+        const candidateWords = candidate?.segments?.length || 0;
+        const candidateChars = String(candidate?.text || "").length;
+        const crossedUsefulSize =
+          candidateChars >= Math.floor(PIPER_SOFT_CLAUSE_CHARS * 0.55) ||
+          candidateWords >= Math.floor(PIPER_SOFT_CLAUSE_WORDS * 0.55);
+
+        if (
+          crossedUsefulSize &&
+          isPiperClauseBreak(segments[probe]) &&
+          (
+            candidateChars >= PIPER_SOFT_CLAUSE_CHARS ||
+            candidateWords >= PIPER_SOFT_CLAUSE_WORDS
+          )
+        ) {
+          bestSoftBreak = probe;
+          probe += 1;
+          break;
+        }
       }
 
       let endIndex;
-      if (probe >= segments.length) {
-        endIndex = segments.length - 1;
-      } else if (bestSoftBreak >= cursor) {
+      if (bestSoftBreak >= cursor) {
         endIndex = bestSoftBreak;
+      } else if (probe >= segments.length) {
+        endIndex = segments.length - 1;
       } else {
         // Prefer the most recent clause boundary that still fits under the hard
         // ceiling, even when it lands beyond the soft target.
