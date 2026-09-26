@@ -144,6 +144,13 @@
       return false;
     }
 
+    if (message?.type === "EDGE_TTS_PIPER_OFFSCREEN_EVENT") {
+      const accepted =
+        app?.speech?.handleLinuxPiperOffscreenEvent?.(message) === true;
+      sendResponse({ accepted });
+      return false;
+    }
+
     return false;
   };
 
