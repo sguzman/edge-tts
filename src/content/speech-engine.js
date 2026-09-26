@@ -219,12 +219,13 @@
   }
 
   class SpeechEngine {
-    constructor({ onBoundary, onEnd, onError, onStart, onRecover }) {
+    constructor({ onBoundary, onEnd, onError, onStart, onRecover, onStatus }) {
       this.onBoundary = onBoundary;
       this.onEnd = onEnd;
       this.onError = onError;
       this.onStart = onStart;
       this.onRecover = onRecover;
+      this.onStatus = onStatus;
       this.synth = root.speechSynthesis;
       this.currentUtterance = null;
       this.currentChunks = [];
