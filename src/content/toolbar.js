@@ -33,6 +33,7 @@
       this.voiceSelect = null;
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
+      this.pronunciationOptionsButton = null;
       this.voices = [];
       this.selectedVoiceName = "";
       this.rateInput = null;
@@ -89,6 +90,7 @@
               Voice
               <select data-edge-tts-voice aria-label="Voice"></select>
             </label>
+            <button type="button" data-edge-tts-action="pronunciation-options" title="Edit Piper pronunciation, abbreviation, acronym, path, and transformation rules">Edit pronunciation</button>
           </div>
           <div class="edge-tts-row">
             <label class="edge-tts-rate-label">
@@ -148,6 +150,7 @@
       this.voiceSelect = element.querySelector("[data-edge-tts-voice]");
       this.voiceFilterInput = element.querySelector("[data-edge-tts-voice-filter]");
       this.clearVoiceFilterButton = element.querySelector("[data-edge-tts-action='clear-voice-filter']");
+      this.pronunciationOptionsButton = element.querySelector("[data-edge-tts-action='pronunciation-options']");
       this.rateInput = element.querySelector("[data-edge-tts-rate]");
       this.rateValue = element.querySelector("[data-edge-tts-rate-value]");
       this.batchCharsInput = element.querySelector("[data-edge-tts-batch-chars]");
@@ -174,6 +177,9 @@
       });
       this.voiceFilterInput.addEventListener("input", () => this.renderVoiceOptions());
       this.clearVoiceFilterButton.addEventListener("click", () => this.clearVoiceFilter());
+      this.pronunciationOptionsButton.addEventListener("click", () => {
+        this.handlers.onPronunciationOptions?.();
+      });
       this.rateInput.addEventListener("input", () => {
         const rate = Number(this.rateInput.value);
         this.rateValue.value = `${rate.toFixed(1)}×`;
@@ -234,6 +240,7 @@
       this.voiceSelect = null;
       this.voiceFilterInput = null;
       this.clearVoiceFilterButton = null;
+      this.pronunciationOptionsButton = null;
       this.rateInput = null;
       this.rateValue = null;
       this.batchCharsInput = null;
