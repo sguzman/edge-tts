@@ -147,7 +147,12 @@ function ensureLinuxPiperPort() {
 
   port.onDisconnect.addListener(() => {
     const error = chrome.runtime.lastError;
-    disconnectLinuxPiperPort();
+
+    // A canceled helper may disconnect after a replacement helper has already
+    // been connected. Never let the stale port tear down the new global port.
+    if (linuxPiperPort === port) {
+      disconnectLinuxPiperPort();
+    }
     if (error) console.warn(error.message);
   });
 
