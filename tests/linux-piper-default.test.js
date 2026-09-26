@@ -22,3 +22,11 @@ test("passive voice refresh does not overwrite the saved preference", () => {
   assert.doesNotMatch(refreshBody, /this\.settings\.voiceName = this\.selectedVoice\.name/);
   assert.match(refreshBody, /savedVoiceName \|\| this\.selectedVoice\?\.name/);
 });
+
+
+test("settings v2 migrate once to Ryan High", () => {
+  assert.match(reader, /settingsVersion: 3/);
+  assert.match(reader, /requiresRyanDefaultMigration = storedSettingsVersion < 3/);
+  assert.match(reader, /voiceName: requiresRyanDefaultMigration/);
+  assert.match(reader, /\? "Ryan High"/);
+});
