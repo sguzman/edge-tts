@@ -10,7 +10,7 @@ A Microsoft Edge extension that turns normal webpages into a synchronized read-a
 - **Linux Piper voices are optional, offline, and CPU-only:** a persistent Native Messaging helper discovers user-installed Piper models under `~/.local/share/edge-natural-tts/voices/`, keeps the selected model warm, and returns WAV audio. The v1 Linux timing bridge is explicitly approximate until source-word alignment is validated.
 - **Windows-local discovery merges two catalogs:** page `speechSynthesis.getVoices()` plus extension `chrome.tts.getVoices()`. A Windows voice missing from Web Speech can therefore still appear and play through the extension-level Windows TTS backend.
 - Voice names are visibly prefixed with **[PIPER]**, **[WIN-NATURAL]**, **[WIN-LEGACY]**, or **[ONLINE]**, and the toolbar can filter each class independently.
-- Natural synthesis is requested at normal prosody; the primary **Speed** control is client-side playback speed, currently 0.5x–8x.
+- Online Natural synthesis is requested at normal prosody and uses client-side playback speed. Linux Piper uses a hybrid speed plan: modest rate changes are synthesized through Piper phoneme duration (`length_scale`) and only the residual 0.5x–8x range is applied by the browser, which preserves clause cadence better at common faster speeds.
 - Natural/direct audio has a **Volume** control from 0–200% using Web Audio gain. Local Windows voices remain limited to the OS/browser TTS volume range.
 - Highlights the currently spoken word and sentence using Microsoft word timing metadata for direct audio, Web Speech boundary events, or `chrome.tts` word events for Windows-local fallback voices.
 - Adjacent short paragraphs are aggregated into a logical speech batch so the reader can plan continuous playback across paragraph boundaries.
@@ -40,7 +40,7 @@ The toolbar's **Voice class** filter can show all voices or any one backend clas
 
 A local voice already exposed by `speechSynthesis` keeps the existing Web Speech playback path. A local voice found only through `chrome.tts` is spoken by the extension-level Windows TTS backend; its start/word/end events are bridged back into the tab so the existing reader cursor and highlighter continue to work.
 
-Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices.
+Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices. Ryan High is warmed opportunistically as soon as the native host starts, and sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency.
 
 ## Direct Natural-voice audio
 
