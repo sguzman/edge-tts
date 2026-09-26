@@ -214,6 +214,13 @@
 
     _speakLinuxPiperChunk(generation) {
       if (generation !== this.generation) return;
+
+      // Each sentence is a separate native synthesis/playback cycle. The
+      // previous audio element marks directActive false when it ends, so the
+      // next sentence must explicitly reactivate the media clock before its
+      // boundary loop starts.
+      this.directActive = true;
+
       const payload = this.currentChunks?.[this.currentChunkIndex];
       if (!payload) {
         this.directActive = false;
