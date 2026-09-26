@@ -27,7 +27,7 @@ test("Linux paths and shell flags become stable spoken projections", () => {
 
   assert.equal(
     result.text,
-    "read link dash f home directory slash dot config slash fish slash config dot fish"
+    "read link dash f home directory, slash, dot config, slash, fish, slash, config dot fish"
   );
   assert.ok(
     result.transformations.some((item) => item.ruleId === "filesystem-path")
@@ -72,7 +72,7 @@ test("spoken expansion preserves canonical source segment identity", () => {
   assert.equal(result.segments[1], gpuSegment);
   assert.equal(result.starts[0], 0);
   assert.ok(result.starts[1] > "~/.config/fish/config.fish".length);
-  assert.match(result.text, /^home directory slash/);
+  assert.match(result.text, /^home directory, slash,/);
   assert.match(result.text, /jee pee you$/);
 });
 
@@ -94,4 +94,13 @@ test("normalization can be disabled without changing canonical token text", () =
 
   assert.equal(result.text, "GPU ~/.config/fish/config.fish");
   assert.deepEqual(result.transformations, []);
+});
+
+
+test("path ellipsis is spoken as ellipsis rather than dot dot dot", () => {
+  const result = pronunciation.transformText("~/.config/...");
+  assert.equal(
+    result.text,
+    "home directory, slash, dot config, slash, ellipsis"
+  );
 });
