@@ -1086,136 +1086,30 @@
         return;
       }
 
-      const payload = prepared.payload;
-      this.directActive = true;
+      this.directActive = false;
       this.linuxPiperPlaybackIndex = prepared.chunkIndex;
       this.linuxPiperPausedInPlace = false;
       this.directBoundaries = this._preparedLinuxPiperBoundaries(prepared);
       this.directBoundaryIndex = 0;
+      this.currentChunkBoundaryIndex = -1;
 
-      const blob = new Blob(prepared.audio, { type: "audio/wav" });
-      this._revokeObjectUrl();
-      this.directObjectUrl = root.URL.createObjectURL(blob);
-
-      try {
-        this.directAudio?.pause?.();
-        this.directAudio?.removeAttribute?.("src");
-        this.directAudio?.load?.();
-      } catch (_error) {}
-
-      const audio = root.document?.createElement?.("audio") || new root.Audio();
-      audio.preload = "auto";
-      audio.preservesPitch = true;
-      if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
-      audio.src = this.directObjectUrl;
-      audio.playbackRate = this.directPlaybackRate;
-      audio.volume = Math.min(
-        1,
-        Math.max(0, Number(this.directOutputGain) || 0)
-      );
-      this.directAudio = audio;
-
-      const activeGeneration = prepared.generation;
-      audio.onended = () => {
-        this._finishLinuxPiperPreparedPlayback(activeGeneration, prepared);
-      };
-
-      audio.onerror = () => {
-        if (activeGeneration !== this.generation) return;
-        const mediaCode = audio.error?.code;
-        const mediaMessage = String(audio.error?.message || "").trim();
-        const detail =
-          `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}` +
-          `${mediaMessage ? `: ${mediaMessage}` : ""}; ` +
-          `readyState=${audio.readyState}; networkState=${audio.networkState}`;
-
-        if (
-          mediaCode === 4 ||
-          /URL safety check/i.test(mediaMessage)
-        ) {
-          this._playLinuxPiperPreparedOffscreen(
-            activeGeneration,
-            prepared,
-            detail
-          );
-          return;
-        }
-
-        this._failLinuxPiper(detail);
-      };
-
+      // Piper WAV playback belongs to the extension, not to arbitrary pages.
+      // The previous "page <audio> first, offscreen fallback second" design had
+      // a real startup race: page audio could reject with NotAllowedError and
+      // mark the reader Paused just before a media-safety error transferred the
+      // same WAV to offscreen playback. Audio would then play while the reader
+      // intentionally ignored start/boundary events because it believed it was
+      // paused. Use the extension-owned player from the outset.
       this.onStatus?.(
-        prepared.prefetch ? "Playing prefetched Piper audio..." : "Playing Piper audio..."
+        prepared.prefetch
+          ? "Playing prefetched Piper audio..."
+          : "Playing Piper audio..."
       );
-
-      const startMediaPlayback = (attempt = 0) => {
-        void audio.play()
-          .then(() => {
-            if (activeGeneration !== this.generation) return;
-            this.onStart?.(
-              payload.segments?.[0],
-              Math.max(
-                0,
-                (root.performance?.now?.() ?? Date.now()) - this.requestedAt
-              )
-            );
-            this._startLinuxPiperBoundaryClock(activeGeneration);
-            this._fillLinuxPiperPrefetch(activeGeneration);
-          })
-          .catch((error) => {
-            if (activeGeneration !== this.generation) return;
-
-            // media.error may have already transferred this prepared WAV to
-            // extension-owned offscreen playback. The original page audio
-            // play() promise will then reject as a consequence of removing its
-            // unsafe blob URL; that rejection must not tear down the fallback.
-            if (
-              this.linuxPiperOffscreenPlayback?.prepared === prepared ||
-              (
-                this.linuxPiperOffscreenPlayback &&
-                this.directAudio !== audio
-              )
-            ) {
-              return;
-            }
-
-            if (error?.name === "NotAllowedError") {
-              // Extension-action activation can expire while CPU synthesis is
-              // running. Keep this prepared WAV intact and let the next explicit
-              // toolbar Resume click provide a fresh user activation.
-              this._clearBoundaryClock();
-              this.directActive = false;
-              this.linuxPiperPausedInPlace = true;
-              this.onPlaybackBlocked?.(error);
-              return;
-            }
-
-            if (
-              error?.name === "AbortError" &&
-              attempt < 1 &&
-              this.directAudio === audio
-            ) {
-              this.onStatus?.("Retrying Piper media start...");
-              root.setTimeout(() => {
-                if (
-                  activeGeneration === this.generation &&
-                  this.directAudio === audio &&
-                  !this.linuxPiperPausedInPlace
-                ) {
-                  startMediaPlayback(attempt + 1);
-                }
-              }, 150);
-              return;
-            }
-
-            this._failLinuxPiper(
-              `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}; ` +
-              `readyState=${audio.readyState}; networkState=${audio.networkState}`
-            );
-          });
-      };
-
-      startMediaPlayback();
+      this._playLinuxPiperPreparedOffscreen(
+        generation,
+        prepared,
+        "primary Piper playback"
+      );
     }
 
     _failLinuxPiper(message) {
