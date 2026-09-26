@@ -259,6 +259,7 @@
       this.linuxPiperVoicesLoaded = false;
       this.linuxPiperVoiceRequest = null;
       this.linuxPiperPronunciationRequest = null;
+      this.linuxPiperSpeakSerial = 0;
 
       this.linuxPiperRequests = new Map();
       this.linuxPiperPrepared = new Map();
@@ -486,8 +487,41 @@
 
     speak(block, startSegmentIndex, options = {}) {
       if (!isLinuxPiperVoice(options.voice)) {
+        this.linuxPiperSpeakSerial += 1;
         return super.speak(block, startSegmentIndex, options);
       }
+
+      // Retire the previous session immediately, then force-read the persisted
+      // pronunciation config before building any Piper payload. This makes an
+      // explicit Options save authoritative even if a storage change event was
+      // delayed or missed in the content-script world.
+      this.cancel();
+      const speakSerial = ++this.linuxPiperSpeakSerial;
+      this.onStatus?.("Loading pronunciation rules...");
+
+      Promise.resolve(
+        pronunciation?.loadConfig?.({ force: true })
+      )
+        .catch((error) => {
+          console.warn(
+            "Edge Natural TTS could not refresh pronunciation rules before speech.",
+            error
+          );
+          return pronunciation?.getConfig?.() || null;
+        })
+        .then(() => {
+          if (speakSerial !== this.linuxPiperSpeakSerial) return;
+          this._beginLinuxPiperSpeak(
+            block,
+            startSegmentIndex,
+            options,
+            speakSerial
+          );
+        });
+    }
+
+    _beginLinuxPiperSpeak(block, startSegmentIndex, options, speakSerial) {
+      if (speakSerial !== this.linuxPiperSpeakSerial) return;
 
       const chunks = createPiperSentenceChunks(block, startSegmentIndex);
       if (!chunks.length) {
@@ -495,7 +529,6 @@
         return;
       }
 
-      this.cancel();
       this.directSessionMode = true;
       this.generation += 1;
       const generation = this.generation;
@@ -509,7 +542,9 @@
         Math.max(0.25, Number(options.rate) || 1)
       );
 
-      const configuredVolume = Number(root.EdgeTtsExtension?.AudioControls?.currentVolume);
+      const configuredVolume = Number(
+        root.EdgeTtsExtension?.AudioControls?.currentVolume
+      );
       this.directOutputGain = Number.isFinite(configuredVolume)
         ? Math.min(2, Math.max(0, configuredVolume))
         : 1;
@@ -583,7 +618,9 @@
           requestId: request,
           text: payload.text,
           voiceId: this.currentOptions?.voice?.voiceId,
-          lang: this.currentOptions?.voice?.lang
+          lang: this.currentOptions?.voice?.lang,
+          pronunciationRevision: Number(payload.configRevision) || 0,
+          pronunciationSavedAt: Number(payload.configSavedAt) || 0
         })
       )
         .then((response) => {
@@ -1211,6 +1248,7 @@
     }
 
     cancel() {
+      this.linuxPiperSpeakSerial += 1;
       this._clearLinuxPiperSentencePause();
       this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
@@ -1228,6 +1266,7 @@
     }
 
     abandon() {
+      this.linuxPiperSpeakSerial += 1;
       this._clearLinuxPiperSentencePause();
       this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
