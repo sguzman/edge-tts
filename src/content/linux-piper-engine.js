@@ -501,38 +501,82 @@
 
       if (this._hasLinuxPiperOffscreenPlayback()) {
         const playback = this.linuxPiperOffscreenPlayback;
-        playback.paused = false;
-        this.linuxPiperPausedInPlace = false;
-        void root.chrome?.runtime?.sendMessage?.({
-          type: "EDGE_TTS_PIPER_OFFSCREEN_RESUME",
-          playbackId: playback.playbackId
-        }).then((response) => {
-          if (!response?.accepted) {
-            this._failLinuxPiper(
-              response?.error || "Extension-owned Piper resume was rejected."
+        const playbackId = playback.playbackId;
+        playback.resumePending = true;
+        this.onStatus?.("Resuming...");
+
+        return Promise.resolve(
+          root.chrome?.runtime?.sendMessage?.({
+            type: "EDGE_TTS_PIPER_OFFSCREEN_RESUME",
+            playbackId
+          })
+        )
+          .then((response) => {
+            if (
+              this.linuxPiperOffscreenPlayback?.playbackId !== playbackId ||
+              playback.generation !== this.generation
+            ) {
+              return false;
+            }
+
+            playback.resumePending = false;
+            if (!response?.accepted) {
+              // The offscreen AUDIO_PLAYBACK document may have been discarded
+              // while paused. Keep our canonical cursor/prepared WAV state,
+              // retire the stale session, and let ReaderApp restart from the
+              // current highlighted word instead of claiming playback resumed.
+              playback.paused = true;
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.linuxPiperOffscreenPlayback = null;
+              this.onStatus?.("Resume session expired — restarting...");
+              return false;
+            }
+
+            // audio.play() has actually resolved in the offscreen document.
+            // The resumed event normally reaches us as well, but make local
+            // state truthful from the confirmed command response.
+            playback.paused = false;
+            this.directActive = true;
+            this.linuxPiperPausedInPlace = false;
+            this.onStatus?.("Reading");
+            return true;
+          })
+          .catch((error) => {
+            if (
+              this.linuxPiperOffscreenPlayback?.playbackId === playbackId
+            ) {
+              playback.resumePending = false;
+              playback.paused = true;
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.linuxPiperOffscreenPlayback = null;
+            }
+            console.warn(
+              "Edge Natural TTS offscreen resume transport failed.",
+              error
             );
-          }
-        }).catch((error) => this._failLinuxPiper(
-          `extension-owned resume failed: ${error?.message || String(error)}`
-        ));
-        return true;
+            this.onStatus?.("Resume transport failed — restarting...");
+            return false;
+          });
       }
 
       if (!this.directAudio) return false;
 
       const generation = this.generation;
-      this.linuxPiperPausedInPlace = false;
-      this.directActive = true;
-      void this.directAudio.play()
+      return Promise.resolve(this.directAudio.play())
         .then(() => {
-          if (generation !== this.generation) return;
+          if (generation !== this.generation) return false;
+          this.linuxPiperPausedInPlace = false;
+          this.directActive = true;
           this._startLinuxPiperBoundaryClock(generation);
           this.onStatus?.("Reading");
+          return true;
         })
-        .catch((error) => this._failLinuxPiper(
-          `resume failed: ${error?.message || String(error)}`
-        ));
-      return true;
+        .catch((error) => {
+          console.warn("Edge Natural TTS direct resume failed.", error);
+          return false;
+        });
     }
 
     speak(block, startSegmentIndex, options = {}) {
