@@ -76,9 +76,15 @@ test("next Piper sentence prefetch starts before current prepared sentence playb
   assert.ok(branchAt >= 0 && fillAt > branchAt && playAt > fillAt);
 });
 
-test("speed changes preserve current playback but regenerate future Piper prefetch", () => {
-  assert.match(piper, /setPlaybackRate\(rate\)/);
-  assert.match(piper, /this\.linuxPiperPrepared\.clear\(\)/);
-  assert.match(piper, /this\._stopLinuxPiperNativeWork\(\)/);
-  assert.match(piper, /this\._fillLinuxPiperPrefetch\(this\.generation\)/);
+test("Piper synthesis remains canonical 1x and user speed stays in media playback", () => {
+  assert.match(host, /SynthesisConfig\(length_scale=1\.0\)/);
+  assert.doesNotMatch(host, /message\.get\("lengthScale"\)/);
+  assert.doesNotMatch(background, /lengthScale/);
+  assert.doesNotMatch(piper, /piperRatePlan/);
+  assert.doesNotMatch(piper, /linuxPiperLengthScale/);
+  assert.match(
+    piper,
+    /this\.directPlaybackRate = Math\.min\([\s\S]*?Number\(options\.rate\) \|\| 1/
+  );
+  assert.match(piper, /audio\.playbackRate = this\.directPlaybackRate/);
 });
