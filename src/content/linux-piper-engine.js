@@ -1093,6 +1093,7 @@
       } catch (_error) {}
 
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       for (const request of this.linuxPiperRequests.values()) {
         if (request.timeoutId) root.clearTimeout(request.timeoutId);
       }
@@ -1197,6 +1198,7 @@
 
     cancel() {
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
@@ -1213,6 +1215,7 @@
 
     abandon() {
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
