@@ -56,3 +56,29 @@ test("native Piper helper advertises idle before synthesisEnd for immediate pref
   const endAt = host.indexOf('"type": "synthesisEnd"', clearAt);
   assert.ok(clearAt >= 0 && endAt > clearAt);
 });
+
+
+test("Ryan warms in parallel with native host startup", () => {
+  assert.match(host, /_voice_load_lock = threading\.Lock\(\)/);
+  assert.match(host, /def start_default_voice_warmup\(\)/);
+  assert.match(host, /target=warm_default_voice/);
+  const mainAt = host.indexOf("def main() -> None:");
+  const warmAt = host.indexOf("start_default_voice_warmup()", mainAt);
+  const loopAt = host.indexOf("while True:", mainAt);
+  assert.ok(warmAt > mainAt && loopAt > warmAt);
+});
+
+test("next Piper sentence prefetch starts before current prepared sentence playback", () => {
+  const marker = "request.chunkIndex === this.currentChunkIndex";
+  const branchAt = piper.lastIndexOf(marker);
+  const fillAt = piper.indexOf("this._fillLinuxPiperPrefetch(request.generation);", branchAt);
+  const playAt = piper.indexOf("this._speakLinuxPiperChunk(request.generation);", branchAt);
+  assert.ok(branchAt >= 0 && fillAt > branchAt && playAt > fillAt);
+});
+
+test("speed changes preserve current playback but regenerate future Piper prefetch", () => {
+  assert.match(piper, /setPlaybackRate\(rate\)/);
+  assert.match(piper, /this\.linuxPiperPrepared\.clear\(\)/);
+  assert.match(piper, /this\._stopLinuxPiperNativeWork\(\)/);
+  assert.match(piper, /this\._fillLinuxPiperPrefetch\(this\.generation\)/);
+});
