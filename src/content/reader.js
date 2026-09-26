@@ -915,6 +915,7 @@
 
     async changeSentencePause(ms) {
       this.settings.sentencePauseMs = normalizeSentencePauseMs(ms);
+      this.speech?.setSentencePauseMs?.(this.settings.sentencePauseMs);
       this.toolbar.setSentencePause(this.settings.sentencePauseMs);
       await this.saveSettings();
     }
