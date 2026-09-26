@@ -681,6 +681,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           at: Date.now(),
           requestId,
           voiceId: String(message.voiceId || ""),
+          pronunciationRevision: Number(message.pronunciationRevision) || 0,
+          pronunciationSavedAt: Number(message.pronunciationSavedAt) || 0,
           text: String(message.text || "")
         }
       });
