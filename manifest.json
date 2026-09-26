@@ -8,7 +8,8 @@
     "scripting",
     "activeTab",
     "tts",
-    "nativeMessaging"
+    "nativeMessaging",
+    "offscreen"
   ],
   "host_permissions": [
     "https://speech.platform.bing.com/*",
