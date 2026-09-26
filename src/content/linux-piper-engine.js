@@ -207,6 +207,43 @@
       );
     }
 
+    setPlaybackRate(rate) {
+      if (
+        !this.directSessionMode ||
+        !isLinuxPiperVoice(this.currentOptions?.voice)
+      ) {
+        return super.setPlaybackRate?.(rate) ?? false;
+      }
+
+      const ratePlan = piperRatePlan(rate);
+      if (this.currentOptions) {
+        this.currentOptions.rate = ratePlan.requestedRate;
+      }
+      this.linuxPiperLengthScale = ratePlan.lengthScale;
+      this.directPlaybackRate = ratePlan.playbackRate;
+
+      if (this.directAudio) {
+        this.directAudio.playbackRate = this.directPlaybackRate;
+      }
+
+      // Future prepared sentences were synthesized with the previous native
+      // length scale. Retire only speculative work; keep the currently playing
+      // WAV alive and refill the look-ahead queue with the new timing.
+      this._stopLinuxPiperNativeWork();
+      for (const request of this.linuxPiperRequests.values()) {
+        if (request.timeoutId) root.clearTimeout(request.timeoutId);
+      }
+      this.linuxPiperRequests.clear();
+      this.linuxPiperPrepared.clear();
+      this.linuxPiperRequest = null;
+
+      root.setTimeout(
+        () => this._fillLinuxPiperPrefetch(this.generation),
+        0
+      );
+      return true;
+    }
+
     pauseInPlace() {
       if (!this.canPauseInPlace() || this.directAudio?.paused) return false;
       try {
