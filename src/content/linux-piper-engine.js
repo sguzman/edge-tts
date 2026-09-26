@@ -61,6 +61,58 @@
     return bytes;
   }
 
+  function separatorForPiperSegments(left, right) {
+    if (
+      left?.blockIndex !== undefined &&
+      right?.blockIndex !== undefined &&
+      left.blockIndex !== right.blockIndex
+    ) {
+      return "\n\n";
+    }
+    return " ";
+  }
+
+  function payloadForPiperSegments(segments) {
+    const starts = [];
+    let text = "";
+    for (let index = 0; index < segments.length; index += 1) {
+      if (index > 0) {
+        text += separatorForPiperSegments(segments[index - 1], segments[index]);
+      }
+      starts.push(text.length);
+      text += String(segments[index]?.text || "");
+    }
+    return { text, starts, segments: [...segments] };
+  }
+
+  function createPiperSentenceChunks(block, startSegmentIndex = 0) {
+    const remaining = Array.isArray(block?.segments)
+      ? block.segments.slice(Math.max(0, Number(startSegmentIndex) || 0))
+      : [];
+    if (!remaining.length) return [];
+
+    const chunks = [];
+    let current = [];
+    let currentKey = "";
+
+    const flush = () => {
+      if (!current.length) return;
+      chunks.push(payloadForPiperSegments(current));
+      current = [];
+      currentKey = "";
+    };
+
+    for (const segment of remaining) {
+      const key = `${segment?.blockIndex ?? "?"}:${segment?.sentenceIndex ?? 0}`;
+      if (current.length && key !== currentKey) flush();
+      if (!current.length) currentKey = key;
+      current.push(segment);
+    }
+
+    flush();
+    return chunks;
+  }
+
   if (!BaseSpeechEngine || typeof createUtteranceChunks !== "function") {
     return {
       LinuxPiperSpeechEngine: null,
@@ -131,24 +183,11 @@
         return super.speak(block, startSegmentIndex, options);
       }
 
-      // Piper high-quality CPU models must not inherit the online backend's
-      // large ~1200-character batching. Keep native requests short so first
-      // audio arrives promptly and cancellation has frequent boundaries.
-      const requestedChunks = options?.chunkOptions || {};
-      const chunks = createUtteranceChunks(block, startSegmentIndex, {
-        firstChunkMaxChars: Math.min(
-          180,
-          Math.max(80, Number(requestedChunks.firstChunkMaxChars) || 180)
-        ),
-        maxChars: Math.min(
-          260,
-          Math.max(120, Number(requestedChunks.maxChars) || 260)
-        ),
-        emergencyMaxChars: Math.min(
-          500,
-          Math.max(260, Number(requestedChunks.emergencyMaxChars) || 500)
-        )
-      });
+      // Piper prosody must follow the reader's actual sentence model. Character
+      // target chunking causes artificial phrase resets that sound like new
+      // sentences every few words and lets approximate timing drift across
+      // multiple sentences.
+      const chunks = createPiperSentenceChunks(block, startSegmentIndex);
       if (!chunks.length) {
         this.onEnd?.();
         return;
@@ -403,6 +442,8 @@
     isLinuxPiperVoice,
     mergeVoices,
     nativeVoiceToCatalogVoice,
-    PIPER_SYNTHESIS_TIMEOUT_MS
+    PIPER_SYNTHESIS_TIMEOUT_MS,
+    createPiperSentenceChunks,
+    payloadForPiperSegments
   };
 });
