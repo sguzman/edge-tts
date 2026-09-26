@@ -445,9 +445,35 @@
         }
 
         if (granted) {
-          if (this.speech?.resumeInPlace?.() === true) {
+          let resumed = false;
+          try {
+            resumed = await Promise.resolve(
+              this.speech?.resumeInPlace?.()
+            );
+          } catch (error) {
+            console.warn(
+              "Edge Natural TTS in-place resume confirmation failed.",
+              error
+            );
+            resumed = false;
+          }
+
+          if (
+            lifecycle !== this.lifecycleSerial ||
+            this.stopped ||
+            this.paused ||
+            this.quitRequested
+          ) {
+            return;
+          }
+
+          if (resumed === true) {
+            // Do not claim Reading until the backend has confirmed that media
+            // actually resumed. Offscreen Piper returns only after audio.play()
+            // succeeds; its resumed event also drives highlight state.
             this.toolbar.setStatus("Reading");
           } else {
+            this.toolbar.setStatus("Restarting from current word…");
             this.speakCurrentPosition();
           }
         } else {
