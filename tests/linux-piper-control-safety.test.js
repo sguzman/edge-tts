@@ -66,3 +66,15 @@ test("Piper supports in-place pause and resume", () => {
   assert.match(reader, /this\.speech\?\.pauseInPlace\?\.\(\)/);
   assert.match(reader, /this\.speech\?\.resumeInPlace\?\.\(\)/);
 });
+
+
+test("playback failures keep the actual error visible after button state becomes stopped", () => {
+  const errorStart = reader.indexOf("    handleError(error) {");
+  const errorEnd = reader.indexOf("    handlePlaybackBlocked", errorStart);
+  const body = reader.slice(errorStart, errorEnd);
+  assert.ok(body.indexOf("this.toolbar.setStopped()") >= 0);
+  assert.ok(
+    body.indexOf("this.toolbar.setStatus(`Error:") >
+      body.indexOf("this.toolbar.setStopped()")
+  );
+});
