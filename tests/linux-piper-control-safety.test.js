@@ -50,3 +50,15 @@ test("Piper bypasses Web Audio and plays through a fresh direct media element", 
   assert.match(piperEngine, /audio\.volume = Math\.min/);
   assert.match(piperEngine, /Playing Piper audio/);
 });
+
+
+test("Piper reactivates the highlight media clock for every sentence", () => {
+  assert.match(
+    piperEngine,
+    /_speakLinuxPiperChunk\(generation\)[\s\S]*?this\.directActive = true/
+  );
+  assert.match(
+    piperEngine,
+    /audio\.onended = \(\) => \{[\s\S]*?this\.directActive = false/
+  );
+});
