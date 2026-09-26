@@ -192,7 +192,9 @@ def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threadi
     global _active_request_id, _active_cancel, _active_thread
 
     try:
+        send_message({"type": "status", "requestId": request_id, "status": "Loading Piper model..."})
         voice = get_voice(voice_id)
+        send_message({"type": "status", "requestId": request_id, "status": "Synthesizing with Piper..."})
         config = SynthesisConfig(length_scale=1.0)
         pcm = bytearray()
         sample_rate: int | None = None
@@ -225,6 +227,15 @@ def synthesize_worker(request_id: str, voice_id: str, text: str, cancel: threadi
             wav_file.setnchannels(channels)
             wav_file.writeframes(bytes(pcm))
         wav_bytes = wav_io.getvalue()
+        send_message(
+            {
+                "type": "status",
+                "requestId": request_id,
+                "status": "Piper WAV ready...",
+                "audioBytes": len(wav_bytes),
+                "durationMs": duration_ms,
+            }
+        )
 
         for boundary in approximate_boundaries(text, duration_ms):
             if cancel.is_set():
@@ -343,6 +354,44 @@ def handle_message(message: dict[str, Any]) -> None:
         send_message({"type": "error", "requestId": request_id, "message": f"Unknown message type: {message_type}"})
 
 
+
+def run_self_test(voice_id: str) -> int:
+    """Synthesize a tiny probe without Native Messaging framing."""
+    try:
+        voice = get_voice(voice_id)
+        config = SynthesisConfig(length_scale=1.0)
+        pcm_bytes = 0
+        sample_rate = 0
+        peak = 0
+        for chunk in voice.synthesize("Ryan Piper self test.", config, include_alignments=False):
+            raw = chunk.audio_int16_bytes
+            pcm_bytes += len(raw)
+            sample_rate = int(chunk.sample_rate)
+            if raw:
+                import array
+
+                samples = array.array("h")
+                samples.frombytes(raw)
+                if sys.byteorder != "little":
+                    samples.byteswap()
+                if samples:
+                    peak = max(peak, max(abs(sample) for sample in samples))
+
+        if pcm_bytes <= 0 or sample_rate <= 0 or peak <= 0:
+            raise RuntimeError(
+                f"Piper self-test produced invalid audio: bytes={pcm_bytes}, rate={sample_rate}, peak={peak}"
+            )
+
+        print(
+            f"Piper self-test OK: {voice_id}; "
+            f"{sample_rate} Hz; {pcm_bytes} PCM bytes; peak={peak}"
+        )
+        return 0
+    except Exception as error:
+        print(f"Piper self-test FAILED: {voice_id}: {error}", file=sys.stderr)
+        return 1
+
+
 def main() -> None:
     while True:
         try:
@@ -358,4 +407,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    if len(sys.argv) >= 3 and sys.argv[1] == "--self-test":
+        raise SystemExit(run_self_test(sys.argv[2]))
     main()
