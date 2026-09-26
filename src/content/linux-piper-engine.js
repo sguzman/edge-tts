@@ -616,6 +616,10 @@
         request.chunkIndex === this.currentChunkIndex &&
         this.linuxPiperPlaybackIndex !== this.currentChunkIndex
       ) {
+        // The native helper is idle now. Start sentence N+1 before constructing
+        // and starting playback for sentence N so synthesis overlaps as much
+        // of the current sentence as possible.
+        this._fillLinuxPiperPrefetch(request.generation);
         this._speakLinuxPiperChunk(request.generation);
       } else {
         this._fillLinuxPiperPrefetch(request.generation);
