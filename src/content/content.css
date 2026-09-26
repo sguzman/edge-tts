@@ -69,14 +69,6 @@
   white-space: nowrap;
 }
 
-#edge-tts-toolbar .edge-tts-header [data-edge-tts-status].edge-tts-error-status {
-  overflow: visible;
-  text-overflow: clip;
-  white-space: normal;
-  overflow-wrap: anywhere;
-  user-select: text;
-  cursor: text;
-}
 
 #edge-tts-toolbar .edge-tts-row {
   display: flex;
