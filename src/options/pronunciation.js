@@ -180,6 +180,8 @@
     $("#enabled").checked = config.enabled !== false;
     $("#filesystem-paths").checked = config.technical.expandFilesystemPaths !== false;
     $("#shell-flags").checked = config.technical.expandShellFlags !== false;
+    $("#path-component-pauses").checked =
+      config.technical.pauseBetweenPathComponents !== false;
     $("#acronyms-enabled").checked = config.acronyms.enabled !== false;
     $("#brand-map-enabled").checked = config.pronunciation.enableBrandMap !== false;
     $("#year-mode").value = config.pronunciation.yearMode || "american";
@@ -233,6 +235,8 @@
     next.enabled = $("#enabled").checked;
     next.technical.expandFilesystemPaths = $("#filesystem-paths").checked;
     next.technical.expandShellFlags = $("#shell-flags").checked;
+    next.technical.pauseBetweenPathComponents =
+      $("#path-component-pauses").checked;
     next.acronyms.enabled = $("#acronyms-enabled").checked;
     next.pronunciation.enableBrandMap = $("#brand-map-enabled").checked;
     next.pronunciation.yearMode = $("#year-mode").value;
