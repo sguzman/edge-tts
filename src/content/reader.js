@@ -32,12 +32,16 @@
   const MIN_BATCH_CHARS = 400;
   const MAX_BATCH_CHARS = 2400;
   const DEFAULT_BATCH_CHARS = 1200;
+  const MIN_SENTENCE_PAUSE_MS = 0;
+  const MAX_SENTENCE_PAUSE_MS = 1200;
+  const DEFAULT_SENTENCE_PAUSE_MS = 300;
 
   const DEFAULT_SETTINGS = {
     settingsVersion: 3,
     rate: 1,
     voiceName: "",
     minBatchChars: DEFAULT_BATCH_CHARS,
+    sentencePauseMs: DEFAULT_SENTENCE_PAUSE_MS,
     wordColor: DEFAULT_WORD_COLOR,
     sentenceColor: DEFAULT_SENTENCE_COLOR,
     autoScroll: true,
@@ -53,6 +57,18 @@
     }
     const stepped = Math.round(numeric / 100) * 100;
     return Math.min(MAX_BATCH_CHARS, Math.max(MIN_BATCH_CHARS, stepped));
+  }
+
+  function normalizeSentencePauseMs(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) {
+      return DEFAULT_SENTENCE_PAUSE_MS;
+    }
+    const stepped = Math.round(numeric / 50) * 50;
+    return Math.min(
+      MAX_SENTENCE_PAUSE_MS,
+      Math.max(MIN_SENTENCE_PAUSE_MS, stepped)
+    );
   }
 
   function isEditableTarget(target) {
@@ -92,7 +108,8 @@
           if (!this.stopped && !this.paused && this.enabled) {
             this.toolbar?.setStatus?.(status);
           }
-        }
+        },
+        onPlaybackBlocked: (error) => this.handlePlaybackBlocked(error)
       });
       this.toolbar = new Toolbar({
         onPlayPause: () => this.playPause(),
@@ -102,6 +119,7 @@
         onVoice: (name) => this.changeVoice(name),
         onRate: (rate) => this.changeRate(rate),
         onBatchChars: (chars) => this.changeBatchChars(chars),
+        onSentencePause: (ms) => this.changeSentencePause(ms),
         onWordColor: (color) => this.changeWordColor(color),
         onSentenceColor: (color) => this.changeSentenceColor(color),
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
@@ -527,6 +545,7 @@
       this.highlighter.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setRate(this.settings.rate);
       this.toolbar.setBatchChars(this.settings.minBatchChars);
+      this.toolbar.setSentencePause(this.settings.sentencePauseMs);
       this.toolbar.setHighlightColors(this.settings.wordColor, this.settings.sentenceColor);
       this.toolbar.setAutoScroll(this.settings.autoScroll);
       this.toolbar.setClickToSeek(this.settings.clickToSeek);
@@ -610,6 +629,7 @@
       this.speech.speak({ segments: batch.segments }, 0, {
         rate: this.settings.rate,
         voice: this.selectedVoice,
+        sentencePauseMs: this.settings.sentencePauseMs,
         chunkOptions: {
           firstChunkMaxChars: utteranceTargetChars,
           maxChars: Math.max(1800, utteranceTargetChars),
@@ -677,6 +697,24 @@
       this.highlighter.clear();
       this.toolbar.setStatus(error.message);
       this.toolbar.setStopped();
+    }
+
+    handlePlaybackBlocked(error) {
+      this.clearResumeWatchdog();
+      console.info(
+        "Edge Natural TTS initial media playback is waiting for a page gesture.",
+        error
+      );
+
+      // Chromium may reject the first asynchronously-created Piper WAV because
+      // the extension-action user activation has expired by the time CPU
+      // synthesis completes. This is recoverable: keep the prepared WAV and
+      // cursor intact so the toolbar's Resume click can play it directly.
+      this.stopped = false;
+      this.paused = true;
+      this.releaseAudioOwnership();
+      this.toolbar.setPaused(true);
+      this.toolbar.setStatus("Ready — press Resume");
     }
 
     async handlePageClick(event) {
@@ -796,6 +834,12 @@
       }
     }
 
+    async changeSentencePause(ms) {
+      this.settings.sentencePauseMs = normalizeSentencePauseMs(ms);
+      this.toolbar.setSentencePause(this.settings.sentencePauseMs);
+      await this.saveSettings();
+    }
+
     async changeWordColor(color) {
       this.settings.wordColor = normalizeColor(color, DEFAULT_WORD_COLOR);
       this.highlighter.setColors(this.settings.wordColor, this.settings.sentenceColor);
@@ -844,6 +888,7 @@
             ? "Ryan High"
             : (stored.voiceName || "Ryan High"),
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
+          sentencePauseMs: normalizeSentencePauseMs(stored.sentencePauseMs),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
           sentenceColor: normalizeColor(stored.sentenceColor, DEFAULT_SETTINGS.sentenceColor),
           autoScroll: stored.autoScroll !== false,
@@ -880,5 +925,10 @@
     }
   }
 
-  extension.Reader = { ReaderApp, isEditableTarget, normalizeBatchChars };
+  extension.Reader = {
+    ReaderApp,
+    isEditableTarget,
+    normalizeBatchChars,
+    normalizeSentencePauseMs
+  };
 })(globalThis);
