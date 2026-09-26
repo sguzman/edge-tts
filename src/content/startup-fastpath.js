@@ -88,6 +88,8 @@
       // auto-start races discovery and can stall until Stop -> Play.
       const linuxPiperVoicesReady =
         this.speech.refreshLinuxPiperVoices?.() || Promise.resolve();
+      const pronunciationReady =
+        this.speech.refreshPronunciationConfig?.() || Promise.resolve();
 
       const winNaturalVoicesReady = this.speech.refreshWinNaturalVoices?.() || Promise.resolve();
       Promise.resolve(winNaturalVoicesReady).catch(() => {});
@@ -108,7 +110,8 @@
       await Promise.all([
         settingsReady,
         extensionVoicesReady,
-        linuxPiperVoicesReady
+        linuxPiperVoicesReady,
+        pronunciationReady
       ]);
       if (!this.enabled || this.quitRequested) {
         trace.active = false;
