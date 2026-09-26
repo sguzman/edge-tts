@@ -78,11 +78,12 @@ exact.
 
 ## Speed and cadence
 
-Piper does not use the browser playback-rate control for the entire requested
-speed range. Common moderate changes are synthesized with Piper
-`SynthesisConfig.length_scale`, while the browser applies only the residual
-rate needed to preserve the full 0.5x-8x UI range. This keeps more of the
-model's punctuation and phoneme timing intact than pure time compression.
+Piper synthesis is always requested at canonical/native 1.0x timing
+(`SynthesisConfig.length_scale=1.0`). The reader applies the user's requested
+speed only to the finished WAV through browser media playback with pitch
+preservation. This intentionally separates TTS prosody generation from
+listening speed so prosody debugging is not confounded by speed-dependent
+synthesis.
 
 ## Uninstall
 
