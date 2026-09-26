@@ -272,8 +272,13 @@
 
     setStatus(text) {
       if (this.status) {
-        this.status.textContent = text;
-        this.status.title = text;
+        const value = String(text || "");
+        this.status.textContent = value;
+        this.status.title = value;
+        this.status.classList.toggle(
+          "edge-tts-error-status",
+          /^Error:/i.test(value)
+        );
       }
     }
 
