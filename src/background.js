@@ -507,6 +507,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             Math.max(0, Number(value) || 0)
           )
         : [],
+      sentencePauseMs: Math.max(
+        0,
+        Math.min(1200, Number(message.sentencePauseMs) || 0)
+      ),
       playbackRate: Number(message.playbackRate) || 1,
       volume: Number(message.volume)
     })
