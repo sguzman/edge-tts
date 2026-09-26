@@ -125,7 +125,8 @@
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
         onClickToSeek: (enabled) => this.changeClickToSeek(enabled),
         onMinimized: (minimized) => this.changeMinimized(minimized),
-        onPosition: (position) => this.changeToolbarPosition(position)
+        onPosition: (position) => this.changeToolbarPosition(position),
+        onPronunciationOptions: () => this.openPronunciationOptions()
       });
 
       this.boundClick = (event) => this.handlePageClick(event);
@@ -164,10 +165,12 @@
       this.applySettings();
       this.rebuildModel();
 
-      // Linux development branch: resolve the app-private Piper catalog before
-      // making the initial voice choice, so an installed local voice does not
-      // lose a race to Edge's online catalog during startup.
-      await this.speech.refreshLinuxPiperVoices?.();
+      // Linux development branch: resolve both the app-private Piper catalog
+      // and pronunciation projection before the first speech request.
+      await Promise.all([
+        this.speech.refreshLinuxPiperVoices?.() || Promise.resolve(),
+        this.speech.refreshPronunciationConfig?.() || Promise.resolve()
+      ]);
       if (
         lifecycle !== this.lifecycleSerial ||
         !this.enabled ||
@@ -876,6 +879,16 @@
     async changeToolbarPosition(position) {
       this.settings.toolbarPosition = position;
       await this.saveSettings();
+    }
+
+    openPronunciationOptions() {
+      try {
+        void chrome.runtime.sendMessage({
+          type: "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS"
+        });
+      } catch (error) {
+        console.warn("Could not open pronunciation options.", error);
+      }
     }
 
     async loadSettings() {
