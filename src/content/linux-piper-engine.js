@@ -129,7 +129,14 @@
       this.linuxPiperVoiceListeners = new Set();
       this.linuxPiperVoicesLoaded = false;
       this.linuxPiperVoiceRequest = null;
+
+      this.linuxPiperRequests = new Map();
+      this.linuxPiperPrepared = new Map();
       this.linuxPiperRequest = null;
+      this.linuxPiperPlaybackIndex = -1;
+      this.linuxPiperPausedInPlace = false;
+      this.linuxPiperPrefetchDepth = 2;
+
       void this.refreshLinuxPiperVoices();
     }
 
@@ -178,15 +185,56 @@
       return isLinuxPiperVoice(voice) || super.canPlayIndependently?.(voice);
     }
 
+    canPauseInPlace() {
+      return Boolean(
+        this.directSessionMode &&
+        this.directAudio &&
+        this.linuxPiperPlaybackIndex === this.currentChunkIndex
+      );
+    }
+
+    pauseInPlace() {
+      if (!this.canPauseInPlace() || this.directAudio?.paused) return false;
+      try {
+        this.directAudio.pause();
+      } catch (_error) {
+        return false;
+      }
+      this._clearBoundaryClock();
+      this.directActive = false;
+      this.linuxPiperPausedInPlace = true;
+      return true;
+    }
+
+    resumeInPlace() {
+      if (
+        !this.linuxPiperPausedInPlace ||
+        !this.directAudio ||
+        this.linuxPiperPlaybackIndex !== this.currentChunkIndex
+      ) {
+        return false;
+      }
+
+      const generation = this.generation;
+      this.linuxPiperPausedInPlace = false;
+      this.directActive = true;
+      void this.directAudio.play()
+        .then(() => {
+          if (generation !== this.generation) return;
+          this._startBoundaryClock(generation);
+          this.onStatus?.("Reading");
+        })
+        .catch((error) => this._failLinuxPiper(
+          \`resume failed: \${error?.message || String(error)}\`
+        ));
+      return true;
+    }
+
     speak(block, startSegmentIndex, options = {}) {
       if (!isLinuxPiperVoice(options.voice)) {
         return super.speak(block, startSegmentIndex, options);
       }
 
-      // Piper prosody must follow the reader's actual sentence model. Character
-      // target chunking causes artificial phrase resets that sound like new
-      // sentences every few words and lets approximate timing drift across
-      // multiple sentences.
       const chunks = createPiperSentenceChunks(block, startSegmentIndex);
       if (!chunks.length) {
         this.onEnd?.();
@@ -195,65 +243,83 @@
 
       this.cancel();
       this.directSessionMode = true;
-      this.directActive = true;
       this.generation += 1;
       const generation = this.generation;
+
       this.currentChunks = chunks;
       this.currentChunkIndex = 0;
       this.currentOptions = options;
       this.requestedAt = root.performance?.now?.() ?? Date.now();
-      this.directPlaybackRate = Math.min(16, Math.max(0.25, Number(options.rate) || 1));
+      this.directPlaybackRate = Math.min(
+        16,
+        Math.max(0.25, Number(options.rate) || 1)
+      );
 
       const configuredVolume = Number(root.EdgeTtsExtension?.AudioControls?.currentVolume);
       this.directOutputGain = Number.isFinite(configuredVolume)
         ? Math.min(2, Math.max(0, configuredVolume))
         : 1;
 
+      this.linuxPiperPrepared.clear();
+      this.linuxPiperRequests.clear();
+      this.linuxPiperRequest = null;
+      this.linuxPiperPlaybackIndex = -1;
+      this.linuxPiperPausedInPlace = false;
+
       this._speakLinuxPiperChunk(generation);
     }
 
-    _speakLinuxPiperChunk(generation) {
-      if (generation !== this.generation) return;
+    _activeLinuxPiperRequestForChunk(chunkIndex) {
+      for (const request of this.linuxPiperRequests.values()) {
+        if (request.chunkIndex === chunkIndex) return request;
+      }
+      return null;
+    }
 
-      // Each sentence is a separate native synthesis/playback cycle. The
-      // previous audio element marks directActive false when it ends, so the
-      // next sentence must explicitly reactivate the media clock before its
-      // boundary loop starts.
-      this.directActive = true;
-
-      const payload = this.currentChunks?.[this.currentChunkIndex];
-      if (!payload) {
-        this.directActive = false;
-        this.directSessionMode = true;
-        this.onEnd?.();
-        return;
+    _startLinuxPiperSynthesis(generation, chunkIndex, prefetch = false) {
+      if (
+        generation !== this.generation ||
+        !this.directSessionMode ||
+        this.linuxPiperRequests.size > 0 ||
+        this.linuxPiperPrepared.has(chunkIndex)
+      ) {
+        return false;
       }
 
-      const request = requestId(generation, this.currentChunkIndex);
+      const payload = this.currentChunks?.[chunkIndex];
+      if (!payload) return false;
+
+      const request = requestId(generation, chunkIndex);
       const timeoutId = root.setTimeout(() => {
-        if (
-          this.linuxPiperRequest?.requestId !== request ||
-          generation !== this.generation
-        ) {
-          return;
-        }
+        const active = this.linuxPiperRequests.get(request);
+        if (!active || generation !== this.generation) return;
         try {
           root.chrome?.runtime?.sendMessage?.({
             type: "EDGE_TTS_LINUX_PIPER_STOP",
             requestId: request
           });
         } catch (_error) {}
-        this._failLinuxPiper("native synthesis timed out");
+        this._handleLinuxPiperRequestFailure(
+          active,
+          "native synthesis timed out"
+        );
       }, PIPER_SYNTHESIS_TIMEOUT_MS);
 
-      this.linuxPiperRequest = {
+      const state = {
         requestId: request,
         generation,
+        chunkIndex,
         payload,
+        prefetch,
         audio: [],
         boundaries: [],
         timeoutId
       };
+      this.linuxPiperRequests.set(request, state);
+      if (!prefetch && chunkIndex === this.currentChunkIndex) {
+        this.linuxPiperRequest = state;
+        this.onStatus?.("Synthesizing with Piper...");
+      }
 
       Promise.resolve(
         root.chrome?.runtime?.sendMessage?.({
@@ -265,101 +331,150 @@
         })
       )
         .then((response) => {
-          if (!response?.accepted && generation === this.generation) {
-            this._failLinuxPiper("Linux Piper helper refused the request.");
+          if (
+            !response?.accepted &&
+            generation === this.generation &&
+            this.linuxPiperRequests.has(request)
+          ) {
+            this._handleLinuxPiperRequestFailure(
+              state,
+              "Linux Piper helper refused the request."
+            );
           }
         })
         .catch((error) => {
-          if (generation === this.generation) {
-            this._failLinuxPiper(error?.message || String(error));
+          if (
+            generation === this.generation &&
+            this.linuxPiperRequests.has(request)
+          ) {
+            this._handleLinuxPiperRequestFailure(
+              state,
+              error?.message || String(error)
+            );
           }
         });
+
+      return true;
     }
 
-    _failLinuxPiper(message) {
-      if (this.linuxPiperRequest?.timeoutId) {
-        root.clearTimeout(this.linuxPiperRequest.timeoutId);
-      }
-      this._resetDirectState({ keepMode: true });
-      this.linuxPiperRequest = null;
-      this.onError?.(new Error(`Linux Piper TTS failed: ${message}`));
-    }
+    _handleLinuxPiperRequestFailure(request, message) {
+      if (request?.timeoutId) root.clearTimeout(request.timeoutId);
+      if (request?.requestId) this.linuxPiperRequests.delete(request.requestId);
+      if (this.linuxPiperRequest === request) this.linuxPiperRequest = null;
 
-    handleLinuxPiperEvent(message) {
-      const request = this.linuxPiperRequest;
       if (
-        !this.directSessionMode ||
-        !request ||
-        message?.requestId !== request.requestId ||
-        request.generation !== this.generation
+        request?.generation === this.generation &&
+        request?.chunkIndex === this.currentChunkIndex &&
+        this.linuxPiperPlaybackIndex !== this.currentChunkIndex
       ) {
-        return false;
+        this._failLinuxPiper(message);
+      } else {
+        root.setTimeout(() => this._fillLinuxPiperPrefetch(this.generation), 0);
+      }
+    }
+
+    _speakLinuxPiperChunk(generation) {
+      if (generation !== this.generation) return;
+
+      const payload = this.currentChunks?.[this.currentChunkIndex];
+      if (!payload) {
+        this.directActive = false;
+        this.directSessionMode = true;
+        this.onEnd?.();
+        return;
       }
 
-      const event = message.event || {};
-      if (event.type === "status") {
-        this.onStatus?.(String(event.status || "Piper is working..."));
-        return true;
+      const prepared = this.linuxPiperPrepared.get(this.currentChunkIndex);
+      if (prepared) {
+        this.linuxPiperPrepared.delete(this.currentChunkIndex);
+        this._playLinuxPiperPrepared(generation, prepared);
+        return;
       }
-      if (event.type === "boundary") {
-        request.boundaries.push(event);
-        return true;
-      }
-      if (event.type === "audioChunk") {
-        request.audio.push(fromBase64(event.data));
-        return true;
-      }
-      if (event.type === "error" || event.type === "cancelled") {
-        this._failLinuxPiper(event.message || event.errorMessage || event.type);
-        return true;
-      }
-      if (event.type !== "synthesisEnd") return false;
 
-      if (request.timeoutId) {
-        root.clearTimeout(request.timeoutId);
-        request.timeoutId = null;
+      if (this._activeLinuxPiperRequestForChunk(this.currentChunkIndex)) {
+        this.onStatus?.("Synthesizing with Piper...");
+        return;
       }
-      const payload = request.payload;
-      this.directBoundaries = request.boundaries.map((boundary) => {
+
+      this._startLinuxPiperSynthesis(
+        generation,
+        this.currentChunkIndex,
+        false
+      );
+    }
+
+    _fillLinuxPiperPrefetch(generation) {
+      if (
+        generation !== this.generation ||
+        !this.directSessionMode ||
+        !this.currentChunks?.length ||
+        this.linuxPiperRequests.size > 0
+      ) {
+        return;
+      }
+
+      const lastIndex = Math.min(
+        this.currentChunks.length - 1,
+        this.currentChunkIndex + this.linuxPiperPrefetchDepth
+      );
+
+      for (
+        let index = this.currentChunkIndex + 1;
+        index <= lastIndex;
+        index += 1
+      ) {
+        if (
+          !this.linuxPiperPrepared.has(index) &&
+          !this._activeLinuxPiperRequestForChunk(index)
+        ) {
+          this._startLinuxPiperSynthesis(generation, index, true);
+          return;
+        }
+      }
+    }
+
+    _preparedLinuxPiperBoundaries(prepared) {
+      const payload = prepared.payload;
+      return prepared.boundaries.map((boundary) => {
         const charIndex = Math.max(0, Number(boundary.charIndex) || 0);
         const index = typeof segmentIndexForCharIndex === "function"
           ? segmentIndexForCharIndex(payload.starts, charIndex)
           : 0;
         return {
           segment: payload.segments?.[index],
-          offsetSeconds: Math.max(0, Number(boundary.audioPositionMs) || 0) / 1000,
-          durationSeconds: Math.max(0, Number(boundary.durationMs) || 0) / 1000,
+          offsetSeconds:
+            Math.max(0, Number(boundary.audioPositionMs) || 0) / 1000,
+          durationSeconds:
+            Math.max(0, Number(boundary.durationMs) || 0) / 1000,
           text: boundary.text || ""
         };
       });
+    }
+
+    _playLinuxPiperPrepared(generation, prepared) {
+      if (
+        generation !== this.generation ||
+        prepared.chunkIndex !== this.currentChunkIndex
+      ) {
+        return;
+      }
+
+      const payload = prepared.payload;
+      this.directActive = true;
+      this.linuxPiperPlaybackIndex = prepared.chunkIndex;
+      this.linuxPiperPausedInPlace = false;
+      this.directBoundaries = this._preparedLinuxPiperBoundaries(prepared);
       this.directBoundaryIndex = 0;
 
-      const blob = new Blob(request.audio, { type: "audio/wav" });
+      const blob = new Blob(prepared.audio, { type: "audio/wav" });
       this._revokeObjectUrl();
       this.directObjectUrl = root.URL.createObjectURL(blob);
 
-      // Piper deliberately bypasses the shared Web Audio gain graph. Chromium
-      // can leave an AudioContext suspended even while a media element appears
-      // to advance, producing silent playback. A fresh unrouted media element
-      // is the smallest reliable Linux path; Piper volume is therefore capped
-      // at 100% until the native backend is proven stable.
       try {
         this.directAudio?.pause?.();
         this.directAudio?.removeAttribute?.("src");
         this.directAudio?.load?.();
       } catch (_error) {}
-      try {
-        this.directMediaSource?.disconnect?.();
-      } catch (_error) {}
-      try {
-        this.directGain?.disconnect?.();
-      } catch (_error) {}
-      try {
-        this.directAudioContext?.close?.();
-      } catch (_error) {}
-      this.directMediaSource = null;
-      this.directGain = null;
-      this.directAudioContext = null;
 
       const audio = root.document?.createElement?.("audio") || new root.Audio();
       audio.preload = "auto";
@@ -373,73 +488,182 @@
       );
       this.directAudio = audio;
 
-      const activeGeneration = request.generation;
+      const activeGeneration = prepared.generation;
       audio.onended = () => {
         if (activeGeneration !== this.generation) return;
         this._clearBoundaryClock();
         this.directActive = false;
-        this.linuxPiperRequest = null;
+        this.linuxPiperPausedInPlace = false;
+        this.linuxPiperPlaybackIndex = -1;
         this.currentChunkIndex += 1;
+
         if (this.currentChunkIndex >= this.currentChunks.length) {
           this.currentChunks = [];
           this.currentOptions = null;
+          this.linuxPiperPrepared.clear();
           this.onEnd?.();
-        } else {
-          root.setTimeout(() => this._speakLinuxPiperChunk(activeGeneration), 0);
+          return;
         }
-      };
-      audio.onerror = () => {
-        if (activeGeneration === this.generation) {
-          const mediaCode = audio.error?.code;
-          this._failLinuxPiper(
-            `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}`
-          );
-        }
+
+        this._speakLinuxPiperChunk(activeGeneration);
       };
 
-      this.onStatus?.("Playing Piper audio...");
+      audio.onerror = () => {
+        if (activeGeneration !== this.generation) return;
+        const mediaCode = audio.error?.code;
+        this._failLinuxPiper(
+          \`WAV playback failed\${mediaCode ? \` (media \${mediaCode})\` : ""}\`
+        );
+      };
+
+      this.onStatus?.(
+        prepared.prefetch ? "Playing prefetched Piper audio..." : "Playing Piper audio..."
+      );
+
       void audio.play()
         .then(() => {
           if (activeGeneration !== this.generation) return;
           this.onStart?.(
             payload.segments?.[0],
-            Math.max(0, (root.performance?.now?.() ?? Date.now()) - this.requestedAt)
+            Math.max(
+              0,
+              (root.performance?.now?.() ?? Date.now()) - this.requestedAt
+            )
           );
           this._startBoundaryClock(activeGeneration);
+          this._fillLinuxPiperPrefetch(activeGeneration);
         })
         .catch((error) => {
           this._failLinuxPiper(
-            `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}`
+            \`audio.play() failed: \${error?.name || "Error"}: \${error?.message || String(error)}\`
           );
         });
+    }
+
+    _failLinuxPiper(message) {
+      for (const request of this.linuxPiperRequests.values()) {
+        if (request.timeoutId) root.clearTimeout(request.timeoutId);
+      }
+      this.linuxPiperRequests.clear();
+      this.linuxPiperPrepared.clear();
+      this.linuxPiperRequest = null;
+      this.linuxPiperPlaybackIndex = -1;
+      this.linuxPiperPausedInPlace = false;
+      this._resetDirectState({ keepMode: true });
+      this.onError?.(new Error(\`Linux Piper TTS failed: \${message}\`));
+    }
+
+    handleLinuxPiperEvent(message) {
+      const request = this.linuxPiperRequests.get(
+        String(message?.requestId || "")
+      );
+      if (
+        !this.directSessionMode ||
+        !request ||
+        request.generation !== this.generation
+      ) {
+        return false;
+      }
+
+      const event = message.event || {};
+      if (event.type === "status") {
+        if (
+          !request.prefetch &&
+          request.chunkIndex === this.currentChunkIndex
+        ) {
+          this.onStatus?.(String(event.status || "Piper is working..."));
+        }
+        return true;
+      }
+
+      if (event.type === "boundary") {
+        request.boundaries.push(event);
+        return true;
+      }
+
+      if (event.type === "audioChunk") {
+        request.audio.push(fromBase64(event.data));
+        return true;
+      }
+
+      if (event.type === "error" || event.type === "cancelled") {
+        this._handleLinuxPiperRequestFailure(
+          request,
+          event.message || event.errorMessage || event.type
+        );
+        return true;
+      }
+
+      if (event.type !== "synthesisEnd") return false;
+
+      if (request.timeoutId) {
+        root.clearTimeout(request.timeoutId);
+        request.timeoutId = null;
+      }
+
+      this.linuxPiperRequests.delete(request.requestId);
+      if (this.linuxPiperRequest === request) this.linuxPiperRequest = null;
+
+      const prepared = {
+        generation: request.generation,
+        chunkIndex: request.chunkIndex,
+        payload: request.payload,
+        audio: request.audio,
+        boundaries: request.boundaries,
+        prefetch: request.prefetch
+      };
+      this.linuxPiperPrepared.set(request.chunkIndex, prepared);
+
+      if (
+        request.chunkIndex === this.currentChunkIndex &&
+        this.linuxPiperPlaybackIndex !== this.currentChunkIndex
+      ) {
+        this._speakLinuxPiperChunk(request.generation);
+      } else {
+        this._fillLinuxPiperPrefetch(request.generation);
+      }
 
       return true;
     }
 
+    _stopLinuxPiperNativeWork() {
+      const active = this.linuxPiperRequests.values().next().value;
+      if (!active) return;
+      try {
+        root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_LINUX_PIPER_STOP",
+          requestId: active.requestId
+        });
+      } catch (_error) {}
+    }
+
     cancel() {
-      if (this.directSessionMode && this.linuxPiperRequest) {
-        if (this.linuxPiperRequest.timeoutId) {
-          root.clearTimeout(this.linuxPiperRequest.timeoutId);
+      if (this.directSessionMode) {
+        this._stopLinuxPiperNativeWork();
+        for (const request of this.linuxPiperRequests.values()) {
+          if (request.timeoutId) root.clearTimeout(request.timeoutId);
         }
-        try {
-          root.chrome?.runtime?.sendMessage?.({
-            type: "EDGE_TTS_LINUX_PIPER_STOP",
-            requestId: this.linuxPiperRequest.requestId
-          });
-        } catch (_error) {}
+        this.linuxPiperRequests.clear();
+        this.linuxPiperPrepared.clear();
         this.linuxPiperRequest = null;
+        this.linuxPiperPlaybackIndex = -1;
+        this.linuxPiperPausedInPlace = false;
       }
       return super.cancel?.();
     }
 
     abandon() {
-      // Never redispatch through this.cancel() here. ReliableSpeechEngine may
-      // call this.abandon() from its idle cancel path, so virtual cancel
-      // dispatch would recurse back through Linux/Windows backend wrappers.
-      if (this.linuxPiperRequest?.timeoutId) {
-        root.clearTimeout(this.linuxPiperRequest.timeoutId);
+      if (this.directSessionMode) {
+        this._stopLinuxPiperNativeWork();
+        for (const request of this.linuxPiperRequests.values()) {
+          if (request.timeoutId) root.clearTimeout(request.timeoutId);
+        }
+        this.linuxPiperRequests.clear();
+        this.linuxPiperPrepared.clear();
+        this.linuxPiperRequest = null;
+        this.linuxPiperPlaybackIndex = -1;
+        this.linuxPiperPausedInPlace = false;
       }
-      this.linuxPiperRequest = null;
       return super.abandon?.();
     }
   }
