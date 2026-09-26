@@ -1,6 +1,8 @@
 const READER_FILES = [
   "src/content/namespace.js",
   "src/content/text-model.js",
+  "src/pronunciation/defaults.js",
+  "src/pronunciation/engine.js",
   "src/content/highlighter.js",
   "src/content/speech-engine.js",
   "src/content/reliable-speech-engine.js",
