@@ -58,7 +58,13 @@
 
     const when = new Date(trace.at);
     const voice = trace.voiceId ? ` · ${trace.voiceId}` : "";
-    meta.textContent = `${when.toLocaleTimeString()}${voice}`;
+    const revision = Number(trace.pronunciationRevision) || 0;
+    const savedAt = Number(trace.pronunciationSavedAt) || 0;
+    const savedText = savedAt
+      ? ` · rules saved ${new Date(savedAt).toLocaleTimeString()}`
+      : "";
+    meta.textContent =
+      `${when.toLocaleTimeString()}${voice} · pronunciation revision ${revision}${savedText}`;
   }
 
   async function loadLastPiperRequest() {
@@ -399,7 +405,10 @@
         savedRevision = targetRevision;
 
         if (editRevision === targetRevision) {
-          setStatus("Saved automatically.", "ok");
+          setStatus(
+            `Saved automatically · revision ${Number(config.revision) || 0}.`,
+            "ok"
+          );
         } else {
           scheduleAutosave();
         }
@@ -425,7 +434,10 @@
     config = await Pronunciation.saveConfig(draft);
     savedRevision = targetRevision;
     $("#raw-json").value = JSON.stringify(config, null, 2);
-    setStatus("Saved.", "ok");
+    setStatus(
+      `Saved · revision ${Number(config.revision) || 0}.`,
+      "ok"
+    );
   }
 
   async function save() {
@@ -512,7 +524,10 @@
     .then((loaded) => {
       config = loaded;
       render(config);
-      setStatus("Rules loaded.", "ok");
+      setStatus(
+        `Rules loaded · revision ${Number(config.revision) || 0}.`,
+        "ok"
+      );
     })
     .catch((error) => setStatus(error.message, "error"));
 })();
