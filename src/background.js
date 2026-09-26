@@ -560,8 +560,24 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .then((response) => {
         if (message.type === "EDGE_TTS_PIPER_OFFSCREEN_STOP") {
           linuxPiperOffscreenSessions.delete(playbackId);
+          sendResponse(response || { accepted: true });
+          return;
         }
-        sendResponse(response || { accepted: true });
+
+        // Pause/resume/rate/volume require an explicit acknowledgement from
+        // the live offscreen player. An undefined response means the document
+        // exists but no matching playbackId survived there; never translate
+        // that into a fake success.
+        sendResponse(
+          response?.accepted === true
+            ? response
+            : {
+                accepted: false,
+                error:
+                  response?.error ||
+                  "Offscreen Piper playback did not acknowledge the command."
+              }
+        );
       })
       .catch((error) => sendResponse({
         accepted: false,
