@@ -359,7 +359,7 @@
 
     if (
       cfg.normalization?.dropNumericBracketCitations &&
-      /^\[\d+\][.,;:!?]?$/.test(text)
+      /^\[\s*\d+(?:\s*,\s*\d+)*\s*\][.,;:!?]?$/.test(text)
     ) {
       text = recordTransform(transformations, "drop", "numeric-bracket-citation", text, "");
     }
@@ -367,7 +367,7 @@
     if (
       text &&
       cfg.normalization?.dropParentheticalNumericCitations &&
-      /^\(\d+\)[.,;:!?]?$/.test(text)
+      /^\(\s*\d+(?:\s*,\s*\d+)*\s*\)[.,;:!?]?$/.test(text)
     ) {
       text = recordTransform(transformations, "drop", "parenthetical-numeric-citation", text, "");
     }
@@ -385,7 +385,7 @@
     if (
       text &&
       cfg.normalization?.dropSquareBracketText &&
-      /^\[[^\]]+\][.,;:!?]?$/.test(text)
+      /^(?:\[[^\]]*\]|【[^】]*】|［[^］]*］)[.,;:!?]?$/.test(text)
     ) {
       text = recordTransform(transformations, "drop", "square-bracket-text", text, "");
     }
