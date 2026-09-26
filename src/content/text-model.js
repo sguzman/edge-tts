@@ -64,6 +64,11 @@
     "[data-message-author-role='assistant']"
   ].join(",");
 
+  // X/Twitter renders tweet prose in div-based application widgets rather than
+  // semantic <p> blocks, so the generic block selector misses the actual post
+  // text even when <main> is selected correctly.
+  const X_TWEET_TEXT_SELECTOR = "[data-testid='tweetText']";
+
   function siteProfileForHostname(hostname) {
     const normalized = String(hostname || "").toLowerCase();
     if (
@@ -72,6 +77,14 @@
       normalized === "chat.openai.com"
     ) {
       return "chatgpt";
+    }
+    if (
+      normalized === "x.com" ||
+      normalized.endsWith(".x.com") ||
+      normalized === "twitter.com" ||
+      normalized.endsWith(".twitter.com")
+    ) {
+      return "x";
     }
     return "generic";
   }
@@ -340,6 +353,20 @@
     return candidates;
   }
 
+  function collectXCandidates(doc, visibilityCache) {
+    return Array.from(doc.querySelectorAll(X_TWEET_TEXT_SELECTOR)).filter(
+      (element) => {
+        if (!shouldKeepCandidate(element, visibilityCache)) {
+          return false;
+        }
+
+        // X can transiently duplicate tweet DOM during navigation/virtualized
+        // timeline updates. Keep only top-level tweetText containers.
+        return !element.parentElement?.closest(X_TWEET_TEXT_SELECTOR);
+      }
+    );
+  }
+
   function buildReadableModel(doc = document) {
     const visibilityCache = new WeakMap();
     const language = doc.documentElement?.lang || globalThis.navigator?.language;
@@ -349,6 +376,8 @@
 
     if (profile === "chatgpt") {
       candidates = collectChatGptCandidates(doc, visibilityCache);
+    } else if (profile === "x") {
+      candidates = collectXCandidates(doc, visibilityCache);
     }
 
     if (candidates.length === 0) {
@@ -388,7 +417,10 @@
     return {
       blocks,
       nodeToBlock,
-      profile: profile === "chatgpt" && blocks.length > 0 ? "chatgpt" : "generic"
+      profile:
+        (profile === "chatgpt" || profile === "x") && blocks.length > 0
+          ? profile
+          : "generic"
     };
   }
 
@@ -483,6 +515,7 @@
     segmentIndexForCharIndex,
     sentenceRanges,
     siteProfileForHostname,
+    collectXCandidates,
     tokenizeText
   };
 });
