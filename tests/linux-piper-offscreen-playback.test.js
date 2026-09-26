@@ -97,3 +97,43 @@ test("background relay preserves Piper boundary offsets for offscreen highlighti
   assert.match(body, /message\.boundaryOffsets/);
   assert.match(body, /EDGE_TTS_OFFSCREEN_PIPER_PLAY/);
 });
+
+
+test("resume cannot report success without an explicit live-player acknowledgement", () => {
+  const routeAt = background.indexOf(
+    'message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE"'
+  );
+  const nextRoute = background.indexOf(
+    'message?.type === "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS"',
+    routeAt
+  );
+  const body = background.slice(routeAt, nextRoute);
+
+  assert.match(body, /response\?\.accepted === true/);
+  assert.match(
+    body,
+    /Offscreen Piper playback did not acknowledge the command/
+  );
+  assert.doesNotMatch(
+    body,
+    /response \|\| \{ accepted: true \}/
+  );
+});
+
+test("offscreen player carries the owning tab so event routing survives worker restart", () => {
+  assert.match(offscreen, /let ownerTabId = null/);
+  assert.match(offscreen, /tabId: ownerTabId/);
+  assert.match(background, /const eventTabId = Number\(message\.tabId\)/);
+  assert.match(background, /Rehydrate in-memory routing after a service-worker restart/);
+});
+
+test("Piper in-place resume waits for confirmed audio playback", () => {
+  const start = piper.indexOf("    resumeInPlace() {");
+  const end = piper.indexOf("    speak(block, startSegmentIndex, options = {}) {", start);
+  const body = piper.slice(start, end);
+
+  assert.match(body, /return Promise\.resolve/);
+  assert.match(body, /response\?\.accepted/);
+  assert.match(body, /Resume session expired — restarting/);
+  assert.match(body, /return false/);
+});
