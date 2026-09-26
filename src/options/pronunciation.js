@@ -8,6 +8,9 @@
 
   const $ = (selector) => document.querySelector(selector);
   let config = Pronunciation.cloneDefaultConfig();
+  let autosaveTimer = null;
+  let editRevision = 0;
+  let savedRevision = 0;
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -61,9 +64,9 @@
     row.querySelector("[data-value]").value = value;
     row.querySelector("[data-remove]").addEventListener("click", () => {
       row.remove();
-      updatePreview();
+      handleRuleChange();
     });
-    row.addEventListener("input", updatePreview);
+    row.addEventListener("input", handleRuleChange);
     document.querySelector(`[data-map="${path}"] tbody`).appendChild(row);
     return row;
   }
@@ -90,13 +93,13 @@
     row.querySelector("[data-case-sensitive]").checked = rule.caseSensitive === true;
     row.querySelector("[data-remove]").addEventListener("click", () => {
       row.remove();
-      updatePreview();
+      handleRuleChange();
     });
     row.addEventListener("input", () => {
       validateRegexRow(row);
-      updatePreview();
+      handleRuleChange();
     });
-    row.addEventListener("change", updatePreview);
+    row.addEventListener("change", handleRuleChange);
     body.appendChild(row);
     validateRegexRow(row);
   }
@@ -293,12 +296,55 @@
     }
   }
 
+  function scheduleAutosave() {
+    editRevision += 1;
+    const targetRevision = editRevision;
+    if (autosaveTimer !== null) {
+      clearTimeout(autosaveTimer);
+    }
+
+    setStatus("Unsaved changes…");
+    autosaveTimer = setTimeout(async () => {
+      autosaveTimer = null;
+      try {
+        const draft = readForm();
+        const persisted = await Pronunciation.saveConfig(draft);
+        config = persisted;
+        savedRevision = targetRevision;
+
+        if (editRevision === targetRevision) {
+          setStatus("Saved automatically.", "ok");
+        } else {
+          scheduleAutosave();
+        }
+      } catch (error) {
+        setStatus(`Autosave failed: ${error.message}`, "error");
+      }
+    }, 450);
+  }
+
+  function handleRuleChange() {
+    updatePreview();
+    scheduleAutosave();
+  }
+
+  async function flushSave() {
+    if (autosaveTimer !== null) {
+      clearTimeout(autosaveTimer);
+      autosaveTimer = null;
+    }
+
+    const targetRevision = ++editRevision;
+    const draft = readForm();
+    config = await Pronunciation.saveConfig(draft);
+    savedRevision = targetRevision;
+    $("#raw-json").value = JSON.stringify(config, null, 2);
+    setStatus("Saved.", "ok");
+  }
+
   async function save() {
     try {
-      const draft = readForm();
-      config = await Pronunciation.saveConfig(draft);
-      render(config);
-      setStatus("Saved. Active Piper readers receive the new rules through extension storage.", "ok");
+      await flushSave();
     } catch (error) {
       setStatus(error.message, "error");
     }
@@ -318,7 +364,7 @@
     try {
       const parsed = JSON.parse($("#raw-json").value);
       render(Pronunciation.normalizeConfig(parsed));
-      setStatus("JSON loaded into the editor. Click Save rules to persist it.", "ok");
+      scheduleAutosave();
     } catch (error) {
       setStatus(`Invalid JSON: ${error.message}`, "error");
     }
@@ -340,14 +386,14 @@
     button.addEventListener("click", () => {
       const row = createMapRow(button.dataset.addMap);
       row.querySelector("[data-key]").focus();
-      updatePreview();
+      handleRuleChange();
     });
   }
 
   $("#add-regex").addEventListener("click", () => {
     createRegexRow();
     $("#regex-table tbody tr:last-child [data-pattern]")?.focus();
-    updatePreview();
+    handleRuleChange();
   });
   $("#save").addEventListener("click", save);
   $("#reset").addEventListener("click", reset);
@@ -358,8 +404,8 @@
   for (const element of document.querySelectorAll(
     "input:not([data-key]):not([data-value]):not([data-pattern]):not([data-replace]), select, #acronym-tokens, #drop-tokens"
   )) {
-    element.addEventListener("input", updatePreview);
-    element.addEventListener("change", updatePreview);
+    element.addEventListener("input", handleRuleChange);
+    element.addEventListener("change", handleRuleChange);
   }
 
   Pronunciation.loadConfig({ force: true })
