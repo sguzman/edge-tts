@@ -387,7 +387,14 @@
     }
 
     abandon() {
-      return this.cancel();
+      // Never redispatch through this.cancel() here. ReliableSpeechEngine may
+      // call this.abandon() from its idle cancel path, so virtual cancel
+      // dispatch would recurse back through Linux/Windows backend wrappers.
+      if (this.linuxPiperRequest?.timeoutId) {
+        root.clearTimeout(this.linuxPiperRequest.timeoutId);
+      }
+      this.linuxPiperRequest = null;
+      return super.abandon?.();
     }
   }
 
