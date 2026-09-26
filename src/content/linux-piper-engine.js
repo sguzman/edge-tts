@@ -136,6 +136,7 @@
       this.linuxPiperRequest = null;
       this.linuxPiperPlaybackIndex = -1;
       this.linuxPiperPausedInPlace = false;
+      this.linuxPiperSentencePauseTimer = null;
       this.linuxPiperPrefetchDepth = 2;
 
       void this.refreshLinuxPiperVoices();
@@ -192,6 +193,13 @@
         this.directAudio &&
         this.linuxPiperPlaybackIndex === this.currentChunkIndex
       );
+    }
+
+    _clearLinuxPiperSentencePause() {
+      if (this.linuxPiperSentencePauseTimer !== null) {
+        root.clearTimeout(this.linuxPiperSentencePauseTimer);
+        this.linuxPiperSentencePauseTimer = null;
+      }
     }
 
     pauseInPlace() {
@@ -261,6 +269,7 @@
         ? Math.min(2, Math.max(0, configuredVolume))
         : 1;
 
+      this._clearLinuxPiperSentencePause();
       this.linuxPiperPrepared.clear();
       this.linuxPiperRequests.clear();
       this.linuxPiperRequest = null;
@@ -504,7 +513,20 @@
           return;
         }
 
-        this._speakLinuxPiperChunk(activeGeneration);
+        const sentencePauseMs = Math.max(
+          0,
+          Number(this.currentOptions?.sentencePauseMs) || 0
+        );
+        if (sentencePauseMs > 0) {
+          this.onStatus?.(`Sentence pause ${sentencePauseMs} ms`);
+          this.linuxPiperSentencePauseTimer = root.setTimeout(() => {
+            this.linuxPiperSentencePauseTimer = null;
+            if (activeGeneration !== this.generation) return;
+            this._speakLinuxPiperChunk(activeGeneration);
+          }, sentencePauseMs);
+        } else {
+          this._speakLinuxPiperChunk(activeGeneration);
+        }
       };
 
       audio.onerror = () => {
@@ -533,6 +555,17 @@
           this._fillLinuxPiperPrefetch(activeGeneration);
         })
         .catch((error) => {
+          if (error?.name === "NotAllowedError") {
+            // Extension-action activation can expire while CPU synthesis is
+            // running. Keep this prepared WAV intact and let the next explicit
+            // toolbar Resume click provide a fresh user activation.
+            this._clearBoundaryClock();
+            this.directActive = false;
+            this.linuxPiperPausedInPlace = true;
+            this.onPlaybackBlocked?.(error);
+            return;
+          }
+
           this._failLinuxPiper(
             `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}`
           );
@@ -540,6 +573,7 @@
     }
 
     _failLinuxPiper(message) {
+      this._clearLinuxPiperSentencePause();
       for (const request of this.linuxPiperRequests.values()) {
         if (request.timeoutId) root.clearTimeout(request.timeoutId);
       }
@@ -641,6 +675,7 @@
     }
 
     cancel() {
+      this._clearLinuxPiperSentencePause();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
@@ -656,6 +691,7 @@
     }
 
     abandon() {
+      this._clearLinuxPiperSentencePause();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
