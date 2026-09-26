@@ -27,6 +27,7 @@
   ].join(",");
   const isWinNaturalVoice = (voice) => voice?.__edgeTtsSource === "win-natural";
   const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
+  const DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-ryan-high";
 
   const MIN_BATCH_CHARS = 400;
   const MAX_BATCH_CHARS = 2400;
@@ -517,21 +518,31 @@
 
     refreshVoices() {
       const documentLanguage = document.documentElement.lang || navigator.language;
-      const voices = this.speech.chooseVoices(documentLanguage, this.settings.voiceName);
+      const savedVoiceName = this.settings.voiceName;
+      const voices = this.speech.chooseVoices(documentLanguage, savedVoiceName);
       this.voices = voices;
+
+      const savedVoice = voices.find((voice) => voice.name === savedVoiceName);
+      const defaultRyan = voices.find(
+        (voice) =>
+          isLinuxPiperVoice(voice) &&
+          voice.voiceId === DEFAULT_LINUX_PIPER_VOICE_ID
+      );
+
       this.selectedVoice =
-        voices.find((voice) => voice.name === this.settings.voiceName) ||
+        savedVoice ||
+        defaultRyan ||
         voices.find(isLinuxPiperVoice) ||
         voices.find(isWinNaturalVoice) ||
         voices.find(isNaturalVoice) ||
         voices[0] ||
         null;
 
-      if (this.selectedVoice) {
-        this.settings.voiceName = this.selectedVoice.name;
-      }
-
-      this.toolbar.setVoices(voices, this.settings.voiceName);
+      // Passive catalog refresh must never erase a user's saved choice. When
+      // there is no saved choice yet, Ryan High is the Linux default.
+      const toolbarVoiceName =
+        savedVoiceName || this.selectedVoice?.name || "";
+      this.toolbar.setVoices(voices, toolbarVoiceName);
       this.toolbar.setRate(this.settings.rate);
     }
 
