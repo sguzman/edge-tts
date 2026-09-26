@@ -4,6 +4,8 @@
   let ownerTabId = null;
   let objectUrl = "";
   let tickTimer = null;
+  let endPauseTimer = null;
+  let sentencePauseMs = 0;
   let boundaryOffsets = [];
   let boundaryIndex = 0;
 
@@ -16,6 +18,13 @@
     if (tickTimer !== null) {
       clearInterval(tickTimer);
       tickTimer = null;
+    }
+  }
+
+  function clearEndPause() {
+    if (endPauseTimer !== null) {
+      clearTimeout(endPauseTimer);
+      endPauseTimer = null;
     }
   }
 
@@ -63,6 +72,7 @@
     const previousId = playbackId;
     const previousTabId = ownerTabId;
     clearTick();
+    clearEndPause();
 
     try {
       audio.pause();
@@ -75,6 +85,7 @@
     revokeUrl();
     playbackId = "";
     ownerTabId = null;
+    sentencePauseMs = 0;
     boundaryOffsets = [];
     boundaryIndex = 0;
 
@@ -121,6 +132,10 @@
       : []
     )
       .map((value) => Math.max(0, Number(value) || 0));
+    sentencePauseMs = Math.max(
+      0,
+      Math.min(1200, Number(message.sentencePauseMs) || 0)
+    );
     boundaryIndex = 0;
 
     const blob = new Blob(chunks, { type: "audio/wav" });
@@ -156,11 +171,27 @@
 
   audio.addEventListener("ended", () => {
     if (!playbackId) return;
-    send({
+
+    clearTick();
+    const finishedId = playbackId;
+    const finalEvent = {
       type: "ended",
       currentTime: Number(audio.currentTime) || 0,
       duration: Number(audio.duration) || 0
-    });
+    };
+
+    if (sentencePauseMs > 0) {
+      send({ type: "sentencePause", durationMs: sentencePauseMs });
+      endPauseTimer = setTimeout(() => {
+        endPauseTimer = null;
+        if (playbackId !== finishedId) return;
+        send(finalEvent);
+        stopCurrent();
+      }, sentencePauseMs);
+      return;
+    }
+
+    send(finalEvent);
     stopCurrent();
   });
 
