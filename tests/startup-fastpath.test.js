@@ -21,26 +21,28 @@ test("startup summary separates extension prep from remote speech latency", () =
   );
 });
 
-test("voice readiness starts before text modeling without blocking startup on WIN-NATURAL", () => {
+test("startup waits for Piper catalog but still does not block on WIN-NATURAL", () => {
   const source = fs.readFileSync(
     path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
     "utf8"
   );
 
   const localVoiceWait = source.indexOf("this.speech.refreshExtensionVoices?.()");
+  const piperVoiceWait = source.indexOf("this.speech.refreshLinuxPiperVoices?.()");
   const nativeVoiceWait = source.indexOf("this.speech.refreshWinNaturalVoices?.()");
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
-  const awaitPrep = source.indexOf("await Promise.all([settingsReady, extensionVoicesReady]);");
+  const awaitPrep = source.indexOf("linuxPiperVoicesReady");
   const forbiddenNativeAwait = source.indexOf(
-    "await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);"
+    "winNaturalVoicesReady\n      ]"
   );
   const firstRefresh = source.indexOf("this.refreshVoices();", awaitPrep);
   const awaitNaturalFallback = source.indexOf("await naturalVoicesReady;", firstRefresh);
 
   assert.ok(localVoiceWait >= 0);
-  assert.ok(nativeVoiceWait > localVoiceWait);
-  assert.ok(naturalVoiceWait > localVoiceWait);
+  assert.ok(piperVoiceWait > localVoiceWait);
+  assert.ok(nativeVoiceWait > piperVoiceWait);
+  assert.ok(naturalVoiceWait > nativeVoiceWait);
   assert.ok(modelBuild > naturalVoiceWait);
   assert.ok(awaitPrep > modelBuild);
   assert.equal(forbiddenNativeAwait, -1);
