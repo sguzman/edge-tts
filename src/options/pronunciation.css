@@ -1,0 +1,110 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+main {
+  width: min(1180px, calc(100% - 32px));
+  margin: 24px auto 80px;
+}
+.hero, .section-heading, .actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hero {
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+h1, h2, h3 { margin: 0 0 10px; }
+p { line-height: 1.45; }
+.card {
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 14px 0;
+  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+}
+.section-heading {
+  justify-content: space-between;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px 18px;
+}
+label {
+  display: block;
+  line-height: 1.4;
+}
+input[type="text"], textarea, select {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  border-radius: 7px;
+  background: Canvas;
+  color: CanvasText;
+}
+textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+button {
+  font: inherit;
+  padding: 7px 11px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  background: color-mix(in srgb, Canvas 88%, CanvasText 12%);
+  color: CanvasText;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button.primary {
+  font-weight: 700;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  padding: 7px;
+}
+th:last-child, td:last-child { width: 1%; white-space: nowrap; }
+td input[type="text"] { min-width: 120px; }
+.invalid {
+  outline: 2px solid #c33;
+}
+#status {
+  min-height: 1.5em;
+  font-weight: 650;
+}
+#status.error { color: #c33; }
+#status.ok { color: #198754; }
+.preview-card textarea[readonly] {
+  opacity: 0.9;
+}
+.ledger {
+  overflow-x: auto;
+}
+.ledger table {
+  font-size: 0.9rem;
+}
+.muted {
+  opacity: 0.7;
+}
+@media (max-width: 700px) {
+  .hero { display: block; }
+  .hero .actions { margin-top: 12px; flex-wrap: wrap; }
+  main { width: min(100% - 20px, 1180px); }
+}
