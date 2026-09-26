@@ -251,6 +251,10 @@
       }
 
       const event = message.event || {};
+      if (event.type === "status") {
+        this.onStatus?.(String(event.status || "Piper is working..."));
+        return true;
+      }
       if (event.type === "boundary") {
         request.boundaries.push(event);
         return true;
@@ -347,6 +351,7 @@
         }
       };
 
+      this.onStatus?.("Playing Piper audio...");
       void audio.play()
         .then(() => {
           if (activeGeneration !== this.generation) return;
