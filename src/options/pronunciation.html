@@ -21,6 +21,31 @@
 
     <div id="status" role="status" aria-live="polite"></div>
 
+    <section class="card preview-card test-bench">
+      <div class="test-bench-heading">
+        <div>
+          <h2>Pronunciation test bench</h2>
+          <p>Uses the current editor state, including unsaved rule edits. Ryan synthesizes at native 1.0x; the slider changes only finished-audio playback speed.</p>
+        </div>
+        <div class="test-controls">
+          <label class="test-speed-label">
+            Speed
+            <input id="test-speed" type="range" min="0.5" max="8" step="0.05" value="1">
+            <output id="test-speed-value">1.00x</output>
+          </label>
+          <button id="test-play" type="button" class="primary">Play test</button>
+          <button id="test-stop" type="button">Stop</button>
+        </div>
+      </div>
+      <label for="preview-source">Source text</label>
+      <textarea id="preview-source" rows="5">readlink -f ~/.config/fish/config.fish and GPU JSON SQLite in 2026.</textarea>
+      <label for="preview-spoken">Piper receives</label>
+      <textarea id="preview-spoken" rows="5" readonly></textarea>
+      <div id="test-status" class="muted" role="status" aria-live="polite">Ready · Ryan High</div>
+      <h3>Applied transformations</h3>
+      <div id="preview-ledger" class="ledger"></div>
+    </section>
+
     <section class="card">
       <h2>Pipeline switches</h2>
       <div class="grid">
@@ -59,16 +84,6 @@
       <p>This captures the exact failure message and the chunk that was active when playback/synthesis failed.</p>
       <textarea id="last-piper-failure" rows="7" readonly placeholder="No Piper failure observed in this extension session yet."></textarea>
       <div id="last-piper-failure-meta" class="muted"></div>
-    </section>
-
-    <section class="card preview-card">
-      <h2>Live preview</h2>
-      <label for="preview-source">Source text</label>
-      <textarea id="preview-source" rows="5">readlink -f ~/.config/fish/config.fish and GPU JSON SQLite in 2026.</textarea>
-      <label for="preview-spoken">Piper receives</label>
-      <textarea id="preview-spoken" rows="5" readonly></textarea>
-      <h3>Applied transformations</h3>
-      <div id="preview-ledger" class="ledger"></div>
     </section>
 
     <section class="card">
@@ -161,6 +176,8 @@
       </div>
     </section>
   </main>
+
+  <div id="save-toast" class="save-toast" role="status" aria-live="polite" aria-atomic="true"></div>
 
   <script src="../pronunciation/defaults.js"></script>
   <script src="../pronunciation/engine.js"></script>
