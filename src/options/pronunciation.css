@@ -159,19 +159,21 @@ td input[type="text"] { min-width: 120px; }
 }
 .save-toast {
   position: fixed;
+  top: 22px;
   right: 22px;
-  bottom: 22px;
   z-index: 2147483647;
-  max-width: min(460px, calc(100vw - 44px));
-  padding: 11px 14px;
-  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
-  border-radius: 9px;
-  background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
-  color: CanvasText;
-  box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 22%, transparent);
-  font-weight: 650;
+  max-width: min(560px, calc(100vw - 44px));
+  padding: 15px 20px;
+  border: 2px solid #198754;
+  border-radius: 12px;
+  background: #198754;
+  color: #fff;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(-10px);
   pointer-events: none;
   transition: opacity 140ms ease, transform 140ms ease;
 }
@@ -180,10 +182,12 @@ td input[type="text"] { min-width: 120px; }
   transform: translateY(0);
 }
 .save-toast.ok {
-  border-color: color-mix(in srgb, #198754 58%, transparent);
+  border-color: #198754;
+  background: #198754;
 }
 .save-toast.error {
-  border-color: color-mix(in srgb, #c33 62%, transparent);
+  border-color: #b42318;
+  background: #b42318;
 }
 @media (max-width: 780px) {
   .test-bench-heading {
