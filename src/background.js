@@ -189,10 +189,11 @@ async function synthesizePronunciationTest(text, voiceId) {
   if (
     [...linuxPiperRequests.values()].some((request) =>
       Number.isInteger(request.tabId)
-    )
+    ) ||
+    linuxPiperOffscreenSessions.size > 0
   ) {
     throw new Error(
-      "Piper is busy with an active reader. Stop or pause the reader before running a pronunciation test."
+      "Piper is busy with an active reader. Stop the reader before running a pronunciation test."
     );
   }
 
