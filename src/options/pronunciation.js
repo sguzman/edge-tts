@@ -203,6 +203,12 @@
 
   function stopTestAudio() {
     testSynthesisSerial += 1;
+    try {
+      void chrome.runtime.sendMessage({
+        type: "EDGE_TTS_PRONUNCIATION_TEST_CANCEL"
+      });
+    } catch (_error) {}
+
     if (testAudio) {
       try {
         testAudio.pause();
@@ -701,7 +707,7 @@
   $("#preview-source").addEventListener("input", updatePreview);
 
   for (const element of document.querySelectorAll(
-    "input:not([data-key]):not([data-value]):not([data-pattern]):not([data-replace]), select, #acronym-tokens, #drop-tokens"
+    "input:not([data-key]):not([data-value]):not([data-pattern]):not([data-replace]):not(#test-speed), select, #acronym-tokens, #drop-tokens"
   )) {
     element.addEventListener("input", handleRuleChange);
     element.addEventListener("change", handleRuleChange);
