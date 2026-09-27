@@ -16,7 +16,7 @@
   };
 
   const DEFAULT_CONFIG = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     revision: 0,
     savedAt: 0,
     enabled: true,
@@ -157,7 +157,7 @@
     acronyms: {
       enabled: true,
       tokens: ["CSS","HTML","HTTP","HTTPS","URL","API","CPU","GPU","JSON","SQL","XML","TTS","XTTS","LLM"],
-      letterSeparator: " ",
+      letterSeparator: ", ",
       digitSeparator: " point ",
       letterSounds: LETTER_SOUNDS
     },
@@ -167,11 +167,11 @@
       insertAnd: false,
       enableBrandMap: true,
       brandMap: {
-        MySQL: "My S Q L",
-        Mysql: "My S Q L",
-        SQLite: "S Q Lite",
-        SQLITE: "S Q Lite",
-        PostCSS: "Post C S S"
+        MySQL: "My S, Q, L",
+        Mysql: "My S, Q, L",
+        SQLite: "S, Q, Lite",
+        SQLITE: "S, Q, Lite",
+        PostCSS: "Post C, S, S"
       },
       customPronunciations: {
         Cato: "Kay toe",
