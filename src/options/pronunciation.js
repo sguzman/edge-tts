@@ -583,11 +583,17 @@
             `Saved automatically · revision ${Number(config.revision) || 0}.`,
             "ok"
           );
+          showSaveToast(
+            `Saved · revision ${Number(config.revision) || 0}`,
+            "ok"
+          );
         } else {
           scheduleAutosave();
         }
       } catch (error) {
-        setStatus(`Autosave failed: ${error.message}`, "error");
+        const message = `Autosave failed: ${error.message}`;
+        setStatus(message, "error");
+        showSaveToast(message, "error");
       }
     }, 450);
   }
@@ -612,13 +618,19 @@
       `Saved · revision ${Number(config.revision) || 0}.`,
       "ok"
     );
+    showSaveToast(
+      `Saved · revision ${Number(config.revision) || 0}`,
+      "ok"
+    );
   }
 
   async function save() {
     try {
       await flushSave();
     } catch (error) {
-      setStatus(error.message, "error");
+      const message = error?.message || String(error);
+      setStatus(message, "error");
+      showSaveToast(message, "error");
     }
   }
 
@@ -630,6 +642,10 @@
     config = await Pronunciation.resetConfig();
     render(config);
     setStatus("Restored Lantern Leaf defaults.", "ok");
+    showSaveToast(
+      `Defaults restored · revision ${Number(config.revision) || 0}`,
+      "ok"
+    );
   }
 
   function loadRawJson() {
@@ -672,6 +688,16 @@
   $("#load-json").addEventListener("click", loadRawJson);
   $("#copy-json").addEventListener("click", copyRawJson);
   $("#copy-piper-diagnostics").addEventListener("click", copyPiperDiagnostics);
+  $("#test-play").addEventListener("click", playTestAudio);
+  $("#test-stop").addEventListener("click", stopTestAudio);
+  $("#test-speed").addEventListener("input", () => {
+    applyTestSpeed();
+    if (testAudio && !testAudio.paused) {
+      setTestStatus(
+        `Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
+      );
+    }
+  });
   $("#preview-source").addEventListener("input", updatePreview);
 
   for (const element of document.querySelectorAll(
@@ -693,6 +719,11 @@
 
   void loadLastPiperRequest();
   void loadLastPiperFailure();
+  applyTestSpeed();
+
+  window.addEventListener("beforeunload", () => {
+    revokeTestAudio();
+  });
 
   Pronunciation.loadConfig({ force: true })
     .then((loaded) => {
