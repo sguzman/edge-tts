@@ -46,7 +46,7 @@ test("options editor exposes all major Lantern Leaf rule classes plus preview", 
     "Regex abbreviation rules",
     "Literal replacements",
     "Linux path vocabulary",
-    "Live preview",
+    "Pronunciation test bench",
     "Applied transformations",
     "Raw JSON import / export"
   ]) {
@@ -65,4 +65,50 @@ test("pronunciation editor autosaves rule changes", () => {
   assert.match(optionsJs, /Pronunciation\.saveConfig\(draft\)/);
   assert.match(optionsJs, /Saved automatically\./);
   assert.match(optionsJs, /function handleRuleChange\(\)/);
+});
+
+
+test("pronunciation editor shows fixed save feedback independent of scroll position", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+  const optionsCss = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.css"),
+    "utf8"
+  );
+
+  assert.match(optionsHtml, /id="save-toast"/);
+  assert.match(optionsJs, /function showSaveToast/);
+  assert.match(optionsJs, /Saved · revision/);
+  assert.match(optionsCss, /\.save-toast \{/);
+  assert.match(optionsCss, /position: fixed/);
+});
+
+test("test bench previews current rules and plays real Ryan Piper audio with browser speed control", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+
+  assert.match(optionsHtml, /id="test-play"/);
+  assert.match(optionsHtml, /id="test-stop"/);
+  assert.match(optionsHtml, /id="test-speed"/);
+  assert.match(optionsHtml, /id="preview-spoken"/);
+  assert.match(optionsJs, /EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE/);
+  assert.match(optionsJs, /voiceId: "en_US-ryan-high"/);
+  assert.match(optionsJs, /new Audio\(testAudioUrl\)/);
+  assert.match(optionsJs, /testAudio\.playbackRate = speed/);
+  assert.match(optionsJs, /testAudio\.preservesPitch = true/);
+  assert.match(background, /synthesizePronunciationTest/);
+  assert.match(background, /type: "synthesize"/);
+  assert.match(background, /EDGE_TTS_PRONUNCIATION_TEST_CANCEL/);
+});
+
+test("test speed is a QA control, not a pronunciation setting that autosaves", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+  assert.match(optionsJs, /:not\(#test-speed\)/);
 });
