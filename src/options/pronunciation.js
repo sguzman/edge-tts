@@ -9,8 +9,13 @@
   const $ = (selector) => document.querySelector(selector);
   let config = Pronunciation.cloneDefaultConfig();
   let autosaveTimer = null;
+  let toastTimer = null;
   let editRevision = 0;
   let savedRevision = 0;
+  let testAudio = null;
+  let testAudioUrl = "";
+  let testAudioKey = "";
+  let testSynthesisSerial = 0;
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -37,6 +42,175 @@
     const element = $("#status");
     element.textContent = message;
     element.className = kind;
+  }
+
+  function showSaveToast(message, kind = "ok") {
+    const toast = $("#save-toast");
+    if (!toast) return;
+
+    if (toastTimer !== null) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+
+    toast.textContent = String(message || "");
+    toast.className = `save-toast visible ${kind}`;
+    toastTimer = setTimeout(() => {
+      toast.classList.remove("visible");
+      toastTimer = null;
+    }, kind === "error" ? 4200 : 2400);
+  }
+
+  function setTestStatus(message, kind = "") {
+    const element = $("#test-status");
+    if (!element) return;
+    element.textContent = String(message || "");
+    element.className = kind ? `muted ${kind}` : "muted";
+  }
+
+  function revokeTestAudio() {
+    if (testAudio) {
+      try {
+        testAudio.pause();
+      } catch (_error) {}
+      testAudio.removeAttribute("src");
+      testAudio = null;
+    }
+
+    if (testAudioUrl) {
+      try {
+        URL.revokeObjectURL(testAudioUrl);
+      } catch (_error) {}
+      testAudioUrl = "";
+    }
+  }
+
+  function decodeBase64Chunks(chunks) {
+    return (chunks || []).map((value) => {
+      const binary = atob(String(value || ""));
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    });
+  }
+
+  function currentTestSpeed() {
+    return Math.min(
+      8,
+      Math.max(0.5, Number($("#test-speed")?.value) || 1)
+    );
+  }
+
+  function applyTestSpeed() {
+    const speed = currentTestSpeed();
+    if ($("#test-speed-value")) {
+      $("#test-speed-value").value = `${speed.toFixed(2)}x`;
+    }
+    if (testAudio) {
+      testAudio.playbackRate = speed;
+      testAudio.preservesPitch = true;
+      if ("webkitPreservesPitch" in testAudio) {
+        testAudio.webkitPreservesPitch = true;
+      }
+    }
+  }
+
+  function transformedPreviewText() {
+    updatePreview();
+    return String($("#preview-spoken")?.value || "").trim();
+  }
+
+  async function ensureTestAudio() {
+    const spokenText = transformedPreviewText();
+    if (!spokenText) {
+      throw new Error("Nothing remains after pronunciation transforms.");
+    }
+
+    const cacheKey = spokenText;
+    if (testAudio && testAudioKey === cacheKey && testAudioUrl) {
+      return testAudio;
+    }
+
+    revokeTestAudio();
+    testAudioKey = "";
+    const serial = ++testSynthesisSerial;
+    $("#test-play").disabled = true;
+    setTestStatus("Synthesizing Ryan test audio…");
+
+    const response = await chrome.runtime.sendMessage({
+      type: "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE",
+      voiceId: "en_US-ryan-high",
+      text: spokenText
+    });
+
+    if (serial !== testSynthesisSerial) {
+      throw new Error("Pronunciation test was superseded.");
+    }
+
+    if (!response?.accepted || !Array.isArray(response.audioChunks)) {
+      throw new Error(
+        response?.error || "Piper did not return pronunciation test audio."
+      );
+    }
+
+    const decoded = decodeBase64Chunks(response.audioChunks);
+    if (!decoded.length) {
+      throw new Error("Piper returned an empty pronunciation test WAV.");
+    }
+
+    const blob = new Blob(decoded, { type: "audio/wav" });
+    testAudioUrl = URL.createObjectURL(blob);
+    testAudio = new Audio(testAudioUrl);
+    testAudio.preload = "auto";
+    testAudio.preservesPitch = true;
+    if ("webkitPreservesPitch" in testAudio) {
+      testAudio.webkitPreservesPitch = true;
+    }
+    testAudioKey = cacheKey;
+    applyTestSpeed();
+
+    testAudio.addEventListener("ended", () => {
+      setTestStatus("Finished · Ryan High");
+      $("#test-play").disabled = false;
+      $("#test-stop").disabled = false;
+    });
+    testAudio.addEventListener("error", () => {
+      const message = testAudio?.error?.message || "Browser test playback failed.";
+      setTestStatus(message, "error");
+      $("#test-play").disabled = false;
+    });
+
+    return testAudio;
+  }
+
+  async function playTestAudio() {
+    try {
+      const audio = await ensureTestAudio();
+      audio.currentTime = 0;
+      applyTestSpeed();
+      await audio.play();
+      setTestStatus(
+        `Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
+      );
+    } catch (error) {
+      setTestStatus(error?.message || String(error), "error");
+    } finally {
+      $("#test-play").disabled = false;
+    }
+  }
+
+  function stopTestAudio() {
+    testSynthesisSerial += 1;
+    if (testAudio) {
+      try {
+        testAudio.pause();
+        testAudio.currentTime = 0;
+      } catch (_error) {}
+    }
+    setTestStatus("Stopped · Ryan High");
+    $("#test-play").disabled = false;
   }
 
   const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
