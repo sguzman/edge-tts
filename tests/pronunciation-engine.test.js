@@ -113,3 +113,27 @@ test("ordinary English words are not rewritten by the default pronunciation laye
   assert.equal(result.text, source);
   assert.deepEqual(result.transformations, []);
 });
+
+
+test("technical acronym chains get speech-safe boundaries", () => {
+  const result = pronunciation.transformText(
+    "readlink -f ~/.config/fish/config.fish and GPU JSON SQLite in 2026."
+  );
+
+  assert.equal(
+    result.text,
+    "read link dash f, home directory, slash, dot config, slash, fish, slash, config dot fish and jee, pee, you, jay, ess, oh, en, S, Q, Lite in two thousand twenty six."
+  );
+});
+
+test("schema 1 acronym defaults migrate to speech-safe separators", () => {
+  const oldConfig = pronunciation.cloneDefaultConfig();
+  oldConfig.schemaVersion = 1;
+  oldConfig.acronyms.letterSeparator = " ";
+  oldConfig.pronunciation.brandMap.SQLite = "S Q Lite";
+
+  const migrated = pronunciation.normalizeConfig(oldConfig);
+  assert.equal(migrated.schemaVersion, 2);
+  assert.equal(migrated.acronyms.letterSeparator, ", ");
+  assert.equal(migrated.pronunciation.brandMap.SQLite, "S, Q, Lite");
+});
