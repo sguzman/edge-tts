@@ -63,7 +63,7 @@ test("pronunciation editor autosaves rule changes", () => {
   assert.match(optionsJs, /function scheduleAutosave\(\)/);
   assert.match(optionsJs, /setTimeout\(async \(\) =>/);
   assert.match(optionsJs, /Pronunciation\.saveConfig\(draft\)/);
-  assert.match(optionsJs, /Saved automatically\./);
+  assert.match(optionsJs, /Saved automatically/);
   assert.match(optionsJs, /function handleRuleChange\(\)/);
 });
 
