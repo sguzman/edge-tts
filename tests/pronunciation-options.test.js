@@ -83,6 +83,10 @@ test("pronunciation editor shows fixed save feedback independent of scroll posit
   assert.match(optionsJs, /Saved · revision/);
   assert.match(optionsCss, /\.save-toast \{/);
   assert.match(optionsCss, /position: fixed/);
+  assert.match(optionsCss, /top: 22px/);
+  assert.match(optionsCss, /right: 22px/);
+  assert.match(optionsCss, /background: #198754/);
+  assert.match(optionsCss, /font-size: 1\.05rem/);
 });
 
 test("test bench previews current rules and plays real Ryan Piper audio with browser speed control", () => {
