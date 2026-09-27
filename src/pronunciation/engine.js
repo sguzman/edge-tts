@@ -16,7 +16,7 @@
   const cloneDefaults =
     defaultsModule?.cloneDefaultConfig ||
     (() => ({
-      schemaVersion: 1,
+      schemaVersion: 2,
       enabled: true,
       normalization: {},
       technical: {},
@@ -89,19 +89,52 @@
     cursor[path.at(-1)] = clone(value);
   }
 
+  function migrateConfig(value) {
+    const incoming = isPlainObject(value) ? clone(value) : {};
+    const schemaVersion = Math.max(1, Number(incoming.schemaVersion) || 1);
+
+    if (schemaVersion < 2) {
+      incoming.acronyms = isPlainObject(incoming.acronyms)
+        ? incoming.acronyms
+        : {};
+      if (incoming.acronyms.letterSeparator === " ") {
+        incoming.acronyms.letterSeparator = ", ";
+      }
+
+      if (isPlainObject(incoming.pronunciation?.brandMap)) {
+        const brandMap = incoming.pronunciation.brandMap;
+        const replacements = new Map([
+          ["My S Q L", "My S, Q, L"],
+          ["S Q Lite", "S, Q, Lite"],
+          ["Post C S S", "Post C, S, S"]
+        ]);
+        for (const [key, spoken] of Object.entries(brandMap)) {
+          if (replacements.has(spoken)) {
+            brandMap[key] = replacements.get(spoken);
+          }
+        }
+      }
+    }
+
+    incoming.schemaVersion = 2;
+    return incoming;
+  }
+
   function normalizeConfig(value) {
-    const normalized = mergeConfig(cloneDefaults(), value);
+    const migrated = migrateConfig(value);
+    const normalized = mergeConfig(cloneDefaults(), migrated);
 
     // Rule maps are user-owned collections, not additive patches over the
     // defaults. Deep-merging them made deleted/default rules silently reappear
     // after Save, which made the Options page look like it was ignoring edits.
     for (const path of REPLACE_MAP_PATHS) {
-      const override = objectAtPath(value, path);
+      const override = objectAtPath(migrated, path);
       if (isPlainObject(override)) {
         setObjectAtPath(normalized, path, override);
       }
     }
 
+    normalized.schemaVersion = 2;
     return normalized;
   }
 
@@ -737,6 +770,38 @@
     return { spokenText: text.trim(), transformations };
   }
 
+  function needsSpeechBoundary(result) {
+    return (result?.transformations || []).some((item) =>
+      [
+        "acronym",
+        "brand-map",
+        "shell-flag",
+        "filesystem-path"
+      ].includes(String(item?.ruleId || ""))
+    );
+  }
+
+  function speechSafeSeparator(
+    previousResult,
+    currentResult,
+    previousSourceSegment,
+    currentSourceSegment,
+    separatorForSegments
+  ) {
+    const normalSeparator = typeof separatorForSegments === "function"
+      ? separatorForSegments(previousSourceSegment, currentSourceSegment)
+      : " ";
+
+    if (
+      needsSpeechBoundary(previousResult) &&
+      needsSpeechBoundary(currentResult)
+    ) {
+      return ", ";
+    }
+
+    return normalSeparator;
+  }
+
   function projectSegments(segments, separatorForSegments, config = currentConfig) {
     const cfg = config === currentConfig ? currentConfig : normalizeConfig(config);
     const projectedSegments = [];
@@ -744,15 +809,20 @@
     const transformations = [];
     let text = "";
     let previousSourceSegment = null;
+    let previousResult = null;
 
     for (const segment of segments || []) {
       const result = transformToken(segment?.text || "", cfg);
       if (!result.spokenText) continue;
 
       if (projectedSegments.length > 0) {
-        text += typeof separatorForSegments === "function"
-          ? separatorForSegments(previousSourceSegment, segment)
-          : " ";
+        text += speechSafeSeparator(
+          previousResult,
+          result,
+          previousSourceSegment,
+          segment,
+          separatorForSegments
+        );
       }
 
       starts.push(text.length);
@@ -769,6 +839,7 @@
       }
 
       previousSourceSegment = segment;
+      previousResult = result;
     }
 
     const normalizedText = text.trim();
