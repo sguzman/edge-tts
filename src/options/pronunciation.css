@@ -108,3 +108,92 @@ td input[type="text"] { min-width: 120px; }
   .hero .actions { margin-top: 12px; flex-wrap: wrap; }
   main { width: min(100% - 20px, 1180px); }
 }
+
+
+.test-bench {
+  position: relative;
+}
+.test-bench-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.test-bench-heading > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.test-bench-heading p {
+  margin: 0 0 12px;
+  opacity: 0.8;
+}
+.test-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.test-speed-label {
+  min-width: 260px;
+}
+.test-speed-label input {
+  width: 180px;
+  vertical-align: middle;
+  margin: 0 8px;
+}
+#test-speed-value {
+  display: inline-block;
+  min-width: 4.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#test-status {
+  min-height: 1.4em;
+  margin: 8px 0 12px;
+}
+#test-play[disabled],
+#test-stop[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+.save-toast {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 2147483647;
+  max-width: min(460px, calc(100vw - 44px));
+  padding: 11px 14px;
+  border: 1px solid color-mix(in srgb, CanvasText 22%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, Canvas 90%, CanvasText 10%);
+  color: CanvasText;
+  box-shadow: 0 8px 28px color-mix(in srgb, CanvasText 22%, transparent);
+  font-weight: 650;
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.save-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.save-toast.ok {
+  border-color: color-mix(in srgb, #198754 58%, transparent);
+}
+.save-toast.error {
+  border-color: color-mix(in srgb, #c33 62%, transparent);
+}
+@media (max-width: 780px) {
+  .test-bench-heading {
+    display: block;
+  }
+  .test-controls {
+    justify-content: flex-start;
+    margin-top: 10px;
+  }
+  .test-speed-label {
+    width: 100%;
+  }
+}
