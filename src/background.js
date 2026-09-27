@@ -37,6 +37,7 @@ const winNaturalRequests = new Map();
 let linuxPiperPort = null;
 let linuxPiperHandshake = null;
 const linuxPiperRequests = new Map();
+let pronunciationTestRequestId = null;
 const linuxPiperOffscreenSessions = new Map();
 let linuxPiperOffscreenReady = null;
 
@@ -175,6 +176,139 @@ function ensureLinuxPiperPort() {
       disconnectLinuxPiperPort();
       throw error;
     });
+}
+
+async function synthesizePronunciationTest(text, voiceId) {
+  const normalizedText = String(text || "").trim();
+  const normalizedVoiceId = String(voiceId || "en_US-ryan-high").trim();
+
+  if (!normalizedText) {
+    throw new Error("Pronunciation test text is empty.");
+  }
+
+  if (
+    [...linuxPiperRequests.values()].some((request) =>
+      Number.isInteger(request.tabId)
+    )
+  ) {
+    throw new Error(
+      "Piper is busy with an active reader. Stop or pause the reader before running a pronunciation test."
+    );
+  }
+
+  if (pronunciationTestRequestId) {
+    throw new Error("A pronunciation test is already synthesizing.");
+  }
+
+  const requestId =
+    `pronunciation-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  pronunciationTestRequestId = requestId;
+
+  try {
+    const port = await ensureLinuxPiperPort();
+
+    return await new Promise((resolve, reject) => {
+      const audioChunks = [];
+      let settled = false;
+
+      const cleanup = () => {
+        if (settled) return false;
+        settled = true;
+        clearTimeout(timer);
+        linuxPiperRequests.delete(requestId);
+        if (pronunciationTestRequestId === requestId) {
+          pronunciationTestRequestId = null;
+        }
+        return true;
+      };
+
+      const fail = (error) => {
+        if (!cleanup()) return;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      };
+
+      const timer = setTimeout(() => {
+        fail(new Error("Pronunciation test synthesis timed out."));
+      }, 30_000);
+
+      linuxPiperRequests.set(requestId, {
+        requestId,
+        resolve: () => {},
+        reject: fail,
+        onMessage(response) {
+          if (response?.type === "audioChunk") {
+            audioChunks.push(String(response.data || ""));
+            return;
+          }
+
+          if (response?.type === "synthesisEnd") {
+            if (!cleanup()) return;
+            if (!audioChunks.length) {
+              reject(new Error("Piper returned no WAV data for the pronunciation test."));
+              return;
+            }
+            resolve({
+              audioChunks,
+              durationMs: Math.max(0, Number(response.durationMs) || 0),
+              sampleRate: Math.max(0, Number(response.sampleRate) || 0)
+            });
+            return;
+          }
+
+          if (response?.type === "error") {
+            fail(new Error(response.message || "Piper pronunciation test failed."));
+            return;
+          }
+
+          if (response?.type === "cancelled") {
+            fail(new Error("Pronunciation test cancelled."));
+          }
+        }
+      });
+
+      try {
+        port.postMessage({
+          type: "synthesize",
+          requestId,
+          voiceId: normalizedVoiceId,
+          text: normalizedText,
+          lang: "en-US"
+        });
+      } catch (error) {
+        fail(error);
+      }
+    });
+  } finally {
+    if (
+      pronunciationTestRequestId === requestId &&
+      !linuxPiperRequests.has(requestId)
+    ) {
+      pronunciationTestRequestId = null;
+    }
+  }
+}
+
+function cancelPronunciationTest() {
+  const requestId = pronunciationTestRequestId;
+  if (!requestId) return false;
+
+  const request = linuxPiperRequests.get(requestId);
+  linuxPiperRequests.delete(requestId);
+  pronunciationTestRequestId = null;
+
+  const port = linuxPiperPort;
+  linuxPiperPort = null;
+  linuxPiperHandshake = null;
+
+  try {
+    port?.postMessage({ type: "cancel", requestId });
+  } catch (_error) {}
+  try {
+    port?.disconnect?.();
+  } catch (_error) {}
+
+  request?.reject?.(new Error("Pronunciation test cancelled."));
+  return true;
 }
 
 function stopLinuxPiperForTab(tabId, requestId = null) {
@@ -447,6 +581,29 @@ async function speakLocalTtsForTab(tabId, message) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
+
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE") {
+    void synthesizePronunciationTest(
+      message.text,
+      message.voiceId || "en_US-ryan-high"
+    )
+      .then((result) => sendResponse({
+        accepted: true,
+        audioChunks: result.audioChunks,
+        durationMs: result.durationMs,
+        sampleRate: result.sampleRate
+      }))
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_TEST_CANCEL") {
+    sendResponse({ cancelled: cancelPronunciationTest() });
+    return false;
+  }
 
   if (message?.type === "EDGE_TTS_OFFSCREEN_PIPER_EVENT") {
     const playbackId = String(message.playbackId || "");
