@@ -18,7 +18,13 @@ from typing import Any
 # Defense in depth: the project never uses CUDA for Piper.
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 
-from piper import PiperVoice, SynthesisConfig  # type: ignore  # installed in app-private venv
+# Do not import Piper/NumPy/ONNX Runtime at process startup. Edge starts its
+# native-messaging handshake timeout as soon as the process is launched, and a
+# cold onnxruntime import can exceed that budget. Handshake using stdlib only,
+# then import Piper lazily on the warm-up/synthesis path.
+_PiperVoice: Any | None = None
+_SynthesisConfig: Any | None = None
+_piper_import_lock = threading.Lock()
 
 
 PROTOCOL_VERSION = 1
@@ -36,8 +42,10 @@ VOICE_ROOT = Path(
 _write_lock = threading.Lock()
 _state_lock = threading.Lock()
 _voice_load_lock = threading.Lock()
+_warmup_lock = threading.Lock()
+_warmup_started = False
 _loaded_voice_id: str | None = None
-_loaded_voice: PiperVoice | None = None
+_loaded_voice: Any | None = None
 _active_request_id: str | None = None
 _active_cancel: threading.Event | None = None
 _active_thread: threading.Thread | None = None
@@ -144,7 +152,23 @@ def voice_model_path(voice_id: str) -> Path:
     return model_path
 
 
-def get_voice(voice_id: str) -> PiperVoice:
+def ensure_piper_runtime() -> tuple[Any, Any]:
+    global _PiperVoice, _SynthesisConfig
+
+    if _PiperVoice is not None and _SynthesisConfig is not None:
+        return _PiperVoice, _SynthesisConfig
+
+    with _piper_import_lock:
+        if _PiperVoice is None or _SynthesisConfig is None:
+            from piper import PiperVoice as PiperVoiceClass, SynthesisConfig as SynthesisConfigClass  # type: ignore
+
+            _PiperVoice = PiperVoiceClass
+            _SynthesisConfig = SynthesisConfigClass
+
+    return _PiperVoice, _SynthesisConfig
+
+
+def get_voice(voice_id: str) -> Any:
     global _loaded_voice_id, _loaded_voice
     with _state_lock:
         if _loaded_voice is not None and _loaded_voice_id == voice_id:
@@ -158,8 +182,9 @@ def get_voice(voice_id: str) -> PiperVoice:
                 return _loaded_voice
 
         model_path = voice_model_path(voice_id)
+        PiperVoiceClass, _ = ensure_piper_runtime()
         # Hard invariant: CPU inference only.
-        voice = PiperVoice.load(str(model_path), use_cuda=False)
+        voice = PiperVoiceClass.load(str(model_path), use_cuda=False)
 
         with _state_lock:
             _loaded_voice_id = voice_id
@@ -182,6 +207,13 @@ def warm_default_voice() -> None:
 
 
 def start_default_voice_warmup() -> None:
+    global _warmup_started
+
+    with _warmup_lock:
+        if _warmup_started:
+            return
+        _warmup_started = True
+
     threading.Thread(
         target=warm_default_voice,
         name="piper-warm-default",
@@ -239,7 +271,8 @@ def synthesize_worker(
         send_message({"type": "status", "requestId": request_id, "status": "Loading Piper model..."})
         voice = get_voice(voice_id)
         send_message({"type": "status", "requestId": request_id, "status": "Synthesizing with Piper..."})
-        config = SynthesisConfig(length_scale=1.0)
+        _, SynthesisConfigClass = ensure_piper_runtime()
+        config = SynthesisConfigClass(length_scale=1.0)
         pcm = bytearray()
         sample_rate: int | None = None
         sample_width: int | None = None
@@ -390,6 +423,9 @@ def handle_message(message: dict[str, Any]) -> None:
                 "timing": "approximate-word-v1",
             }
         )
+        # Only after the handshake has been flushed do we begin expensive
+        # Piper/onnxruntime import and Ryan model warm-up.
+        start_default_voice_warmup()
     elif message_type == "voices":
         send_message({"type": "voices", "requestId": request_id, "voices": list_voices()})
     elif message_type == "synthesize":
@@ -405,7 +441,8 @@ def run_self_test(voice_id: str) -> int:
     """Synthesize a tiny probe without Native Messaging framing."""
     try:
         voice = get_voice(voice_id)
-        config = SynthesisConfig(length_scale=1.0)
+        _, SynthesisConfigClass = ensure_piper_runtime()
+        config = SynthesisConfigClass(length_scale=1.0)
         pcm_bytes = 0
         sample_rate = 0
         peak = 0
@@ -439,10 +476,8 @@ def run_self_test(voice_id: str) -> int:
 
 
 def main() -> None:
-    # Start loading Ryan immediately when Edge launches the native host. This
-    # overlaps model I/O with handshake, voice discovery, and page modeling.
-    start_default_voice_warmup()
-
+    # Keep startup stdlib-only so Edge can complete Native Messaging handshake
+    # before Piper/onnxruntime cold imports begin.
     while True:
         try:
             message = read_message()
