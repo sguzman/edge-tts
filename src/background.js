@@ -176,10 +176,11 @@ function ensureLinuxPiperPort() {
     // A canceled helper may disconnect after a replacement helper has already
     // been connected. Never let the stale port tear down the new global port.
     if (linuxPiperPort === port) {
+      const runtimeId = String(chrome.runtime?.id || "unknown");
       disconnectLinuxPiperPort(
         error?.message
-          ? `Linux Piper helper disconnected: ${error.message}`
-          : "Linux Piper helper disconnected before handshake completed."
+          ? `Linux Piper helper disconnected (extension ${runtimeId}): ${error.message}`
+          : `Linux Piper helper disconnected before handshake completed (extension ${runtimeId}).`
       );
     }
     if (error) console.warn(error.message);
