@@ -188,10 +188,13 @@
       }
 
       this.rebuildModel();
-      this.refreshVoices();
-      if (!this.voices.some((voice) =>
-        isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
-      )) {
+      await this.ensurePreferredVoiceAvailable();
+      if (
+        !this.selectedVoice &&
+        !this.voices.some((voice) =>
+          isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
+        )
+      ) {
         this.toolbar.setStatus("Loading voices…");
         await this.speech.waitForVoices(
           350,
@@ -208,7 +211,17 @@
         ) {
           return;
         }
-        this.refreshVoices();
+        await this.ensurePreferredVoiceAvailable();
+      }
+
+      if (this.prefersLinuxPiper() && !isLinuxPiperVoice(this.selectedVoice)) {
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus(
+          "Paused — Piper voice unavailable; Online fallback blocked"
+        );
+        return;
       }
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -657,6 +670,22 @@
       );
     }
 
+    async ensurePreferredVoiceAvailable() {
+      this.refreshVoices();
+      if (!this.prefersLinuxPiper() || isLinuxPiperVoice(this.selectedVoice)) {
+        return Boolean(this.selectedVoice);
+      }
+
+      this.toolbar?.setStatus?.("Loading Piper voice...");
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      await (
+        this.speech?.refreshLinuxPiperVoices?.() ||
+        Promise.resolve()
+      );
+      this.refreshVoices();
+      return isLinuxPiperVoice(this.selectedVoice);
+    }
+
     speakCurrentPosition() {
       this.clearResumeWatchdog();
 
@@ -666,6 +695,7 @@
         this.toolbar?.setStatus?.(
           "Paused — Piper voice unavailable; refusing Online fallback"
         );
+        this.releaseAudioOwnership();
         return;
       }
 
