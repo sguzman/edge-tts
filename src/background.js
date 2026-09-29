@@ -36,6 +36,8 @@ let winNaturalHandshake = null;
 const winNaturalRequests = new Map();
 let linuxPiperPort = null;
 let linuxPiperHandshake = null;
+let linuxPiperHandshakeReject = null;
+let linuxPiperHandshakeTimer = null;
 const linuxPiperRequests = new Map();
 let pronunciationTestRequestId = null;
 const linuxPiperOffscreenSessions = new Map();
@@ -94,12 +96,19 @@ function stopWinNaturalForTab(tabId, requestId = null) {
   return true;
 }
 
-function disconnectLinuxPiperPort() {
+function disconnectLinuxPiperPort(
+  reason = "Linux Piper helper disconnected."
+) {
   const port = linuxPiperPort;
-  const handshake = linuxPiperHandshake;
+  const rejectHandshake = linuxPiperHandshakeReject;
   linuxPiperPort = null;
   linuxPiperHandshake = null;
-  handshake?.reject?.(new Error("Linux Piper helper disconnected."));
+  linuxPiperHandshakeReject = null;
+  if (linuxPiperHandshakeTimer !== null) {
+    clearTimeout(linuxPiperHandshakeTimer);
+    linuxPiperHandshakeTimer = null;
+  }
+  rejectHandshake?.(new Error(reason));
   for (const request of linuxPiperRequests.values()) {
     request.reject?.(new Error("Linux Piper helper disconnected."));
     if (Number.isInteger(request.tabId)) {
@@ -128,9 +137,18 @@ function ensureLinuxPiperPort() {
 
   linuxPiperPort = port;
   linuxPiperHandshake = new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error("Linux Piper helper handshake timed out.")), 5000);
+    linuxPiperHandshakeReject = reject;
+    linuxPiperHandshakeTimer = setTimeout(() => {
+      linuxPiperHandshakeTimer = null;
+      linuxPiperHandshakeReject = null;
+      reject(new Error("Linux Piper helper handshake timed out after 15 seconds."));
+    }, 15_000);
     const finish = (callback, value) => {
-      clearTimeout(timer);
+      if (linuxPiperHandshakeTimer !== null) {
+        clearTimeout(linuxPiperHandshakeTimer);
+        linuxPiperHandshakeTimer = null;
+      }
+      linuxPiperHandshakeReject = null;
       callback(value);
     };
 
@@ -158,7 +176,11 @@ function ensureLinuxPiperPort() {
     // A canceled helper may disconnect after a replacement helper has already
     // been connected. Never let the stale port tear down the new global port.
     if (linuxPiperPort === port) {
-      disconnectLinuxPiperPort();
+      disconnectLinuxPiperPort(
+        error?.message
+          ? `Linux Piper helper disconnected: ${error.message}`
+          : "Linux Piper helper disconnected before handshake completed."
+      );
     }
     if (error) console.warn(error.message);
   });
