@@ -127,6 +127,60 @@ manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
 PY
 chmod 0644 "$MANIFEST_PATH"
 
+echo "Verifying Native Messaging handshake..."
+"$VENV_DIR/bin/python" - "$HOST_LAUNCHER" <<'PY'
+import json
+import struct
+import subprocess
+import sys
+import time
+
+launcher = sys.argv[1]
+message = json.dumps(
+    {"type": "hello", "protocol": 1},
+    separators=(",", ":"),
+).encode("utf-8")
+frame = struct.pack("<I", len(message)) + message
+
+started = time.monotonic()
+process = subprocess.Popen(
+    [launcher],
+    stdin=subprocess.PIPE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+try:
+    stdout, stderr = process.communicate(input=frame, timeout=5)
+except subprocess.TimeoutExpired:
+    process.kill()
+    stdout, stderr = process.communicate()
+    raise SystemExit(
+        "Native Messaging handshake self-test timed out.\n"
+        + stderr.decode("utf-8", "replace")
+    )
+
+elapsed_ms = round((time.monotonic() - started) * 1000)
+if len(stdout) < 4:
+    raise SystemExit(
+        "Native Messaging handshake self-test produced no framed response.\n"
+        + stderr.decode("utf-8", "replace")
+    )
+
+length = struct.unpack("<I", stdout[:4])[0]
+payload = stdout[4 : 4 + length]
+response = json.loads(payload.decode("utf-8"))
+if not (
+    response.get("type") == "hello"
+    and response.get("protocol") == 1
+    and response.get("platform") == "linux"
+    and response.get("backend") == "piper"
+    and response.get("cpuOnly") is True
+):
+    raise SystemExit(f"Unexpected Native Messaging handshake: {response!r}")
+
+print(f"Native Messaging handshake OK in {elapsed_ms} ms.")
+PY
+
 echo
 echo "Linux Piper native host installed."
 echo "  Runtime:  $RUNTIME_DIR"
