@@ -124,13 +124,16 @@
       trace.modelMs = now() - modelStartedAt;
 
       this.applySettings();
-      this.refreshVoices();
+      await this.ensurePreferredVoiceAvailable?.();
 
-      if (!this.voices.some((voice) =>
-        isNaturalVoice(voice) ||
-        isWinNaturalVoice(voice) ||
-        isLinuxPiperVoice(voice)
-      )) {
+      if (
+        !this.selectedVoice &&
+        !this.voices.some((voice) =>
+          isNaturalVoice(voice) ||
+          isWinNaturalVoice(voice) ||
+          isLinuxPiperVoice(voice)
+        )
+      ) {
         this.toolbar.setStatus("Loading voice…");
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
@@ -139,7 +142,21 @@
           trace.active = false;
           return;
         }
-        this.refreshVoices();
+        await this.ensurePreferredVoiceAvailable?.();
+      }
+
+      if (
+        this.prefersLinuxPiper?.() &&
+        !isLinuxPiperVoice(this.selectedVoice)
+      ) {
+        trace.active = false;
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus(
+          "Paused — Piper voice unavailable; Online fallback blocked"
+        );
+        return;
       }
 
       const startBlock = firstBlockNearViewport(this.model?.blocks || []);
