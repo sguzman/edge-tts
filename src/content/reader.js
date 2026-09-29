@@ -37,9 +37,11 @@
   const DEFAULT_SENTENCE_PAUSE_MS = 300;
 
   const DEFAULT_SETTINGS = {
-    settingsVersion: 3,
+    settingsVersion: 4,
     rate: 1,
     voiceName: "",
+    voiceSource: "linux-piper",
+    voiceId: DEFAULT_LINUX_PIPER_VOICE_ID,
     minBatchChars: DEFAULT_BATCH_CHARS,
     sentencePauseMs: DEFAULT_SENTENCE_PAUSE_MS,
     wordColor: DEFAULT_WORD_COLOR,
@@ -592,35 +594,81 @@
     refreshVoices() {
       const documentLanguage = document.documentElement.lang || navigator.language;
       const savedVoiceName = this.settings.voiceName;
+      const savedVoiceSource = String(this.settings.voiceSource || "");
+      const savedVoiceId = String(this.settings.voiceId || "");
       const voices = this.speech.chooseVoices(documentLanguage, savedVoiceName);
       this.voices = voices;
 
-      const savedVoice = voices.find((voice) => voice.name === savedVoiceName);
+      const savedVoice = voices.find((voice) => {
+        if (savedVoiceSource === "linux-piper") {
+          return (
+            isLinuxPiperVoice(voice) &&
+            (!savedVoiceId || voice.voiceId === savedVoiceId)
+          );
+        }
+        if (savedVoiceSource) {
+          return (
+            String(voice?.__edgeTtsSource || "") === savedVoiceSource &&
+            voice.name === savedVoiceName
+          );
+        }
+        return voice.name === savedVoiceName;
+      });
+
       const defaultRyan = voices.find(
         (voice) =>
           isLinuxPiperVoice(voice) &&
           voice.voiceId === DEFAULT_LINUX_PIPER_VOICE_ID
       );
 
-      this.selectedVoice =
-        savedVoice ||
-        defaultRyan ||
-        voices.find(isLinuxPiperVoice) ||
-        voices.find(isWinNaturalVoice) ||
-        voices.find(isNaturalVoice) ||
-        voices[0] ||
-        null;
+      const prefersPiper =
+        savedVoiceSource === "linux-piper" ||
+        (!savedVoiceSource && savedVoiceName === "Ryan High");
 
-      // Passive catalog refresh must never erase a user's saved choice. When
-      // there is no saved choice yet, Ryan High is the Linux default.
+      this.selectedVoice = prefersPiper
+        ? (
+            savedVoice ||
+            defaultRyan ||
+            voices.find(isLinuxPiperVoice) ||
+            null
+          )
+        : (
+            savedVoice ||
+            defaultRyan ||
+            voices.find(isLinuxPiperVoice) ||
+            voices.find(isWinNaturalVoice) ||
+            voices.find(isNaturalVoice) ||
+            voices[0] ||
+            null
+          );
+
+      // A Piper preference is sticky. Passive catalog refresh may temporarily
+      // leave no selected voice, but it must never silently substitute Online.
       const toolbarVoiceName =
-        savedVoiceName || this.selectedVoice?.name || "";
+        this.selectedVoice?.name || savedVoiceName || "";
       this.toolbar.setVoices(voices, toolbarVoiceName);
       this.toolbar.setRate(this.settings.rate);
     }
 
+    prefersLinuxPiper() {
+      return (
+        this.settings.voiceSource === "linux-piper" ||
+        (!this.settings.voiceSource && this.settings.voiceName === "Ryan High")
+      );
+    }
+
     speakCurrentPosition() {
       this.clearResumeWatchdog();
+
+      if (!this.selectedVoice && this.prefersLinuxPiper()) {
+        this.paused = true;
+        this.toolbar?.setPaused?.(true);
+        this.toolbar?.setStatus?.(
+          "Paused — Piper voice unavailable; refusing Online fallback"
+        );
+        return;
+      }
+
       if (!this.audioOwner) {
         if (!this.stopped) {
           this.paused = true;
@@ -890,6 +938,13 @@
       if (!voice) return;
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
+      this.settings.voiceSource = String(
+        voice?.__edgeTtsSource ||
+        (isNaturalVoice(voice) ? "online" : "browser")
+      );
+      this.settings.voiceId = isLinuxPiperVoice(voice)
+        ? String(voice.voiceId || "")
+        : "";
       await this.saveSettings();
       if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
@@ -971,12 +1026,24 @@
         const storedSettingsVersion = Number(stored.settingsVersion || 0);
         const requiresSafetyMigration = storedSettingsVersion < 2;
         const requiresRyanDefaultMigration = storedSettingsVersion < 3;
+        const requiresVoiceIdentityMigration = storedSettingsVersion < 4;
+        const migratedVoiceName = requiresRyanDefaultMigration
+          ? "Ryan High"
+          : (stored.voiceName || "Ryan High");
+        const migratedVoiceSource = requiresVoiceIdentityMigration
+          ? (migratedVoiceName === "Ryan High" ? "linux-piper" : "")
+          : String(stored.voiceSource || "");
+        const migratedVoiceId = requiresVoiceIdentityMigration
+          ? (migratedVoiceSource === "linux-piper"
+              ? DEFAULT_LINUX_PIPER_VOICE_ID
+              : "")
+          : String(stored.voiceId || "");
         this.settings = {
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
-          voiceName: requiresRyanDefaultMigration
-            ? "Ryan High"
-            : (stored.voiceName || "Ryan High"),
+          voiceName: migratedVoiceName,
+          voiceSource: migratedVoiceSource,
+          voiceId: migratedVoiceId,
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
           sentencePauseMs: normalizeSentencePauseMs(stored.sentencePauseMs),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
@@ -992,13 +1059,17 @@
               : null
         };
 
-        if (requiresSafetyMigration || requiresRyanDefaultMigration) {
+        if (
+          requiresSafetyMigration ||
+          requiresRyanDefaultMigration ||
+          requiresVoiceIdentityMigration
+        ) {
           await chrome.storage.local.set({
             settingsVersion: DEFAULT_SETTINGS.settingsVersion,
             clickToSeek: requiresSafetyMigration ? false : this.settings.clickToSeek,
-            voiceName: requiresRyanDefaultMigration
-              ? "Ryan High"
-              : this.settings.voiceName
+            voiceName: this.settings.voiceName,
+            voiceSource: this.settings.voiceSource,
+            voiceId: this.settings.voiceId
           });
         }
       } catch (error) {
