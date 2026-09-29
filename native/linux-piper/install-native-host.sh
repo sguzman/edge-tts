@@ -4,7 +4,10 @@ set -euo pipefail
 usage() {
   cat <<'EOF'
 Usage:
-  ./native/linux-piper/install-native-host.sh --extension-id <EDGE_EXTENSION_ID>
+  ./native/linux-piper/install-native-host.sh [--extension-id <EDGE_EXTENSION_ID>]
+
+Without --extension-id, the installer auto-detects the unpacked extension ID
+that Microsoft Edge currently associates with this repository path.
 
 Installs an isolated, CPU-only Piper runtime for Edge Natural TTS.
 No sudo. No system/user-site pip install. Voice models are not modified.
@@ -31,13 +34,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z "$EXTENSION_ID" ]]; then
-  echo "Missing --extension-id." >&2
-  usage >&2
-  exit 2
-fi
-
-if [[ ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
+if [[ -n "$EXTENSION_ID" && ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
   echo "That does not look like a Chromium extension ID: $EXTENSION_ID" >&2
   exit 2
 fi
@@ -56,6 +53,88 @@ HOST_PY="$RUNTIME_DIR/linux_piper_host.py"
 HOST_LAUNCHER="$RUNTIME_DIR/edge-natural-tts-linux-piper-host"
 MANIFEST_DIR="$CONFIG_HOME/microsoft-edge/NativeMessagingHosts"
 MANIFEST_PATH="$MANIFEST_DIR/com.sguzman.edge_tts.linux_piper.json"
+REPO_ROOT="$(cd -- "$SCRIPT_DIR/../.." && pwd -P)"
+
+if [[ -z "$EXTENSION_ID" ]]; then
+  echo "Auto-detecting Edge extension ID for:"
+  echo "  $REPO_ROOT"
+
+  EXTENSION_ID="$(
+    "$VENV_DIR/bin/python" - "$REPO_ROOT" "$CONFIG_HOME/microsoft-edge" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+repo_root = Path(sys.argv[1]).resolve()
+edge_root = Path(sys.argv[2]).expanduser()
+
+matches = set()
+checked = []
+
+if edge_root.is_dir():
+    for profile in sorted(edge_root.iterdir()):
+        if not profile.is_dir():
+            continue
+        for filename in ("Preferences", "Secure Preferences"):
+            prefs_path = profile / filename
+            if not prefs_path.is_file():
+                continue
+            checked.append(str(prefs_path))
+            try:
+                data = json.loads(prefs_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+
+            settings = data.get("extensions", {}).get("settings", {})
+            if not isinstance(settings, dict):
+                continue
+
+            for extension_id, entry in settings.items():
+                if not isinstance(entry, dict):
+                    continue
+                raw_path = entry.get("path")
+                if not isinstance(raw_path, str) or not raw_path:
+                    continue
+
+                candidate = Path(raw_path).expanduser()
+                if not candidate.is_absolute():
+                    candidate = (profile / candidate)
+                try:
+                    candidate = candidate.resolve()
+                except Exception:
+                    continue
+
+                if candidate == repo_root:
+                    matches.add(str(extension_id))
+
+if len(matches) == 1:
+    print(next(iter(matches)))
+    raise SystemExit(0)
+
+if len(matches) > 1:
+    raise SystemExit(
+        "Multiple Edge extension IDs are registered for this repo path: "
+        + ", ".join(sorted(matches))
+        + "\nPass --extension-id explicitly."
+    )
+
+raise SystemExit(
+    "Could not auto-detect an Edge extension ID for this repo path.\n"
+    "Make sure the unpacked extension is loaded from this exact directory, "
+    "then rerun the installer, or pass --extension-id explicitly.\n"
+    "Checked Edge profile files:\n  "
+    + "\n  ".join(checked)
+)
+PY
+  )"
+fi
+
+if [[ ! "$EXTENSION_ID" =~ ^[a-p]{32}$ ]]; then
+  echo "Detected invalid Chromium extension ID: $EXTENSION_ID" >&2
+  exit 2
+fi
+
+echo "Using Edge extension ID: $EXTENSION_ID"
 
 mkdir -p "$VOICE_DIR" "$RUNTIME_DIR" "$MANIFEST_DIR"
 
