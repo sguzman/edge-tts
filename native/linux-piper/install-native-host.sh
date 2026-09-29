@@ -60,7 +60,7 @@ if [[ -z "$EXTENSION_ID" ]]; then
   echo "  $REPO_ROOT"
 
   EXTENSION_ID="$(
-    "$VENV_DIR/bin/python" - "$REPO_ROOT" "$CONFIG_HOME/microsoft-edge" <<'PY'
+    python3 - "$REPO_ROOT" "$CONFIG_HOME/microsoft-edge" <<'PY'
 import json
 import sys
 from pathlib import Path
