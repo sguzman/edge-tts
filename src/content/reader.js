@@ -29,6 +29,14 @@
   const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
   const DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-ryan-high";
 
+  function voiceSourceKey(voice) {
+    if (isLinuxPiperVoice(voice)) return "linux-piper";
+    if (isWinNaturalVoice(voice)) return "win-natural";
+    if (voice?.__edgeTtsSource) return String(voice.__edgeTtsSource);
+    if (isNaturalVoice(voice)) return "online";
+    return "browser";
+  }
+
   const MIN_BATCH_CHARS = 400;
   const MAX_BATCH_CHARS = 2400;
   const DEFAULT_BATCH_CHARS = 1200;
@@ -621,7 +629,7 @@
         }
         if (savedVoiceSource) {
           return (
-            String(voice?.__edgeTtsSource || "") === savedVoiceSource &&
+            voiceSourceKey(voice) === savedVoiceSource &&
             voice.name === savedVoiceName
           );
         }
@@ -968,10 +976,7 @@
       if (!voice) return;
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
-      this.settings.voiceSource = String(
-        voice?.__edgeTtsSource ||
-        (isNaturalVoice(voice) ? "online" : "browser")
-      );
+      this.settings.voiceSource = voiceSourceKey(voice);
       this.settings.voiceId = isLinuxPiperVoice(voice)
         ? String(voice.voiceId || "")
         : "";
