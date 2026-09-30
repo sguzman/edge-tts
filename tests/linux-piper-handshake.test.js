@@ -11,6 +11,10 @@ const background = fs.readFileSync(
   path.join(__dirname, "..", "src", "background.js"),
   "utf8"
 );
+const installer = fs.readFileSync(
+  path.join(__dirname, "..", "native", "linux-piper", "install-native-host.sh"),
+  "utf8"
+);
 
 test("native host handshakes before importing Piper and onnxruntime", () => {
   const ensureAt = host.indexOf("def ensure_piper_runtime()");
@@ -34,4 +38,18 @@ test("browser handshake rejects real disconnects and uses a tolerant timeout", (
   assert.match(background, /Linux Piper helper disconnected before handshake completed/);
   assert.match(background, /15_000/);
   assert.match(background, /handshake timed out after 15 seconds/);
+});
+
+
+test("installer can auto-detect the unpacked Edge ID from the current repo path", () => {
+  assert.match(installer, /REPO_ROOT=.*SCRIPT_DIR\/\.\.\/\.\./);
+  assert.match(installer, /Auto-detecting Edge extension ID/);
+  assert.match(installer, /"Preferences", "Secure Preferences"/);
+  assert.match(installer, /candidate == repo_root/);
+  assert.match(installer, /Using Edge extension ID/);
+});
+
+test("native host errors identify the requesting runtime extension ID", () => {
+  assert.match(background, /chrome\.runtime\?\.id/);
+  assert.match(background, /extension \$\{runtimeId\}/);
 });
