@@ -1,0 +1,203 @@
+:root {
+  color-scheme: light dark;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: Canvas;
+  color: CanvasText;
+}
+main {
+  width: min(1180px, calc(100% - 32px));
+  margin: 24px auto 80px;
+}
+.hero, .section-heading, .actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.hero {
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 18px;
+}
+h1, h2, h3 { margin: 0 0 10px; }
+p { line-height: 1.45; }
+.card {
+  border: 1px solid color-mix(in srgb, CanvasText 18%, transparent);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 14px 0;
+  background: color-mix(in srgb, Canvas 96%, CanvasText 4%);
+}
+.section-heading {
+  justify-content: space-between;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px 18px;
+}
+label {
+  display: block;
+  line-height: 1.4;
+}
+input[type="text"], textarea, select {
+  width: 100%;
+  font: inherit;
+  padding: 8px 10px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  border-radius: 7px;
+  background: Canvas;
+  color: CanvasText;
+}
+textarea {
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+button {
+  font: inherit;
+  padding: 7px 11px;
+  border-radius: 7px;
+  border: 1px solid color-mix(in srgb, CanvasText 25%, transparent);
+  background: color-mix(in srgb, Canvas 88%, CanvasText 12%);
+  color: CanvasText;
+  cursor: pointer;
+}
+button:hover { filter: brightness(1.08); }
+button.primary {
+  font-weight: 700;
+}
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 6px;
+}
+th, td {
+  text-align: left;
+  vertical-align: top;
+  border-bottom: 1px solid color-mix(in srgb, CanvasText 14%, transparent);
+  padding: 7px;
+}
+th:last-child, td:last-child { width: 1%; white-space: nowrap; }
+td input[type="text"] { min-width: 120px; }
+.invalid {
+  outline: 2px solid #c33;
+}
+#status {
+  min-height: 1.5em;
+  font-weight: 650;
+}
+#status.error { color: #c33; }
+#status.ok { color: #198754; }
+.preview-card textarea[readonly] {
+  opacity: 0.9;
+}
+.ledger {
+  overflow-x: auto;
+}
+.ledger table {
+  font-size: 0.9rem;
+}
+.muted {
+  opacity: 0.7;
+}
+@media (max-width: 700px) {
+  .hero { display: block; }
+  .hero .actions { margin-top: 12px; flex-wrap: wrap; }
+  main { width: min(100% - 20px, 1180px); }
+}
+
+
+.test-bench {
+  position: relative;
+}
+.test-bench-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+.test-bench-heading > div:first-child {
+  min-width: 0;
+  flex: 1;
+}
+.test-bench-heading p {
+  margin: 0 0 12px;
+  opacity: 0.8;
+}
+.test-controls {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.test-speed-label {
+  min-width: 260px;
+}
+.test-speed-label input {
+  width: 180px;
+  vertical-align: middle;
+  margin: 0 8px;
+}
+#test-speed-value {
+  display: inline-block;
+  min-width: 4.5ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+#test-status {
+  min-height: 1.4em;
+  margin: 8px 0 12px;
+}
+#test-play[disabled],
+#test-stop[disabled] {
+  opacity: 0.55;
+  cursor: default;
+}
+.save-toast {
+  position: fixed;
+  top: 22px;
+  right: 22px;
+  z-index: 2147483647;
+  max-width: min(560px, calc(100vw - 44px));
+  padding: 15px 20px;
+  border: 2px solid #198754;
+  border-radius: 12px;
+  background: #198754;
+  color: #fff;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.28);
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.01em;
+  opacity: 0;
+  transform: translateY(-10px);
+  pointer-events: none;
+  transition: opacity 140ms ease, transform 140ms ease;
+}
+.save-toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+.save-toast.ok {
+  border-color: #198754;
+  background: #198754;
+}
+.save-toast.error {
+  border-color: #b42318;
+  background: #b42318;
+}
+@media (max-width: 780px) {
+  .test-bench-heading {
+    display: block;
+  }
+  .test-controls {
+    justify-content: flex-start;
+    margin-top: 10px;
+  }
+  .test-speed-label {
+    width: 100%;
+  }
+}

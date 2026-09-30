@@ -8,6 +8,9 @@ const source = fs.readFileSync(backgroundPath, "utf8");
 
 test("speech backends, voice UI, controls, and startup fast path load before bootstrap", () => {
   const baseSpeech = source.indexOf('"src/content/speech-engine.js"');
+  const pronunciationDefaults = source.indexOf('"src/pronunciation/defaults.js"');
+  const pronunciationEngine = source.indexOf('"src/pronunciation/engine.js"');
+  const textModel = source.indexOf('"src/content/text-model.js"');
   const reliableSpeech = source.indexOf('"src/content/reliable-speech-engine.js"');
   const directAudio = source.indexOf('"src/content/direct-audio-engine.js"');
   const winNatural = source.indexOf('"src/content/win-natural-engine.js"');
@@ -23,6 +26,10 @@ test("speech backends, voice UI, controls, and startup fast path load before boo
   const bootstrap = source.indexOf('"src/content/content-script.js"');
 
   assert.ok(baseSpeech >= 0);
+  assert.ok(pronunciationDefaults >= 0);
+  assert.ok(pronunciationEngine > pronunciationDefaults);
+  assert.ok(textModel > pronunciationEngine);
+  assert.ok(pronunciationEngine < directAudio);
   assert.ok(reliableSpeech > baseSpeech);
   assert.ok(directAudio > reliableSpeech);
   assert.ok(winNatural > directAudio);

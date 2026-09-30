@@ -1,5 +1,5 @@
 (function attachTextModel(root, factory) {
-  const api = factory();
+  const api = factory(root);
 
   if (typeof module === "object" && module.exports) {
     module.exports = api;
@@ -8,7 +8,7 @@
   if (root.EdgeTtsExtension) {
     root.EdgeTtsExtension.TextModel = api;
   }
-})(globalThis, function createTextModelApi() {
+})(globalThis, function createTextModelApi(root) {
   const BLOCK_SELECTOR = [
     "h1",
     "h2",
@@ -64,6 +64,11 @@
     "[data-message-author-role='assistant']"
   ].join(",");
 
+  // X/Twitter renders tweet prose in div-based application widgets rather than
+  // semantic <p> blocks, so the generic block selector misses the actual post
+  // text even when <main> is selected correctly.
+  const X_TWEET_TEXT_SELECTOR = "[data-testid='tweetText']";
+
   function siteProfileForHostname(hostname) {
     const normalized = String(hostname || "").toLowerCase();
     if (
@@ -72,6 +77,14 @@
       normalized === "chat.openai.com"
     ) {
       return "chatgpt";
+    }
+    if (
+      normalized === "x.com" ||
+      normalized.endsWith(".x.com") ||
+      normalized === "twitter.com" ||
+      normalized.endsWith(".twitter.com")
+    ) {
+      return "x";
     }
     return "generic";
   }
@@ -99,12 +112,22 @@
   }
 
   function sentenceRanges(text, language) {
+    const lanternLeafRanges =
+      root.EdgeTtsExtension?.Pronunciation?.sentenceRanges?.(text);
+    if (Array.isArray(lanternLeafRanges) && lanternLeafRanges.length > 0) {
+      return lanternLeafRanges;
+    }
+
+    // Non-Piper/minimal test fallback only. Runtime pronunciation builds load
+    // the Lantern Leaf-derived boundary model before this module.
     const ranges = [];
-    const Segmenter = globalThis.Intl?.Segmenter;
+    const Segmenter = root.Intl?.Segmenter;
 
     if (typeof Segmenter === "function") {
       try {
-        const segmenter = new Segmenter(language || undefined, { granularity: "sentence" });
+        const segmenter = new Segmenter(language || undefined, {
+          granularity: "sentence"
+        });
         for (const sentence of segmenter.segment(text)) {
           const range = trimSentenceRange(
             text,
@@ -113,19 +136,19 @@
           );
           if (range) ranges.push(range);
         }
-      } catch (_error) {
-        // Fall through to punctuation segmentation below.
-      }
+      } catch (_error) {}
     }
 
-    if (ranges.length > 0) {
-      return ranges;
-    }
+    if (ranges.length > 0) return ranges;
 
     const expression = /[^.!?]+(?:[.!?]+(?:["'”’\)\]]+)?(?=\s|$)|$)/g;
     let match;
     while ((match = expression.exec(text)) !== null) {
-      const range = trimSentenceRange(text, match.index, match.index + match[0].length);
+      const range = trimSentenceRange(
+        text,
+        match.index,
+        match.index + match[0].length
+      );
       if (range) ranges.push(range);
       if (match[0].length === 0) expression.lastIndex += 1;
     }
@@ -330,6 +353,20 @@
     return candidates;
   }
 
+  function collectXCandidates(doc, visibilityCache) {
+    return Array.from(doc.querySelectorAll(X_TWEET_TEXT_SELECTOR)).filter(
+      (element) => {
+        if (!shouldKeepCandidate(element, visibilityCache)) {
+          return false;
+        }
+
+        // X can transiently duplicate tweet DOM during navigation/virtualized
+        // timeline updates. Keep only top-level tweetText containers.
+        return !element.parentElement?.closest(X_TWEET_TEXT_SELECTOR);
+      }
+    );
+  }
+
   function buildReadableModel(doc = document) {
     const visibilityCache = new WeakMap();
     const language = doc.documentElement?.lang || globalThis.navigator?.language;
@@ -339,6 +376,8 @@
 
     if (profile === "chatgpt") {
       candidates = collectChatGptCandidates(doc, visibilityCache);
+    } else if (profile === "x") {
+      candidates = collectXCandidates(doc, visibilityCache);
     }
 
     if (candidates.length === 0) {
@@ -378,7 +417,10 @@
     return {
       blocks,
       nodeToBlock,
-      profile: profile === "chatgpt" && blocks.length > 0 ? "chatgpt" : "generic"
+      profile:
+        (profile === "chatgpt" || profile === "x") && blocks.length > 0
+          ? profile
+          : "generic"
     };
   }
 
@@ -473,6 +515,7 @@
     segmentIndexForCharIndex,
     sentenceRanges,
     siteProfileForHostname,
+    collectXCandidates,
     tokenizeText
   };
 });

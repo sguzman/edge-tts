@@ -42,21 +42,21 @@ test("reader invalidates stale startup work on lifecycle changes", () => {
   assert.match(reader, /this\.lifecycleSerial \+= 1/);
 });
 
-test("Piper uses fresh direct media playback with two-sentence look-ahead", () => {
+test("Piper uses extension-owned playback with two-sentence look-ahead", () => {
   assert.match(piperEngine, /linuxPiperPrefetchDepth = 2/);
   assert.match(piperEngine, /_fillLinuxPiperPrefetch/);
-  assert.match(piperEngine, /const audio = root\.document\?\.createElement\?\.\("audio"\)/);
-  assert.match(piperEngine, /audio\.volume = Math\.min/);
+  assert.match(piperEngine, /_playLinuxPiperPreparedOffscreen/);
+  assert.match(piperEngine, /EDGE_TTS_PIPER_OFFSCREEN_PLAY/);
 });
 
-test("Piper reactivates and clears the highlight media clock per prepared sentence", () => {
+test("Piper starts and ends highlight state from offscreen playback events", () => {
   assert.match(
     piperEngine,
-    /_playLinuxPiperPrepared\(generation, prepared\)[\s\S]*?this\.directActive = true/
+    /event\.type === "started"[\s\S]*?this\.directActive = true/
   );
   assert.match(
     piperEngine,
-    /audio\.onended = \(\) => \{[\s\S]*?this\.directActive = false/
+    /event\.type === "ended"[\s\S]*?_finishLinuxPiperPreparedPlayback/
   );
 });
 

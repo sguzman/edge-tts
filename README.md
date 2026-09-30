@@ -42,6 +42,8 @@ A local voice already exposed by `speechSynthesis` keeps the existing Web Speech
 
 Linux Piper models are not committed to this repository. The helper discovers model/config pairs from the managed user-data directory and exposes them as `[PIPER]` voices. Ryan High is warmed opportunistically as soon as the native host starts, and sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency. If Chromium rejects the first asynchronously-created WAV because the original extension-click activation has expired, the reader now preserves the prepared audio and enters a recoverable **Ready — press Resume** state instead of reporting a false TTS crash.
 
+On the experimental `development/linux-piper-pronunciation` branch, Piper text also passes through a provenance-preserving spoken projection ported from Lantern Leaf. The toolbar exposes **Edit pronunciation**, which opens a full options tab for abbreviations, regex rules, acronyms, brands, custom pronunciations, technical-path rules, preview, and JSON import/export. `development/linux-piper-v1` remains the fallback branch without this experimental rule layer.
+
 ## Direct Natural-voice audio
 
 For Natural / Online voices the extension no longer asks `SpeechSynthesisUtterance.rate` to do the main speed work. It talks to Microsoft Edge's consumer Read Aloud speech endpoint, requests `audio-24khz-48kbitrate-mono-mp3` at normal synthesis prosody, collects the returned MP3 frames and WordBoundary metadata, and creates its own media player.

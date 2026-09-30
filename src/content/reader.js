@@ -29,6 +29,14 @@
   const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
   const DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-ryan-high";
 
+  function voiceSourceKey(voice) {
+    if (isLinuxPiperVoice(voice)) return "linux-piper";
+    if (isWinNaturalVoice(voice)) return "win-natural";
+    if (voice?.__edgeTtsSource) return String(voice.__edgeTtsSource);
+    if (isNaturalVoice(voice)) return "online";
+    return "browser";
+  }
+
   const MIN_BATCH_CHARS = 400;
   const MAX_BATCH_CHARS = 2400;
   const DEFAULT_BATCH_CHARS = 1200;
@@ -37,9 +45,11 @@
   const DEFAULT_SENTENCE_PAUSE_MS = 300;
 
   const DEFAULT_SETTINGS = {
-    settingsVersion: 3,
+    settingsVersion: 4,
     rate: 1,
     voiceName: "",
+    voiceSource: "linux-piper",
+    voiceId: DEFAULT_LINUX_PIPER_VOICE_ID,
     minBatchChars: DEFAULT_BATCH_CHARS,
     sentencePauseMs: DEFAULT_SENTENCE_PAUSE_MS,
     wordColor: DEFAULT_WORD_COLOR,
@@ -127,7 +137,8 @@
         onAutoScroll: (enabled) => this.changeAutoScroll(enabled),
         onClickToSeek: (enabled) => this.changeClickToSeek(enabled),
         onMinimized: (minimized) => this.changeMinimized(minimized),
-        onPosition: (position) => this.changeToolbarPosition(position)
+        onPosition: (position) => this.changeToolbarPosition(position),
+        onPronunciationOptions: () => this.openPronunciationOptions()
       });
 
       this.boundClick = (event) => this.handlePageClick(event);
@@ -166,12 +177,14 @@
         return;
       }
       this.applySettings();
-      this.rebuildModel();
 
-      // Linux development branch: resolve the app-private Piper catalog before
-      // making the initial voice choice, so an installed local voice does not
-      // lose a race to Edge's online catalog during startup.
-      await this.speech.refreshLinuxPiperVoices?.();
+      // Sentence boundaries and Piper speech projection both depend on the
+      // persisted pronunciation config. Load it before building the readable
+      // model so the base startup path matches the optimized fast path.
+      await Promise.all([
+        this.speech.refreshLinuxPiperVoices?.() || Promise.resolve(),
+        this.speech.refreshPronunciationConfig?.() || Promise.resolve()
+      ]);
       if (
         lifecycle !== this.lifecycleSerial ||
         !this.enabled ||
@@ -181,10 +194,15 @@
       ) {
         return;
       }
-      this.refreshVoices();
-      if (!this.voices.some((voice) =>
-        isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
-      )) {
+
+      this.rebuildModel();
+      await this.ensurePreferredVoiceAvailable();
+      if (
+        !this.selectedVoice &&
+        !this.voices.some((voice) =>
+          isNaturalVoice(voice) || isWinNaturalVoice(voice) || isLinuxPiperVoice(voice)
+        )
+      ) {
         this.toolbar.setStatus("Loading voices…");
         await this.speech.waitForVoices(
           350,
@@ -201,7 +219,17 @@
         ) {
           return;
         }
-        this.refreshVoices();
+        await this.ensurePreferredVoiceAvailable();
+      }
+
+      if (this.prefersLinuxPiper() && !isLinuxPiperVoice(this.selectedVoice)) {
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus(
+          "Paused — Piper voice unavailable; Online fallback blocked"
+        );
+        return;
       }
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -440,9 +468,35 @@
         }
 
         if (granted) {
-          if (this.speech?.resumeInPlace?.() === true) {
+          let resumed = false;
+          try {
+            resumed = await Promise.resolve(
+              this.speech?.resumeInPlace?.()
+            );
+          } catch (error) {
+            console.warn(
+              "Edge Natural TTS in-place resume confirmation failed.",
+              error
+            );
+            resumed = false;
+          }
+
+          if (
+            lifecycle !== this.lifecycleSerial ||
+            this.stopped ||
+            this.paused ||
+            this.quitRequested
+          ) {
+            return;
+          }
+
+          if (resumed === true) {
+            // Do not claim Reading until the backend has confirmed that media
+            // actually resumed. Offscreen Piper returns only after audio.play()
+            // succeeds; its resumed event also drives highlight state.
             this.toolbar.setStatus("Reading");
           } else {
+            this.toolbar.setStatus("Restarting from current word…");
             this.speakCurrentPosition();
           }
         } else {
@@ -561,35 +615,98 @@
     refreshVoices() {
       const documentLanguage = document.documentElement.lang || navigator.language;
       const savedVoiceName = this.settings.voiceName;
+      const savedVoiceSource = String(this.settings.voiceSource || "");
+      const savedVoiceId = String(this.settings.voiceId || "");
       const voices = this.speech.chooseVoices(documentLanguage, savedVoiceName);
       this.voices = voices;
 
-      const savedVoice = voices.find((voice) => voice.name === savedVoiceName);
+      const savedVoice = voices.find((voice) => {
+        if (savedVoiceSource === "linux-piper") {
+          return (
+            isLinuxPiperVoice(voice) &&
+            (!savedVoiceId || voice.voiceId === savedVoiceId)
+          );
+        }
+        if (savedVoiceSource) {
+          return (
+            voiceSourceKey(voice) === savedVoiceSource &&
+            voice.name === savedVoiceName
+          );
+        }
+        return voice.name === savedVoiceName;
+      });
+
       const defaultRyan = voices.find(
         (voice) =>
           isLinuxPiperVoice(voice) &&
           voice.voiceId === DEFAULT_LINUX_PIPER_VOICE_ID
       );
 
-      this.selectedVoice =
-        savedVoice ||
-        defaultRyan ||
-        voices.find(isLinuxPiperVoice) ||
-        voices.find(isWinNaturalVoice) ||
-        voices.find(isNaturalVoice) ||
-        voices[0] ||
-        null;
+      const prefersPiper =
+        savedVoiceSource === "linux-piper" ||
+        (!savedVoiceSource && savedVoiceName === "Ryan High");
 
-      // Passive catalog refresh must never erase a user's saved choice. When
-      // there is no saved choice yet, Ryan High is the Linux default.
+      this.selectedVoice = prefersPiper
+        ? (
+            savedVoice ||
+            defaultRyan ||
+            voices.find(isLinuxPiperVoice) ||
+            null
+          )
+        : (
+            savedVoice ||
+            defaultRyan ||
+            voices.find(isLinuxPiperVoice) ||
+            voices.find(isWinNaturalVoice) ||
+            voices.find(isNaturalVoice) ||
+            voices[0] ||
+            null
+          );
+
+      // A Piper preference is sticky. Passive catalog refresh may temporarily
+      // leave no selected voice, but it must never silently substitute Online.
       const toolbarVoiceName =
-        savedVoiceName || this.selectedVoice?.name || "";
+        this.selectedVoice?.name || savedVoiceName || "";
       this.toolbar.setVoices(voices, toolbarVoiceName);
       this.toolbar.setRate(this.settings.rate);
     }
 
+    prefersLinuxPiper() {
+      return (
+        this.settings.voiceSource === "linux-piper" ||
+        (!this.settings.voiceSource && this.settings.voiceName === "Ryan High")
+      );
+    }
+
+    async ensurePreferredVoiceAvailable() {
+      this.refreshVoices();
+      if (!this.prefersLinuxPiper() || isLinuxPiperVoice(this.selectedVoice)) {
+        return Boolean(this.selectedVoice);
+      }
+
+      this.toolbar?.setStatus?.("Loading Piper voice...");
+      await new Promise((resolve) => window.setTimeout(resolve, 180));
+      await (
+        this.speech?.refreshLinuxPiperVoices?.() ||
+        Promise.resolve()
+      );
+      this.refreshVoices();
+      return isLinuxPiperVoice(this.selectedVoice);
+    }
+
     speakCurrentPosition() {
       this.clearResumeWatchdog();
+
+      if (!this.selectedVoice && this.prefersLinuxPiper()) {
+        this.paused = true;
+        this.toolbar?.setPaused?.(true);
+        this.toolbar?.setStatus?.(
+          "Paused — Piper voice unavailable; refusing Online fallback"
+        );
+        this.releaseAudioOwnership();
+        return;
+      }
+
       if (!this.audioOwner) {
         if (!this.stopped) {
           this.paused = true;
@@ -859,6 +976,10 @@
       if (!voice) return;
       this.selectedVoice = voice;
       this.settings.voiceName = voice.name;
+      this.settings.voiceSource = voiceSourceKey(voice);
+      this.settings.voiceId = isLinuxPiperVoice(voice)
+        ? String(voice.voiceId || "")
+        : "";
       await this.saveSettings();
       if (!this.stopped && !this.paused && this.audioOwner) {
         this.speakCurrentPosition();
@@ -884,6 +1005,7 @@
 
     async changeSentencePause(ms) {
       this.settings.sentencePauseMs = normalizeSentencePauseMs(ms);
+      this.speech?.setSentencePauseMs?.(this.settings.sentencePauseMs);
       this.toolbar.setSentencePause(this.settings.sentencePauseMs);
       await this.saveSettings();
     }
@@ -922,6 +1044,16 @@
       await this.saveSettings();
     }
 
+    openPronunciationOptions() {
+      try {
+        void chrome.runtime.sendMessage({
+          type: "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS"
+        });
+      } catch (error) {
+        console.warn("Could not open pronunciation options.", error);
+      }
+    }
+
     async loadSettings() {
       try {
         const stored = await chrome.storage.local.get(Object.keys(DEFAULT_SETTINGS));
@@ -929,12 +1061,24 @@
         const storedSettingsVersion = Number(stored.settingsVersion || 0);
         const requiresSafetyMigration = storedSettingsVersion < 2;
         const requiresRyanDefaultMigration = storedSettingsVersion < 3;
+        const requiresVoiceIdentityMigration = storedSettingsVersion < 4;
+        const migratedVoiceName = requiresRyanDefaultMigration
+          ? "Ryan High"
+          : (stored.voiceName || "Ryan High");
+        const migratedVoiceSource = requiresVoiceIdentityMigration
+          ? (migratedVoiceName === "Ryan High" ? "linux-piper" : "")
+          : String(stored.voiceSource || "");
+        const migratedVoiceId = requiresVoiceIdentityMigration
+          ? (migratedVoiceSource === "linux-piper"
+              ? DEFAULT_LINUX_PIPER_VOICE_ID
+              : "")
+          : String(stored.voiceId || "");
         this.settings = {
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
-          voiceName: requiresRyanDefaultMigration
-            ? "Ryan High"
-            : (stored.voiceName || "Ryan High"),
+          voiceName: migratedVoiceName,
+          voiceSource: migratedVoiceSource,
+          voiceId: migratedVoiceId,
           minBatchChars: normalizeBatchChars(stored.minBatchChars),
           sentencePauseMs: normalizeSentencePauseMs(stored.sentencePauseMs),
           wordColor: normalizeColor(stored.wordColor, DEFAULT_SETTINGS.wordColor),
@@ -950,13 +1094,17 @@
               : null
         };
 
-        if (requiresSafetyMigration || requiresRyanDefaultMigration) {
+        if (
+          requiresSafetyMigration ||
+          requiresRyanDefaultMigration ||
+          requiresVoiceIdentityMigration
+        ) {
           await chrome.storage.local.set({
             settingsVersion: DEFAULT_SETTINGS.settingsVersion,
             clickToSeek: requiresSafetyMigration ? false : this.settings.clickToSeek,
-            voiceName: requiresRyanDefaultMigration
-              ? "Ryan High"
-              : this.settings.voiceName
+            voiceName: this.settings.voiceName,
+            voiceSource: this.settings.voiceSource,
+            voiceId: this.settings.voiceId
           });
         }
       } catch (error) {

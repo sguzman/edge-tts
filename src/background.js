@@ -1,5 +1,7 @@
 const READER_FILES = [
   "src/content/namespace.js",
+  "src/pronunciation/defaults.js",
+  "src/pronunciation/engine.js",
   "src/content/text-model.js",
   "src/content/highlighter.js",
   "src/content/speech-engine.js",
@@ -22,7 +24,9 @@ const READER_CSS = ["src/content/content.css"];
 const injectionPromises = new Map();
 
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
-const READER_SESSION_REVISION = 2;
+const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
+const PIPER_OFFSCREEN_URL = "src/offscreen/piper-audio.html";
+const READER_SESSION_REVISION = 11;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
@@ -35,6 +39,9 @@ let linuxPiperHandshake = null;
 let linuxPiperHandshakeReject = null;
 let linuxPiperHandshakeTimer = null;
 const linuxPiperRequests = new Map();
+let pronunciationTestRequestId = null;
+const linuxPiperOffscreenSessions = new Map();
+let linuxPiperOffscreenReady = null;
 
 function disconnectWinNaturalPort() {
   const port = winNaturalPort;
@@ -194,6 +201,140 @@ function ensureLinuxPiperPort() {
     });
 }
 
+async function synthesizePronunciationTest(text, voiceId) {
+  const normalizedText = String(text || "").trim();
+  const normalizedVoiceId = String(voiceId || "en_US-ryan-high").trim();
+
+  if (!normalizedText) {
+    throw new Error("Pronunciation test text is empty.");
+  }
+
+  if (
+    [...linuxPiperRequests.values()].some((request) =>
+      Number.isInteger(request.tabId)
+    ) ||
+    linuxPiperOffscreenSessions.size > 0
+  ) {
+    throw new Error(
+      "Piper is busy with an active reader. Stop the reader before running a pronunciation test."
+    );
+  }
+
+  if (pronunciationTestRequestId) {
+    throw new Error("A pronunciation test is already synthesizing.");
+  }
+
+  const requestId =
+    `pronunciation-test-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  pronunciationTestRequestId = requestId;
+
+  try {
+    const port = await ensureLinuxPiperPort();
+
+    return await new Promise((resolve, reject) => {
+      const audioChunks = [];
+      let settled = false;
+
+      const cleanup = () => {
+        if (settled) return false;
+        settled = true;
+        clearTimeout(timer);
+        linuxPiperRequests.delete(requestId);
+        if (pronunciationTestRequestId === requestId) {
+          pronunciationTestRequestId = null;
+        }
+        return true;
+      };
+
+      const fail = (error) => {
+        if (!cleanup()) return;
+        reject(error instanceof Error ? error : new Error(String(error)));
+      };
+
+      const timer = setTimeout(() => {
+        fail(new Error("Pronunciation test synthesis timed out."));
+      }, 30_000);
+
+      linuxPiperRequests.set(requestId, {
+        requestId,
+        resolve: () => {},
+        reject: fail,
+        onMessage(response) {
+          if (response?.type === "audioChunk") {
+            audioChunks.push(String(response.data || ""));
+            return;
+          }
+
+          if (response?.type === "synthesisEnd") {
+            if (!cleanup()) return;
+            if (!audioChunks.length) {
+              reject(new Error("Piper returned no WAV data for the pronunciation test."));
+              return;
+            }
+            resolve({
+              audioChunks,
+              durationMs: Math.max(0, Number(response.durationMs) || 0),
+              sampleRate: Math.max(0, Number(response.sampleRate) || 0)
+            });
+            return;
+          }
+
+          if (response?.type === "error") {
+            fail(new Error(response.message || "Piper pronunciation test failed."));
+            return;
+          }
+
+          if (response?.type === "cancelled") {
+            fail(new Error("Pronunciation test cancelled."));
+          }
+        }
+      });
+
+      try {
+        port.postMessage({
+          type: "synthesize",
+          requestId,
+          voiceId: normalizedVoiceId,
+          text: normalizedText,
+          lang: "en-US"
+        });
+      } catch (error) {
+        fail(error);
+      }
+    });
+  } finally {
+    if (
+      pronunciationTestRequestId === requestId &&
+      !linuxPiperRequests.has(requestId)
+    ) {
+      pronunciationTestRequestId = null;
+    }
+  }
+}
+
+function cancelPronunciationTest() {
+  const requestId = pronunciationTestRequestId;
+  if (!requestId) return false;
+
+  const request = linuxPiperRequests.get(requestId);
+  linuxPiperRequests.delete(requestId);
+  pronunciationTestRequestId = null;
+
+  const port = linuxPiperPort;
+  linuxPiperPort = null;
+  linuxPiperHandshake = null;
+
+  try {
+    port?.postMessage({ type: "cancel", requestId });
+  } catch (_error) {}
+  try {
+    port?.disconnect?.();
+  } catch (_error) {}
+
+  request?.reject?.(new Error("Pronunciation test cancelled."));
+  return true;
+}
+
 function stopLinuxPiperForTab(tabId, requestId = null) {
   if (!Number.isInteger(tabId)) return false;
   const active = [...linuxPiperRequests.entries()].find(([, request]) =>
@@ -219,6 +360,70 @@ function stopLinuxPiperForTab(tabId, requestId = null) {
   } catch (_error) {}
 
   return true;
+}
+
+async function hasLinuxPiperOffscreenDocument() {
+  if (!chrome.offscreen?.createDocument) {
+    throw new Error("This Chromium build does not expose chrome.offscreen.");
+  }
+
+  if (typeof chrome.offscreen.hasDocument === "function") {
+    return chrome.offscreen.hasDocument();
+  }
+
+  if (typeof chrome.runtime.getContexts === "function") {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ["OFFSCREEN_DOCUMENT"],
+      documentUrls: [chrome.runtime.getURL(PIPER_OFFSCREEN_URL)]
+    });
+    return contexts.length > 0;
+  }
+
+  return false;
+}
+
+async function ensureLinuxPiperOffscreenDocument() {
+  if (linuxPiperOffscreenReady) return linuxPiperOffscreenReady;
+
+  linuxPiperOffscreenReady = (async () => {
+    if (await hasLinuxPiperOffscreenDocument()) return true;
+
+    await chrome.offscreen.createDocument({
+      url: PIPER_OFFSCREEN_URL,
+      reasons: ["AUDIO_PLAYBACK"],
+      justification:
+        "Play Piper WAV audio in extension origin when a webpage blocks blob media URLs."
+    });
+    return true;
+  })();
+
+  try {
+    return await linuxPiperOffscreenReady;
+  } finally {
+    linuxPiperOffscreenReady = null;
+  }
+}
+
+async function sendLinuxPiperOffscreenCommand(message) {
+  await ensureLinuxPiperOffscreenDocument();
+  return chrome.runtime.sendMessage(message);
+}
+
+function stopLinuxPiperOffscreenForTab(tabId) {
+  if (!Number.isInteger(tabId)) return false;
+  let stopped = false;
+
+  for (const [playbackId, session] of linuxPiperOffscreenSessions.entries()) {
+    if (session.tabId !== tabId) continue;
+    linuxPiperOffscreenSessions.delete(playbackId);
+    stopped = true;
+    void sendLinuxPiperOffscreenCommand({
+      type: "EDGE_TTS_OFFSCREEN_PIPER_STOP",
+      playbackId
+    }).catch(() => {});
+  }
+
+  return stopped;
 }
 
 async function loadAudioOwner() {
@@ -401,6 +606,177 @@ async function speakLocalTtsForTab(tabId, message) {
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const tabId = sender.tab?.id;
 
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE") {
+    void synthesizePronunciationTest(
+      message.text,
+      message.voiceId || "en_US-ryan-high"
+    )
+      .then((result) => sendResponse({
+        accepted: true,
+        audioChunks: result.audioChunks,
+        durationMs: result.durationMs,
+        sampleRate: result.sampleRate
+      }))
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_TEST_CANCEL") {
+    sendResponse({ cancelled: cancelPronunciationTest() });
+    return false;
+  }
+
+  if (message?.type === "EDGE_TTS_OFFSCREEN_PIPER_EVENT") {
+    const playbackId = String(message.playbackId || "");
+    const session = linuxPiperOffscreenSessions.get(playbackId);
+    const eventTabId = Number(message.tabId);
+    const targetTabId = session?.tabId ??
+      (Number.isInteger(eventTabId) ? eventTabId : null);
+
+    if (!Number.isInteger(targetTabId)) {
+      sendResponse({ accepted: false });
+      return false;
+    }
+
+    // Rehydrate in-memory routing after a service-worker restart. The offscreen
+    // audio document survives independently and carries its owning tab id.
+    if (!session) {
+      linuxPiperOffscreenSessions.set(playbackId, { tabId: targetTabId });
+    }
+
+    const event = message.event || {};
+    void chrome.tabs.sendMessage(targetTabId, {
+      type: "EDGE_TTS_PIPER_OFFSCREEN_EVENT",
+      playbackId,
+      event
+    }).catch(() => {});
+
+    if (["ended", "error", "stopped"].includes(String(event.type || ""))) {
+      linuxPiperOffscreenSessions.delete(playbackId);
+    }
+
+    sendResponse({ accepted: true });
+    return false;
+  }
+
+  if (message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PLAY") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ accepted: false, error: "Missing source tab for Piper playback." });
+      return false;
+    }
+
+    const playbackId = String(message.playbackId || "");
+    const audioChunks = Array.isArray(message.audioChunks) ? message.audioChunks : [];
+    if (!playbackId || !audioChunks.length) {
+      sendResponse({ accepted: false, error: "Missing Piper playback id or WAV data." });
+      return false;
+    }
+
+    stopLinuxPiperOffscreenForTab(tabId);
+    linuxPiperOffscreenSessions.set(playbackId, { tabId });
+
+    void sendLinuxPiperOffscreenCommand({
+      type: "EDGE_TTS_OFFSCREEN_PIPER_PLAY",
+      playbackId,
+      tabId,
+      audioChunks,
+      boundaryOffsets: Array.isArray(message.boundaryOffsets)
+        ? message.boundaryOffsets.map((value) =>
+            Math.max(0, Number(value) || 0)
+          )
+        : [],
+      sentencePauseMs: Math.max(
+        0,
+        Math.min(1200, Number(message.sentencePauseMs) || 0)
+      ),
+      playbackRate: Number(message.playbackRate) || 1,
+      volume: Number(message.volume)
+    })
+      .then((response) => {
+        if (!response?.accepted) {
+          linuxPiperOffscreenSessions.delete(playbackId);
+        }
+        sendResponse(response || { accepted: false });
+      })
+      .catch((error) => {
+        linuxPiperOffscreenSessions.delete(playbackId);
+        sendResponse({
+          accepted: false,
+          error: error?.message || String(error)
+        });
+      });
+    return true;
+  }
+
+  if (
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_RESUME" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_STOP" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_RATE" ||
+    message?.type === "EDGE_TTS_PIPER_OFFSCREEN_VOLUME"
+  ) {
+    const playbackId = String(message.playbackId || "");
+    if (!playbackId || !Number.isInteger(tabId)) {
+      sendResponse({
+        accepted: false,
+        error: "Missing Piper playback id or source tab."
+      });
+      return false;
+    }
+
+    // Do not require the volatile in-memory session map here. Chromium may
+    // restart the service worker while the offscreen document keeps a paused
+    // WAV alive. The offscreen document itself validates playbackId.
+    linuxPiperOffscreenSessions.set(playbackId, { tabId });
+
+    const internalType = String(message.type).replace(
+      "EDGE_TTS_PIPER_OFFSCREEN_",
+      "EDGE_TTS_OFFSCREEN_PIPER_"
+    );
+
+    void sendLinuxPiperOffscreenCommand({
+      ...message,
+      tabId,
+      type: internalType
+    })
+      .then((response) => {
+        if (message.type === "EDGE_TTS_PIPER_OFFSCREEN_STOP") {
+          linuxPiperOffscreenSessions.delete(playbackId);
+          sendResponse(response || { accepted: true });
+          return;
+        }
+
+        // Pause/resume/rate/volume require an explicit acknowledgement from
+        // the live offscreen player. An undefined response means the document
+        // exists but no matching playbackId survived there; never translate
+        // that into a fake success.
+        sendResponse(
+          response?.accepted === true
+            ? response
+            : {
+                accepted: false,
+                error:
+                  response?.error ||
+                  "Offscreen Piper playback did not acknowledge the command."
+              }
+        );
+      })
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_OPEN_PRONUNCIATION_OPTIONS") {
+    void chrome.runtime.openOptionsPage();
+    sendResponse({ opened: true });
+    return false;
+  }
+
   if (message?.type === "EDGE_TTS_AUDIO_CLAIM") {
     if (!Number.isInteger(tabId)) {
       sendResponse({ granted: false });
@@ -521,6 +897,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return false;
     }
 
+    // Record the exact text that is about to cross the browser/native boundary.
+    // Keep it in session storage only: this is a local diagnostic surface for
+    // pronunciation/projection debugging, not durable history.
+    try {
+      void chrome.storage.session.set({
+        [PIPER_TRACE_STORAGE_KEY]: {
+          at: Date.now(),
+          requestId,
+          voiceId: String(message.voiceId || ""),
+          pronunciationRevision: Number(message.pronunciationRevision) || 0,
+          pronunciationSavedAt: Number(message.pronunciationSavedAt) || 0,
+          text: String(message.text || "")
+        }
+      });
+    } catch (_error) {}
+
     // If this tab already has native Piper work in flight (for example a
     // prefetch while the user click-seeks), retire that helper before starting
     // the replacement request. This makes seek authoritative regardless of
@@ -574,6 +966,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   stopLocalTtsForTab(tabId);
   stopWinNaturalForTab(tabId);
   stopLinuxPiperForTab(tabId);
+  stopLinuxPiperOffscreenForTab(tabId);
   void queueAudioMutation(async () => {
     await loadAudioOwner();
     if (audioOwnerTabId === tabId) {

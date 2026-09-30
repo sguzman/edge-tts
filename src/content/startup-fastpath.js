@@ -90,6 +90,8 @@
       // auto-start races discovery and can stall until Stop -> Play.
       const linuxPiperVoicesReady =
         this.speech.refreshLinuxPiperVoices?.() || Promise.resolve();
+      const pronunciationReady =
+        this.speech.refreshPronunciationConfig?.() || Promise.resolve();
 
       const winNaturalVoicesReady = this.speech.refreshWinNaturalVoices?.() || Promise.resolve();
       Promise.resolve(winNaturalVoicesReady).catch(() => {});
@@ -103,28 +105,35 @@
         )
       );
 
-      const modelStartedAt = now();
-      this.rebuildModel();
-      trace.modelMs = now() - modelStartedAt;
-
       await Promise.all([
         settingsReady,
         extensionVoicesReady,
-        linuxPiperVoicesReady
+        linuxPiperVoicesReady,
+        pronunciationReady
       ]);
       if (!this.enabled || this.quitRequested) {
         trace.active = false;
         return;
       }
 
-      this.applySettings();
-      this.refreshVoices();
+      // Sentence boundaries are pronunciation-config aware on the Piper branch.
+      // Never build the readable model against defaults and load the user's
+      // saved abbreviation rules afterwards.
+      const modelStartedAt = now();
+      this.rebuildModel();
+      trace.modelMs = now() - modelStartedAt;
 
-      if (!this.voices.some((voice) =>
-        isNaturalVoice(voice) ||
-        isWinNaturalVoice(voice) ||
-        isLinuxPiperVoice(voice)
-      )) {
+      this.applySettings();
+      await this.ensurePreferredVoiceAvailable?.();
+
+      if (
+        !this.selectedVoice &&
+        !this.voices.some((voice) =>
+          isNaturalVoice(voice) ||
+          isWinNaturalVoice(voice) ||
+          isLinuxPiperVoice(voice)
+        )
+      ) {
         this.toolbar.setStatus("Loading voice…");
         const voiceWaitStartedAt = now();
         await naturalVoicesReady;
@@ -133,7 +142,21 @@
           trace.active = false;
           return;
         }
-        this.refreshVoices();
+        await this.ensurePreferredVoiceAvailable?.();
+      }
+
+      if (
+        this.prefersLinuxPiper?.() &&
+        !isLinuxPiperVoice(this.selectedVoice)
+      ) {
+        trace.active = false;
+        this.stopped = false;
+        this.paused = true;
+        this.toolbar.setPaused(true);
+        this.toolbar.setStatus(
+          "Paused — Piper voice unavailable; Online fallback blocked"
+        );
+        return;
       }
 
       const startBlock = firstBlockNearViewport(this.model?.blocks || []);

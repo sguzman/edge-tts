@@ -223,6 +223,31 @@ def start_default_voice_warmup() -> None:
 
 _WORD_RE = re.compile(r"\S+")
 
+# Ryan High is a VITS/Piper voice and is known to be fragile on isolated
+# short words. Keep synthesis speed canonical while reducing stochastic
+# generator and duration variation for more repeatable articulation.
+_STABLE_NOISE_SCALE = 0.50
+_STABLE_NOISE_W_SCALE = 0.60
+_SHORT_NOISE_SCALE = 0.35
+_SHORT_NOISE_W_SCALE = 0.40
+
+
+def synthesis_config_for_text(text: str) -> Any:
+    _, SynthesisConfigClass = ensure_piper_runtime()
+    word_count = len(_WORD_RE.findall(text))
+    if word_count <= 2:
+        return SynthesisConfigClass(
+            length_scale=1.0,
+            noise_scale=_SHORT_NOISE_SCALE,
+            noise_w_scale=_SHORT_NOISE_W_SCALE,
+        )
+
+    return SynthesisConfigClass(
+        length_scale=1.0,
+        noise_scale=_STABLE_NOISE_SCALE,
+        noise_w_scale=_STABLE_NOISE_W_SCALE,
+    )
+
 
 def approximate_boundaries(text: str, duration_ms: float) -> list[dict[str, Any]]:
     """Produce conservative word timings until source-word alignment is added.
@@ -271,8 +296,7 @@ def synthesize_worker(
         send_message({"type": "status", "requestId": request_id, "status": "Loading Piper model..."})
         voice = get_voice(voice_id)
         send_message({"type": "status", "requestId": request_id, "status": "Synthesizing with Piper..."})
-        _, SynthesisConfigClass = ensure_piper_runtime()
-        config = SynthesisConfigClass(length_scale=1.0)
+        config = synthesis_config_for_text(text)
         pcm = bytearray()
         sample_rate: int | None = None
         sample_width: int | None = None

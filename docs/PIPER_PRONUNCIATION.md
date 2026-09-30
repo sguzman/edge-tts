@@ -2,8 +2,11 @@
 
 ## Status
 
-Design only. Do not enable pronunciation rewriting until source-to-spoken
-mapping tests exist.
+Implemented experimentally on `development/linux-piper-pronunciation`.
+
+The fallback branch `development/linux-piper-v1` intentionally does not
+contain the editable Lantern Leaf pronunciation pipeline. Keep that branch
+available as the known baseline while this projection layer is validated.
 
 ## Goal
 
@@ -107,3 +110,84 @@ Normalization should run only for material being sent to Piper, not across the
 whole page in the background. Ordered maps and small regex/rule passes over one
 sentence are trivial compared with CPU ONNX synthesis and do not justify a
 background worker or service.
+
+
+## Imported Lantern Leaf rule surface
+
+The extension defaults are ported from the current Lantern Leaf
+`conf/normalizer.toml` and `conf/abbreviations.toml` rule sets:
+
+- case-sensitive and case-insensitive abbreviation maps
+- regex abbreviation rules
+- literal replacements and drop tokens
+- configured acronym tokens, digit handling, and letter sounds
+- year pronunciation
+- brand pronunciation map
+- custom pronunciation map
+- Unicode quote/dash/ellipsis cleanup
+- numeric citation, superscript citation, word-footnote, square-bracket, and
+  curly-brace cleanup
+
+Lantern Leaf's old arbitrary long-sentence chunking policy is deliberately not
+ported. Edge Natural TTS already has a sentence model, and earlier Linux Piper
+testing showed that character-sized intra-sentence splitting damages Ryan's
+prosody.
+
+The extension adds a technical-text rule family not present in the original
+Lantern Leaf config: Linux filesystem paths and shell flags. This exists to
+keep strings such as `~/.config/fish/config.fish` and `-f` away from raw
+eSpeak symbol phonemization.
+
+## Options UI
+
+`manifest.json` registers `src/options/pronunciation.html` as a full-tab
+extension options page. The reader toolbar's **Edit pronunciation** button
+opens it.
+
+The page exposes structured editors for the maps and regex rules, pipeline
+switches, acronym settings, Linux path vocabulary, raw JSON import/export, a
+live source-to-spoken preview, and a transformation ledger showing which rule
+changed which text.
+
+Configuration is persisted in `chrome.storage.local` under
+`edgeTtsPronunciationConfigV1`. Active content-script instances observe
+storage changes and use the new rules for subsequent Piper sentence
+generation.
+
+
+## Sentence boundaries
+
+The pronunciation branch does not trust `Intl.Segmenter` as the authoritative
+sentence splitter. The readable-text model now uses a JavaScript port of
+Lantern Leaf's abbreviation-aware boundary policy before TTS chunking.
+
+Protected periods include configured abbreviations, U.S.-style initialisms,
+middle initials, decimals, known domain TLDs, filename-extension patterns,
+regex abbreviation spans, and periods inside filesystem/path-like tokens.
+This keeps punctuation from creating fake sentence pauses before
+normalization can run.
+
+## Saved configuration authority
+
+Rule-map collections are replacement collections, not patches over the
+defaults. Deleting a default rule therefore keeps it deleted.
+
+Each persisted config carries a monotonic `revision` and `savedAt` value.
+The Piper engine force-loads `chrome.storage.local` before each new speech
+batch, and the Last actual Piper request diagnostic records the exact
+pronunciation revision used to build that request.
+
+Startup also waits for the saved pronunciation config before constructing the
+readable sentence model.
+
+## Offscreen highlighting
+
+When a page rejects its own `blob:` media URL, extension-owned offscreen
+audio owns both WAV playback and highlight-boundary scheduling. Boundary
+indices are emitted directly from the real offscreen media clock rather than
+reconstructing time from periodic current-time messages in the page.
+
+The browser-side approximate word timeline is punctuation-aware so clause
+pauses contribute to the next-word offset. This is still approximate timing,
+not phoneme-perfect alignment, but it avoids cumulative drift caused by
+ignoring punctuation pauses.

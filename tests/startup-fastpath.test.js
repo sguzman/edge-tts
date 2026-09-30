@@ -29,6 +29,7 @@ test("startup waits for Piper catalog but still does not block on WIN-NATURAL", 
 
   const localVoiceWait = source.indexOf("this.speech.refreshExtensionVoices?.()");
   const piperVoiceWait = source.indexOf("this.speech.refreshLinuxPiperVoices?.()");
+  const pronunciationWait = source.indexOf("this.speech.refreshPronunciationConfig?.()");
   const nativeVoiceWait = source.indexOf("this.speech.refreshWinNaturalVoices?.()");
   const naturalVoiceWait = source.indexOf("this.speech.waitForVoices(");
   const modelBuild = source.indexOf("this.rebuildModel();");
@@ -41,10 +42,11 @@ test("startup waits for Piper catalog but still does not block on WIN-NATURAL", 
 
   assert.ok(localVoiceWait >= 0);
   assert.ok(piperVoiceWait > localVoiceWait);
-  assert.ok(nativeVoiceWait > piperVoiceWait);
+  assert.ok(pronunciationWait > piperVoiceWait);
+  assert.ok(nativeVoiceWait > pronunciationWait);
   assert.ok(naturalVoiceWait > nativeVoiceWait);
-  assert.ok(modelBuild > naturalVoiceWait);
-  assert.ok(awaitPrep > modelBuild);
+  assert.ok(awaitPrep > naturalVoiceWait);
+  assert.ok(modelBuild > awaitPrep);
   assert.equal(forbiddenNativeAwait, -1);
   assert.ok(firstRefresh > awaitPrep);
   assert.ok(awaitNaturalFallback > firstRefresh);
@@ -58,4 +60,32 @@ test("startup aborts cleanly when the reader is closed or quit during async prep
 
   const guard = "if (!this.enabled || this.quitRequested)";
   assert.ok(source.split(guard).length - 1 >= 3);
+});
+
+
+test("startup waits for pronunciation projection before first Piper speech", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
+    "utf8"
+  );
+  const readyAt = source.indexOf("const pronunciationReady");
+  const awaitAt = source.indexOf("await Promise.all([");
+  const applyAt = source.indexOf("this.applySettings();", awaitAt);
+  assert.ok(readyAt >= 0);
+  assert.ok(awaitAt > readyAt);
+  assert.match(source.slice(awaitAt, applyAt), /pronunciationReady/);
+});
+
+
+test("saved pronunciation config resolves before readable-model sentence boundaries", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "startup-fastpath.js"),
+    "utf8"
+  );
+  const awaitAt = source.indexOf("await Promise.all([");
+  const modelAt = source.indexOf("this.rebuildModel();");
+  const applyAt = source.indexOf("this.applySettings();");
+  assert.ok(awaitAt >= 0);
+  assert.ok(modelAt > awaitAt);
+  assert.ok(applyAt > modelAt);
 });

@@ -10,6 +10,7 @@
   const BaseSpeechEngine = speechModule?.SpeechEngine;
   const createUtteranceChunks = speechModule?.createUtteranceChunks;
   const segmentIndexForCharIndex = root.EdgeTtsExtension?.TextModel?.segmentIndexForCharIndex;
+  const pronunciation = root.EdgeTtsExtension?.Pronunciation;
   const PIPER_SYNTHESIS_TIMEOUT_MS = 20_000;
   const PIPER_SOFT_CLAUSE_CHARS = 240;
   const PIPER_HARD_CLAUSE_CHARS = 320;
@@ -58,6 +59,56 @@
     return `${Date.now()}-${generation}-${chunkIndex}-${Math.random().toString(16).slice(2)}`;
   }
 
+  function punctuationPauseWeight(token) {
+    const text = String(token || "");
+    if (/[.!?]["'”’\)\]]*$/.test(text)) return 5;
+    if (/[;:]["'”’\)\]]*$/.test(text)) return 3.5;
+    if (/[,]["'”’\)\]]*$/.test(text)) return 2.25;
+    if (/[—–-]["'”’\)\]]*$/.test(text)) return 1.25;
+    return 0;
+  }
+
+  function approximatePiperBoundaries(payload, durationMs) {
+    const text = String(payload?.text || "");
+    const duration = Math.max(0, Number(durationMs) || 0);
+    if (!text || duration <= 0) return [];
+
+    const matches = [...text.matchAll(/\S+/g)];
+    if (!matches.length) return [];
+
+    const weights = matches.map((match) => {
+      const lexical = String(match[0] || "").replace(/[^\p{L}\p{N}]+/gu, "");
+      const lexicalWeight = Math.max(
+        1,
+        Math.pow([...lexical].length || 1, 0.9)
+      );
+      return lexicalWeight + punctuationPauseWeight(match[0]);
+    });
+    const total = Math.max(
+      1,
+      weights.reduce((sum, weight) => sum + weight, 0)
+    );
+
+    let cursorMs = 0;
+    return matches.map((match, index) => {
+      const spanMs = duration * (weights[index] / total);
+      const charIndex = Number(match.index) || 0;
+      const segmentIndex =
+        typeof segmentIndexForCharIndex === "function"
+          ? segmentIndexForCharIndex(payload.starts || [], charIndex)
+          : 0;
+
+      const boundary = {
+        segment: payload.segments?.[Math.max(0, segmentIndex)],
+        offsetSeconds: cursorMs / 1000,
+        durationSeconds: spanMs / 1000,
+        text: match[0]
+      };
+      cursorMs += spanMs;
+      return boundary;
+    });
+  }
+
 
   function fromBase64(value) {
     const binary = root.atob(String(value || ""));
@@ -78,6 +129,13 @@
   }
 
   function payloadForPiperSegments(segments) {
+    if (typeof pronunciation?.projectSegments === "function") {
+      return pronunciation.projectSegments(
+        segments,
+        separatorForPiperSegments
+      );
+    }
+
     const starts = [];
     let text = "";
     for (let index = 0; index < segments.length; index += 1) {
@@ -87,7 +145,7 @@
       starts.push(text.length);
       text += String(segments[index]?.text || "");
     }
-    return { text, starts, segments: [...segments] };
+    return { text, starts, segments: [...segments], transformations: [] };
   }
 
   function isPiperClauseBreak(segment) {
@@ -250,16 +308,36 @@
       this.linuxPiperVoiceListeners = new Set();
       this.linuxPiperVoicesLoaded = false;
       this.linuxPiperVoiceRequest = null;
+      this.linuxPiperPronunciationRequest = null;
+      this.linuxPiperSpeakSerial = 0;
 
       this.linuxPiperRequests = new Map();
       this.linuxPiperPrepared = new Map();
       this.linuxPiperRequest = null;
       this.linuxPiperPlaybackIndex = -1;
       this.linuxPiperPausedInPlace = false;
+      this.linuxPiperOffscreenPlayback = null;
       this.linuxPiperSentencePauseTimer = null;
       this.linuxPiperPrefetchDepth = 2;
 
       void this.refreshLinuxPiperVoices();
+      void this.refreshPronunciationConfig();
+    }
+
+    refreshPronunciationConfig() {
+      if (this.linuxPiperPronunciationRequest) {
+        return this.linuxPiperPronunciationRequest;
+      }
+      if (typeof pronunciation?.loadConfig !== "function") {
+        return Promise.resolve(null);
+      }
+
+      this.linuxPiperPronunciationRequest = Promise.resolve(
+        pronunciation.loadConfig()
+      ).finally(() => {
+        this.linuxPiperPronunciationRequest = null;
+      });
+      return this.linuxPiperPronunciationRequest;
     }
 
     getVoices() {
@@ -307,12 +385,83 @@
       return isLinuxPiperVoice(voice) || super.canPlayIndependently?.(voice);
     }
 
+
+    _hasLinuxPiperOffscreenPlayback() {
+      return Boolean(
+        this.linuxPiperOffscreenPlayback &&
+        this.linuxPiperOffscreenPlayback.chunkIndex === this.currentChunkIndex
+      );
+    }
+
     canPauseInPlace() {
+      if (
+        this.directSessionMode &&
+        this._hasLinuxPiperOffscreenPlayback()
+      ) {
+        return true;
+      }
       return Boolean(
         this.directSessionMode &&
         this.directAudio &&
         this.linuxPiperPlaybackIndex === this.currentChunkIndex
       );
+    }
+
+    isSpeaking() {
+      if (this.directSessionMode && this._hasLinuxPiperOffscreenPlayback()) {
+        return Boolean(
+          this.directActive &&
+          !this.linuxPiperOffscreenPlayback.paused
+        );
+      }
+      return super.isSpeaking?.() || false;
+    }
+
+    isPaused() {
+      if (this.directSessionMode && this._hasLinuxPiperOffscreenPlayback()) {
+        return Boolean(this.linuxPiperOffscreenPlayback.paused);
+      }
+      return super.isPaused?.() || false;
+    }
+
+    setPlaybackRate(rate) {
+      if (this.directSessionMode && this._hasLinuxPiperOffscreenPlayback()) {
+        this.directPlaybackRate = Math.min(
+          16,
+          Math.max(0.25, Number(rate) || 1)
+        );
+        void root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_PIPER_OFFSCREEN_RATE",
+          playbackId: this.linuxPiperOffscreenPlayback.playbackId,
+          playbackRate: this.directPlaybackRate
+        }).catch?.(() => {});
+        return true;
+      }
+      return super.setPlaybackRate?.(rate) ?? false;
+    }
+
+    setSentencePauseMs(ms) {
+      const value = Math.max(0, Math.min(1200, Number(ms) || 0));
+      if (this.currentOptions) {
+        this.currentOptions.sentencePauseMs = value;
+      }
+      return value;
+    }
+
+    setOutputVolume(volume) {
+      if (this.directSessionMode && this._hasLinuxPiperOffscreenPlayback()) {
+        this.directOutputGain = Math.min(
+          2,
+          Math.max(0, Number(volume) || 0)
+        );
+        void root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_PIPER_OFFSCREEN_VOLUME",
+          playbackId: this.linuxPiperOffscreenPlayback.playbackId,
+          volume: Math.min(1, this.directOutputGain)
+        }).catch?.(() => {});
+        return true;
+      }
+      return super.setOutputVolume?.(volume) ?? false;
     }
 
     _clearLinuxPiperSentencePause() {
@@ -323,7 +472,22 @@
     }
 
     pauseInPlace() {
-      if (!this.canPauseInPlace() || this.directAudio?.paused) return false;
+      if (!this.canPauseInPlace()) return false;
+
+      if (this._hasLinuxPiperOffscreenPlayback()) {
+        const playback = this.linuxPiperOffscreenPlayback;
+        playback.paused = true;
+        this._clearBoundaryClock();
+        this.directActive = false;
+        this.linuxPiperPausedInPlace = true;
+        void root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_PIPER_OFFSCREEN_PAUSE",
+          playbackId: playback.playbackId
+        }).catch?.(() => {});
+        return true;
+      }
+
+      if (this.directAudio?.paused) return false;
       try {
         this.directAudio.pause();
       } catch (_error) {
@@ -338,31 +502,138 @@
     resumeInPlace() {
       if (
         !this.linuxPiperPausedInPlace ||
-        !this.directAudio ||
         this.linuxPiperPlaybackIndex !== this.currentChunkIndex
       ) {
         return false;
       }
 
+      if (this._hasLinuxPiperOffscreenPlayback()) {
+        const playback = this.linuxPiperOffscreenPlayback;
+        const playbackId = playback.playbackId;
+        playback.resumePending = true;
+        this.onStatus?.("Resuming...");
+
+        const resumeCommand = Promise.resolve(
+          root.chrome?.runtime?.sendMessage?.({
+            type: "EDGE_TTS_PIPER_OFFSCREEN_RESUME",
+            playbackId
+          })
+        );
+        const resumeTimeout = new Promise((resolve) => {
+          root.setTimeout(() => {
+            resolve({
+              accepted: false,
+              error: "Offscreen Piper resume acknowledgement timed out."
+            });
+          }, 1500);
+        });
+
+        return Promise.race([resumeCommand, resumeTimeout])
+          .then((response) => {
+            if (
+              this.linuxPiperOffscreenPlayback?.playbackId !== playbackId ||
+              playback.generation !== this.generation
+            ) {
+              return false;
+            }
+
+            playback.resumePending = false;
+            if (!response?.accepted) {
+              // The offscreen AUDIO_PLAYBACK document may have been discarded
+              // while paused. Keep our canonical cursor/prepared WAV state,
+              // retire the stale session, and let ReaderApp restart from the
+              // current highlighted word instead of claiming playback resumed.
+              playback.paused = true;
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.linuxPiperOffscreenPlayback = null;
+              this.onStatus?.("Resume session expired — restarting...");
+              return false;
+            }
+
+            // audio.play() has actually resolved in the offscreen document.
+            // The resumed event normally reaches us as well, but make local
+            // state truthful from the confirmed command response.
+            playback.paused = false;
+            this.directActive = true;
+            this.linuxPiperPausedInPlace = false;
+            this.onStatus?.("Reading");
+            return true;
+          })
+          .catch((error) => {
+            if (
+              this.linuxPiperOffscreenPlayback?.playbackId === playbackId
+            ) {
+              playback.resumePending = false;
+              playback.paused = true;
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.linuxPiperOffscreenPlayback = null;
+            }
+            console.warn(
+              "Edge Natural TTS offscreen resume transport failed.",
+              error
+            );
+            this.onStatus?.("Resume transport failed — restarting...");
+            return false;
+          });
+      }
+
+      if (!this.directAudio) return false;
+
       const generation = this.generation;
-      this.linuxPiperPausedInPlace = false;
-      this.directActive = true;
-      void this.directAudio.play()
+      return Promise.resolve(this.directAudio.play())
         .then(() => {
-          if (generation !== this.generation) return;
-          this._startBoundaryClock(generation);
+          if (generation !== this.generation) return false;
+          this.linuxPiperPausedInPlace = false;
+          this.directActive = true;
+          this._startLinuxPiperBoundaryClock(generation);
           this.onStatus?.("Reading");
+          return true;
         })
-        .catch((error) => this._failLinuxPiper(
-          `resume failed: ${error?.message || String(error)}`
-        ));
-      return true;
+        .catch((error) => {
+          console.warn("Edge Natural TTS direct resume failed.", error);
+          return false;
+        });
     }
 
     speak(block, startSegmentIndex, options = {}) {
       if (!isLinuxPiperVoice(options.voice)) {
+        this.linuxPiperSpeakSerial += 1;
         return super.speak(block, startSegmentIndex, options);
       }
+
+      // Retire the previous session immediately, then force-read the persisted
+      // pronunciation config before building any Piper payload. This makes an
+      // explicit Options save authoritative even if a storage change event was
+      // delayed or missed in the content-script world.
+      this.cancel();
+      const speakSerial = ++this.linuxPiperSpeakSerial;
+      this.onStatus?.("Loading pronunciation rules...");
+
+      Promise.resolve(
+        pronunciation?.loadConfig?.({ force: true })
+      )
+        .catch((error) => {
+          console.warn(
+            "Edge Natural TTS could not refresh pronunciation rules before speech.",
+            error
+          );
+          return pronunciation?.getConfig?.() || null;
+        })
+        .then(() => {
+          if (speakSerial !== this.linuxPiperSpeakSerial) return;
+          this._beginLinuxPiperSpeak(
+            block,
+            startSegmentIndex,
+            options,
+            speakSerial
+          );
+        });
+    }
+
+    _beginLinuxPiperSpeak(block, startSegmentIndex, options, speakSerial) {
+      if (speakSerial !== this.linuxPiperSpeakSerial) return;
 
       const chunks = createPiperSentenceChunks(block, startSegmentIndex);
       if (!chunks.length) {
@@ -370,7 +641,6 @@
         return;
       }
 
-      this.cancel();
       this.directSessionMode = true;
       this.generation += 1;
       const generation = this.generation;
@@ -384,7 +654,9 @@
         Math.max(0.25, Number(options.rate) || 1)
       );
 
-      const configuredVolume = Number(root.EdgeTtsExtension?.AudioControls?.currentVolume);
+      const configuredVolume = Number(
+        root.EdgeTtsExtension?.AudioControls?.currentVolume
+      );
       this.directOutputGain = Number.isFinite(configuredVolume)
         ? Math.min(2, Math.max(0, configuredVolume))
         : 1;
@@ -442,6 +714,7 @@
         payload,
         prefetch,
         audio: [],
+        audioBase64: [],
         boundaries: [],
         timeoutId
       };
@@ -457,7 +730,9 @@
           requestId: request,
           text: payload.text,
           voiceId: this.currentOptions?.voice?.voiceId,
-          lang: this.currentOptions?.voice?.lang
+          lang: this.currentOptions?.voice?.lang,
+          pronunciationRevision: Number(payload.configRevision) || 0,
+          pronunciationSavedAt: Number(payload.configSavedAt) || 0
         })
       )
         .then((response) => {
@@ -564,6 +839,10 @@
     }
 
     _preparedLinuxPiperBoundaries(prepared) {
+      if (prepared?.boundariesArePrepared) {
+        return [...(prepared.boundaries || [])];
+      }
+
       const payload = prepared.payload;
       return prepared.boundaries.map((boundary) => {
         const charIndex = Math.max(0, Number(boundary.charIndex) || 0);
@@ -581,6 +860,279 @@
       });
     }
 
+    _startLinuxPiperBoundaryClock(generation) {
+      this._clearBoundaryClock();
+      const tick = () => {
+        if (
+          generation !== this.generation ||
+          !this.directActive
+        ) {
+          this.directBoundaryFrame = null;
+          return;
+        }
+
+        const mediaTime = this._hasLinuxPiperOffscreenPlayback()
+          ? Math.max(
+              0,
+              Number(this.linuxPiperOffscreenPlayback?.currentTime) || 0
+            )
+          : Math.max(0, Number(this.directAudio?.currentTime) || 0);
+
+        while (
+          this.directBoundaryIndex < this.directBoundaries.length &&
+          this.directBoundaries[this.directBoundaryIndex].offsetSeconds <=
+            mediaTime + 0.025
+        ) {
+          const boundary = this.directBoundaries[this.directBoundaryIndex];
+          this.directBoundaryIndex += 1;
+          if (boundary.segment) {
+            this.currentChunkBoundaryIndex = this.directBoundaryIndex - 1;
+            this.onBoundary?.(boundary.segment, {
+              type: "linux-piper-boundary",
+              directAudio: true,
+              audioOffset: boundary.offsetSeconds,
+              duration: boundary.durationSeconds,
+              spokenText: boundary.text
+            });
+          }
+        }
+
+        this.directBoundaryFrame =
+          root.requestAnimationFrame?.(tick) ?? null;
+      };
+
+      this.directBoundaryFrame =
+        root.requestAnimationFrame?.(tick) ?? null;
+    }
+
+    _stopLinuxPiperOffscreenPlayback() {
+      const playback = this.linuxPiperOffscreenPlayback;
+      if (!playback) return false;
+
+      this.linuxPiperOffscreenPlayback = null;
+      try {
+        void root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_PIPER_OFFSCREEN_STOP",
+          playbackId: playback.playbackId
+        }).catch?.(() => {});
+      } catch (_error) {}
+      return true;
+    }
+
+    _finishLinuxPiperPreparedPlayback(activeGeneration, prepared) {
+      if (activeGeneration !== this.generation) return;
+
+      this._clearBoundaryClock();
+      this.directActive = false;
+      this.linuxPiperPausedInPlace = false;
+      this.linuxPiperPlaybackIndex = -1;
+      this.linuxPiperOffscreenPlayback = null;
+      this.currentChunkIndex += 1;
+
+      if (this.currentChunkIndex >= this.currentChunks.length) {
+        this.currentChunks = [];
+        this.currentOptions = null;
+        this.linuxPiperPrepared.clear();
+        this.onEnd?.();
+        return;
+      }
+
+      // The extension-owned audio document now owns the inter-sentence
+      // wall-clock pause and emits "ended" only after that gap. Continue
+      // immediately here so background-tab throttling cannot collapse or
+      // stretch the configured sentence pause.
+      this._speakLinuxPiperChunk(activeGeneration);
+    }
+
+    _playLinuxPiperPreparedOffscreen(generation, prepared, reason) {
+      if (
+        generation !== this.generation ||
+        prepared.chunkIndex !== this.currentChunkIndex
+      ) {
+        return;
+      }
+
+      if (!prepared.audioBase64?.length) {
+        this._failLinuxPiper(
+          `page media rejected Piper WAV and no offscreen WAV copy was available: ${reason}`
+        );
+        return;
+      }
+
+      try {
+        this.directAudio?.pause?.();
+        this.directAudio?.removeAttribute?.("src");
+        this.directAudio?.load?.();
+      } catch (_error) {}
+      this.directAudio = null;
+      this._revokeObjectUrl();
+
+      const playbackId =
+        `piper-offscreen-${generation}-${prepared.chunkIndex}-${Date.now()}`;
+      this.linuxPiperOffscreenPlayback = {
+        playbackId,
+        generation,
+        chunkIndex: prepared.chunkIndex,
+        currentTime: 0,
+        paused: false,
+        started: false,
+        prepared
+      };
+      this.directBoundaryIndex = 0;
+      this.currentChunkBoundaryIndex = -1;
+      this.directActive = false;
+      this.linuxPiperPausedInPlace = false;
+      this.onStatus?.("Using extension audio fallback...");
+
+      void root.chrome?.runtime?.sendMessage?.({
+        type: "EDGE_TTS_PIPER_OFFSCREEN_PLAY",
+        playbackId,
+        audioChunks: prepared.audioBase64,
+        boundaryOffsets: this.directBoundaries.map(
+          (boundary) => Math.max(0, Number(boundary.offsetSeconds) || 0)
+        ),
+        sentencePauseMs: prepared.payload?.sentenceFinal === false
+          ? 0
+          : Math.max(
+              0,
+              Number(this.currentOptions?.sentencePauseMs) || 0
+            ),
+        playbackRate: this.directPlaybackRate,
+        volume: Math.min(
+          1,
+          Math.max(0, Number(this.directOutputGain) || 0)
+        )
+      }).then((response) => {
+        if (
+          generation !== this.generation ||
+          this.linuxPiperOffscreenPlayback?.playbackId !== playbackId
+        ) {
+          return;
+        }
+        if (!response?.accepted) {
+          this._failLinuxPiper(
+            `extension-owned playback rejected: ${response?.error || "unknown error"}`
+          );
+        }
+      }).catch((error) => {
+        if (
+          generation !== this.generation ||
+          this.linuxPiperOffscreenPlayback?.playbackId !== playbackId
+        ) {
+          return;
+        }
+        this._failLinuxPiper(
+          `extension-owned playback failed: ${error?.message || String(error)}`
+        );
+      });
+    }
+
+    handleLinuxPiperOffscreenEvent(message) {
+      const playback = this.linuxPiperOffscreenPlayback;
+      if (
+        !playback ||
+        String(message?.playbackId || "") !== playback.playbackId ||
+        playback.generation !== this.generation
+      ) {
+        return false;
+      }
+
+      const event = message.event || {};
+      if (Number.isFinite(Number(event.currentTime))) {
+        playback.currentTime = Math.max(0, Number(event.currentTime));
+      }
+
+      if (event.type === "time") {
+        return true;
+      }
+
+      if (event.type === "started" || event.type === "resumed") {
+        playback.paused = false;
+        this.directActive = true;
+        this.linuxPiperPausedInPlace = false;
+
+        if (!playback.started) {
+          playback.started = true;
+          this.onStart?.(
+            playback.prepared?.payload?.segments?.[0],
+            Math.max(
+              0,
+              (root.performance?.now?.() ?? Date.now()) - this.requestedAt
+            )
+          );
+          this._fillLinuxPiperPrefetch(this.generation);
+
+          // Defensive fallback: even if a backend returned no word boundaries,
+          // never start audible speech with no visible highlight at all.
+          if (
+            this.directBoundaries.length === 0 &&
+            playback.prepared?.payload?.segments?.[0]
+          ) {
+            this.onBoundary?.(
+              playback.prepared.payload.segments[0],
+              {
+                type: "linux-piper-boundary-fallback",
+                directAudio: true,
+                audioOffset: 0,
+                duration: 0,
+                spokenText: ""
+              }
+            );
+          }
+        }
+
+        this.onStatus?.("Reading");
+        return true;
+      }
+
+      if (event.type === "boundary") {
+        const index = Math.max(0, Number(event.index) || 0);
+        const boundary = this.directBoundaries[index];
+        if (boundary?.segment) {
+          this.currentChunkBoundaryIndex = index;
+          this.onBoundary?.(boundary.segment, {
+            type: "linux-piper-offscreen-boundary",
+            directAudio: true,
+            audioOffset: boundary.offsetSeconds,
+            duration: boundary.durationSeconds,
+            spokenText: boundary.text
+          });
+        }
+        return true;
+      }
+
+      if (event.type === "paused") {
+        playback.paused = true;
+        this.directActive = false;
+        this.linuxPiperPausedInPlace = true;
+        this._clearBoundaryClock();
+        return true;
+      }
+
+      if (event.type === "ended") {
+        const prepared = playback.prepared;
+        this._finishLinuxPiperPreparedPlayback(this.generation, prepared);
+        return true;
+      }
+
+      if (event.type === "stopped") {
+        this.directActive = false;
+        this._clearBoundaryClock();
+        this.linuxPiperOffscreenPlayback = null;
+        return true;
+      }
+
+      if (event.type === "error") {
+        this.linuxPiperOffscreenPlayback = null;
+        this._failLinuxPiper(
+          event.message || "Extension-owned Piper playback failed."
+        );
+        return true;
+      }
+
+      return false;
+    }
+
     _playLinuxPiperPrepared(generation, prepared) {
       if (
         generation !== this.generation ||
@@ -589,141 +1141,30 @@
         return;
       }
 
-      const payload = prepared.payload;
-      this.directActive = true;
+      this.directActive = false;
       this.linuxPiperPlaybackIndex = prepared.chunkIndex;
       this.linuxPiperPausedInPlace = false;
       this.directBoundaries = this._preparedLinuxPiperBoundaries(prepared);
       this.directBoundaryIndex = 0;
+      this.currentChunkBoundaryIndex = -1;
 
-      const blob = new Blob(prepared.audio, { type: "audio/wav" });
-      this._revokeObjectUrl();
-      this.directObjectUrl = root.URL.createObjectURL(blob);
-
-      try {
-        this.directAudio?.pause?.();
-        this.directAudio?.removeAttribute?.("src");
-        this.directAudio?.load?.();
-      } catch (_error) {}
-
-      const audio = root.document?.createElement?.("audio") || new root.Audio();
-      audio.preload = "auto";
-      audio.preservesPitch = true;
-      if ("webkitPreservesPitch" in audio) audio.webkitPreservesPitch = true;
-      audio.src = this.directObjectUrl;
-      audio.playbackRate = this.directPlaybackRate;
-      audio.volume = Math.min(
-        1,
-        Math.max(0, Number(this.directOutputGain) || 0)
-      );
-      this.directAudio = audio;
-
-      const activeGeneration = prepared.generation;
-      audio.onended = () => {
-        if (activeGeneration !== this.generation) return;
-        this._clearBoundaryClock();
-        this.directActive = false;
-        this.linuxPiperPausedInPlace = false;
-        this.linuxPiperPlaybackIndex = -1;
-        this.currentChunkIndex += 1;
-
-        if (this.currentChunkIndex >= this.currentChunks.length) {
-          this.currentChunks = [];
-          this.currentOptions = null;
-          this.linuxPiperPrepared.clear();
-          this.onEnd?.();
-          return;
-        }
-
-        const finishedPayload = prepared.payload;
-        const sentencePauseMs = finishedPayload?.sentenceFinal === false
-          ? 0
-          : Math.max(
-              0,
-              Number(this.currentOptions?.sentencePauseMs) || 0
-            );
-
-        if (sentencePauseMs > 0) {
-          this.onStatus?.(`Sentence pause ${sentencePauseMs} ms`);
-          this.linuxPiperSentencePauseTimer = root.setTimeout(() => {
-            this.linuxPiperSentencePauseTimer = null;
-            if (activeGeneration !== this.generation) return;
-            this._speakLinuxPiperChunk(activeGeneration);
-          }, sentencePauseMs);
-        } else {
-          this._speakLinuxPiperChunk(activeGeneration);
-        }
-      };
-
-      audio.onerror = () => {
-        if (activeGeneration !== this.generation) return;
-        const mediaCode = audio.error?.code;
-        const mediaMessage = String(audio.error?.message || "").trim();
-        this._failLinuxPiper(
-          `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}` +
-          `${mediaMessage ? `: ${mediaMessage}` : ""}; ` +
-          `readyState=${audio.readyState}; networkState=${audio.networkState}`
-        );
-      };
-
+      // Piper WAV playback belongs to the extension, not to arbitrary pages.
+      // The previous "page <audio> first, offscreen fallback second" design had
+      // a real startup race: page audio could reject with NotAllowedError and
+      // mark the reader Paused just before a media-safety error transferred the
+      // same WAV to offscreen playback. Audio would then play while the reader
+      // intentionally ignored start/boundary events because it believed it was
+      // paused. Use the extension-owned player from the outset.
       this.onStatus?.(
-        prepared.prefetch ? "Playing prefetched Piper audio..." : "Playing Piper audio..."
+        prepared.prefetch
+          ? "Playing prefetched Piper audio..."
+          : "Playing Piper audio..."
       );
-
-      const startMediaPlayback = (attempt = 0) => {
-        void audio.play()
-          .then(() => {
-            if (activeGeneration !== this.generation) return;
-            this.onStart?.(
-              payload.segments?.[0],
-              Math.max(
-                0,
-                (root.performance?.now?.() ?? Date.now()) - this.requestedAt
-              )
-            );
-            this._startBoundaryClock(activeGeneration);
-            this._fillLinuxPiperPrefetch(activeGeneration);
-          })
-          .catch((error) => {
-            if (activeGeneration !== this.generation) return;
-
-            if (error?.name === "NotAllowedError") {
-              // Extension-action activation can expire while CPU synthesis is
-              // running. Keep this prepared WAV intact and let the next explicit
-              // toolbar Resume click provide a fresh user activation.
-              this._clearBoundaryClock();
-              this.directActive = false;
-              this.linuxPiperPausedInPlace = true;
-              this.onPlaybackBlocked?.(error);
-              return;
-            }
-
-            if (
-              error?.name === "AbortError" &&
-              attempt < 1 &&
-              this.directAudio === audio
-            ) {
-              this.onStatus?.("Retrying Piper media start...");
-              root.setTimeout(() => {
-                if (
-                  activeGeneration === this.generation &&
-                  this.directAudio === audio &&
-                  !this.linuxPiperPausedInPlace
-                ) {
-                  startMediaPlayback(attempt + 1);
-                }
-              }, 150);
-              return;
-            }
-
-            this._failLinuxPiper(
-              `audio.play() failed: ${error?.name || "Error"}: ${error?.message || String(error)}; ` +
-              `readyState=${audio.readyState}; networkState=${audio.networkState}`
-            );
-          });
-      };
-
-      startMediaPlayback();
+      this._playLinuxPiperPreparedOffscreen(
+        generation,
+        prepared,
+        "primary Piper playback"
+      );
     }
 
     _failLinuxPiper(message) {
@@ -744,6 +1185,7 @@
       } catch (_error) {}
 
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       for (const request of this.linuxPiperRequests.values()) {
         if (request.timeoutId) root.clearTimeout(request.timeoutId);
       }
@@ -785,6 +1227,7 @@
       }
 
       if (event.type === "audioChunk") {
+        request.audioBase64.push(String(event.data || ""));
         request.audio.push(fromBase64(event.data));
         return true;
       }
@@ -807,12 +1250,22 @@
       this.linuxPiperRequests.delete(request.requestId);
       if (this.linuxPiperRequest === request) this.linuxPiperRequest = null;
 
+      const improvedBoundaries = approximatePiperBoundaries(
+        request.payload,
+        event.durationMs
+      );
+
       const prepared = {
         generation: request.generation,
         chunkIndex: request.chunkIndex,
         payload: request.payload,
         audio: request.audio,
-        boundaries: request.boundaries,
+        audioBase64: request.audioBase64,
+        boundaries:
+          improvedBoundaries.length > 0
+            ? improvedBoundaries
+            : request.boundaries,
+        boundariesArePrepared: improvedBoundaries.length > 0,
         prefetch: request.prefetch
       };
       this.linuxPiperPrepared.set(request.chunkIndex, prepared);
@@ -845,7 +1298,9 @@
     }
 
     cancel() {
+      this.linuxPiperSpeakSerial += 1;
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
@@ -861,7 +1316,9 @@
     }
 
     abandon() {
+      this.linuxPiperSpeakSerial += 1;
       this._clearLinuxPiperSentencePause();
+      this._stopLinuxPiperOffscreenPlayback();
       if (this.directSessionMode) {
         this._stopLinuxPiperNativeWork();
         for (const request of this.linuxPiperRequests.values()) {
@@ -886,6 +1343,7 @@
     PIPER_SOFT_CLAUSE_CHARS,
     PIPER_HARD_CLAUSE_CHARS,
     splitPiperSentenceSegments,
+    approximatePiperBoundaries,
     createPiperSentenceChunks,
     payloadForPiperSegments
   };

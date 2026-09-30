@@ -1,5 +1,5 @@
 (function bootstrapEdgeTts(root) {
-  const SESSION_REVISION = 2;
+  const SESSION_REVISION = 11;
   const extension = root.EdgeTtsExtension;
   if (!extension?.Reader?.ReaderApp) {
     console.error("Edge Natural TTS reader modules did not initialize.");
@@ -140,6 +140,13 @@
       message?.type === "EDGE_TTS_LINUX_PIPER_EVENT"
     ) {
       const accepted = app?.speech?.handleLinuxPiperEvent?.(message) === true;
+      sendResponse({ accepted });
+      return false;
+    }
+
+    if (message?.type === "EDGE_TTS_PIPER_OFFSCREEN_EVENT") {
+      const accepted =
+        app?.speech?.handleLinuxPiperOffscreenEvent?.(message) === true;
       sendResponse({ accepted });
       return false;
     }
