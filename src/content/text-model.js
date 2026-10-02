@@ -424,6 +424,95 @@
     };
   }
 
+  function segmentIsLive(segment) {
+    const node = segment?.node;
+    if (!(node instanceof Text) || !node.isConnected) {
+      return false;
+    }
+
+    const start = Number(segment.nodeStart);
+    const end = Number(segment.nodeEnd);
+    const value = String(node.nodeValue || "");
+    if (
+      !Number.isInteger(start) ||
+      !Number.isInteger(end) ||
+      start < 0 ||
+      end < start ||
+      end > value.length
+    ) {
+      return false;
+    }
+
+    return value.slice(start, end) === String(segment.text || "");
+  }
+
+  function blockIsLive(block) {
+    if (!block?.element?.isConnected) {
+      return false;
+    }
+    const segments = Array.isArray(block.segments) ? block.segments : [];
+    return segments.length > 0 && segments.every(segmentIsLive);
+  }
+
+  function matchingSegmentPrefixLength(leftSegments, rightSegments) {
+    const left = Array.isArray(leftSegments) ? leftSegments : [];
+    const right = Array.isArray(rightSegments) ? rightSegments : [];
+    const limit = Math.min(left.length, right.length);
+    let index = 0;
+    while (
+      index < limit &&
+      String(left[index]?.text || "") === String(right[index]?.text || "")
+    ) {
+      index += 1;
+    }
+    return index;
+  }
+
+  function relocateCursorAfterRebuild(anchor, freshModel) {
+    if (!anchor || !Array.isArray(freshModel?.blocks)) {
+      return null;
+    }
+
+    const candidates = [];
+    for (const block of freshModel.blocks) {
+      if (String(block?.authorRole || "") !== String(anchor.authorRole || "")) {
+        continue;
+      }
+
+      const prefix = matchingSegmentPrefixLength(
+        anchor.segments,
+        block?.segments
+      );
+      if (prefix <= Number(anchor.segmentIndex)) {
+        continue;
+      }
+
+      candidates.push({
+        block,
+        prefix,
+        distance: Math.abs(
+          Number(block.index) - Number(anchor.blockIndex)
+        )
+      });
+    }
+
+    candidates.sort((left, right) =>
+      right.prefix - left.prefix ||
+      left.distance - right.distance
+    );
+
+    const best = candidates[0]?.block;
+    if (!best) return null;
+
+    return {
+      blockIndex: best.index,
+      segmentIndex: Math.min(
+        Math.max(0, Number(anchor.segmentIndex) || 0),
+        Math.max(0, best.segments.length - 1)
+      )
+    };
+  }
+
   function findSegmentInNode(block, node, offset) {
     const matching = block.segments.filter((segment) => segment.node === node);
     if (matching.length === 0) {
@@ -509,8 +598,12 @@
 
   return {
     annotateSentences,
+    blockIsLive,
     buildReadableModel,
     findSegmentInNode,
+    matchingSegmentPrefixLength,
+    relocateCursorAfterRebuild,
+    segmentIsLive,
     firstBlockNearViewport,
     segmentIndexForCharIndex,
     sentenceRanges,
