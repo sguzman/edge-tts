@@ -495,6 +495,9 @@
       this.highlighter.styleElement = null;
       this.toolbar.destroy?.();
 
+      this.disconnectModelMutationObserver();
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
       this.model = null;
       this.voices = [];
       this.selectedVoice = null;
@@ -598,6 +601,9 @@
 
     stop() {
       this.lifecycleSerial += 1;
+      this.disconnectModelMutationObserver();
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
@@ -735,6 +741,8 @@
       this.activeBatchEndBlockIndex = -1;
       this.discardLocalSpeechState();
       this.highlighter.clear();
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
       this.rebuildModel();
 
       const startBlock = firstBlockNearViewport(this.model.blocks);
@@ -789,13 +797,16 @@
     }
 
     rebuildModel() {
+      this.disconnectModelMutationObserver();
       const startedAt = performance.now();
       this.model = buildReadableModel(document);
+      this.modelStale = false;
       console.debug(
         `Edge Natural TTS modeled ${this.model.blocks.length} ${this.model.profile} blocks in ${Math.round(
           performance.now() - startedAt
         )}ms`
       );
+      this.observeModelMutations();
     }
 
     applySettings() {
@@ -1000,6 +1011,7 @@
 
     finishDocument() {
       this.clearResumeWatchdog();
+      this.disconnectModelMutationObserver();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.discardLocalSpeechState();
