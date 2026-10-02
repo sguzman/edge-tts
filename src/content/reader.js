@@ -247,6 +247,16 @@
       if (this.stopped) return false;
 
       if (this.paused) {
+        // A manually-paused reader may still own a resumable offscreen WAV.
+        // Once its DOM coordinates are stale, that media is stale too.
+        try {
+          this.discardLocalSpeechState();
+        } catch (error) {
+          console.warn(
+            "Edge Natural TTS could not retire stale paused playback.",
+            error
+          );
+        }
         this.toolbar?.setPaused?.(true);
         this.toolbar?.setStatus?.(
           "Paused — page text changed; Resume will rebuild"
@@ -293,7 +303,6 @@
       this.disconnectModelMutationObserver();
       if (
         !this.enabled ||
-        this.stopped ||
         !this.model?.blocks?.length ||
         typeof root.MutationObserver !== "function" ||
         !document.body
