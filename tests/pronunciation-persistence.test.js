@@ -49,3 +49,25 @@ test("options surfaces recovery/default/backup-failure state instead of silently
   assert.match(options, /No saved pronunciation config was found for this extension identity/);
   assert.match(options, /backup failed/);
 });
+
+
+test("save path archives previous config before replacing extension-local state", () => {
+  const saveAt = engine.indexOf("  async function saveConfig(value) {");
+  const resetAt = engine.indexOf("  async function resetConfig()", saveAt);
+  const body = engine.slice(saveAt, resetAt);
+
+  const previousBackupAt = body.indexOf("await writeDurableBackup(previous)");
+  const localWriteAt = body.indexOf("root.chrome.storage.local.set");
+  const currentBackupAt = body.lastIndexOf("await writeDurableBackup(currentConfig)");
+
+  assert.ok(previousBackupAt >= 0);
+  assert.ok(localWriteAt > previousBackupAt);
+  assert.ok(currentBackupAt > localWriteAt);
+});
+
+test("loading a valid extension-local config seeds the durable backup automatically", () => {
+  const localLoadAt = engine.indexOf('lastLoadSource = "extension-storage"');
+  const backupAt = engine.indexOf("await writeDurableBackup(currentConfig)", localLoadAt);
+  assert.ok(localLoadAt >= 0);
+  assert.ok(backupAt > localLoadAt);
+});
