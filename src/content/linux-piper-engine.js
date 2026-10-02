@@ -476,15 +476,44 @@
 
       if (this._hasLinuxPiperOffscreenPlayback()) {
         const playback = this.linuxPiperOffscreenPlayback;
-        playback.paused = true;
-        this._clearBoundaryClock();
-        this.directActive = false;
-        this.linuxPiperPausedInPlace = true;
-        void root.chrome?.runtime?.sendMessage?.({
-          type: "EDGE_TTS_PIPER_OFFSCREEN_PAUSE",
-          playbackId: playback.playbackId
-        }).catch?.(() => {});
-        return true;
+        const playbackId = playback.playbackId;
+        const generation = playback.generation;
+        this.onStatus?.("Pausing...");
+
+        const pauseCommand = Promise.resolve(
+          root.chrome?.runtime?.sendMessage?.({
+            type: "EDGE_TTS_PIPER_OFFSCREEN_PAUSE",
+            playbackId
+          })
+        );
+        const pauseTimeout = new Promise((resolve) => {
+          root.setTimeout(() => {
+            resolve({
+              accepted: false,
+              error: "Offscreen Piper pause acknowledgement timed out."
+            });
+          }, 900);
+        });
+
+        return Promise.race([pauseCommand, pauseTimeout])
+          .then((response) => {
+            if (
+              this.linuxPiperOffscreenPlayback?.playbackId !== playbackId ||
+              generation !== this.generation
+            ) {
+              return false;
+            }
+            if (!response?.accepted) {
+              return false;
+            }
+
+            playback.paused = true;
+            this._clearBoundaryClock();
+            this.directActive = false;
+            this.linuxPiperPausedInPlace = true;
+            return true;
+          })
+          .catch(() => false);
       }
 
       if (this.directAudio?.paused) return false;
