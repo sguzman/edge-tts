@@ -21,7 +21,7 @@ test("highlighter fails closed when cached DOM segments are stale", () => {
   assert.match(highlighter, /!segmentCanHighlight\(segment\)/);
   assert.match(highlighter, /this\.clear\(\);\s*return false;/);
   assert.match(highlighter, /sentence\.segments\.every\(segmentCanHighlight\)/);
-  assert.match(highlighter, /return true;\s*}\s*\n\s*keepRangeInView/);
+  assert.match(highlighter, /this\.keepRangeInView\(wordRange, segment\.node\.parentElement\);\s*return true;/);
 });
 
 test("reader observes active readable DOM and pauses on mutation", () => {
