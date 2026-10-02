@@ -201,3 +201,38 @@ td input[type="text"] { min-width: 120px; }
     width: 100%;
   }
 }
+
+
+.rule-actions {
+  min-width: 190px;
+}
+.rule-action-buttons {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+.rule-test-result {
+  display: block;
+  max-width: 300px;
+  margin-top: 6px;
+  font-size: 0.82rem;
+  opacity: 0.76;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.regex-test-cell {
+  min-width: 220px;
+}
+.regex-test-cell input {
+  min-width: 180px;
+}
+button[data-test-rule],
+button[data-test-regex] {
+  font-weight: 700;
+}
+button[data-test-rule]:disabled,
+button[data-test-regex]:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
