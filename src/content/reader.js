@@ -954,6 +954,12 @@
         return;
       }
 
+      const currentSegment = block.segments?.[this.currentSegmentIndex];
+      if (currentSegment && !segmentIsLive?.(currentSegment)) {
+        this.markModelStale("speech-start-target-stale");
+        return;
+      }
+
       const batch = createSpeechBatch(
         this.model.blocks,
         this.currentBlockIndex,
@@ -1006,7 +1012,11 @@
       this.currentBlockIndex = segment.blockIndex;
       this.currentSegmentIndex = segment.segmentIndex;
       const block = this.model?.blocks[segment.blockIndex];
-      this.highlighter.highlight(block, segment);
+      const highlighted = this.highlighter.highlight(block, segment);
+      if (highlighted !== true) {
+        this.markModelStale("boundary-highlight-target-stale");
+        return;
+      }
       if (!this.paused && !this.stopped) {
         this.toolbar.setStatus("Reading");
       }
