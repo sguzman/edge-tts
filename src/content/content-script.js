@@ -1,5 +1,5 @@
 (function bootstrapEdgeTts(root) {
-  const SESSION_REVISION = 11;
+  const SESSION_REVISION = 12;
   const extension = root.EdgeTtsExtension;
   if (!extension?.Reader?.ReaderApp) {
     console.error("Edge Natural TTS reader modules did not initialize.");
