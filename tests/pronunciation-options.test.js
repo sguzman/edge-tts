@@ -116,3 +116,47 @@ test("test speed is a QA control, not a pronunciation setting that autosaves", (
   );
   assert.match(optionsJs, /:not\(#test-speed\)/);
 });
+
+
+test("map rows can be tested in place without editing the global preview sentence", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+  const optionsCss = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.css"),
+    "utf8"
+  );
+
+  assert.match(optionsJs, /const INLINE_TESTABLE_MAPS = new Set/);
+  assert.match(optionsJs, /pronunciation\.customPronunciations/);
+  assert.match(optionsJs, /function inlineRuleTestSource/);
+  assert.match(optionsJs, /function testMapRow/);
+  assert.match(optionsJs, /data-test-rule/);
+  assert.match(optionsJs, /data-rule-test-result/);
+  assert.match(optionsJs, /Play this rule using the current unsaved editor state/);
+  assert.match(optionsCss, /\.rule-test-result/);
+});
+
+test("regex rules have their own in-situ sample text and test button", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+
+  assert.match(optionsHtml, /<th>Test text<\/th>/);
+  assert.match(optionsJs, /data-regex-test-source/);
+  assert.match(optionsJs, /data-test-regex/);
+  assert.match(optionsJs, /Enter test text for this regex row/);
+});
+
+test("letter sounds and path vocabulary can audition their configured spoken value directly", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+
+  assert.match(optionsJs, /path === "acronyms\.letterSounds"/);
+  assert.match(optionsJs, /path === "technical\.pathWords"/);
+  assert.match(optionsJs, /spoken: value/);
+});
