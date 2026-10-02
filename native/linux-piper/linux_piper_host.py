@@ -39,6 +39,11 @@ VOICE_ROOT = Path(
     )
 ).expanduser()
 
+APP_HOME = VOICE_ROOT.parent
+PRONUNCIATION_CONFIG_PATH = APP_HOME / "pronunciation-config.json"
+PRONUNCIATION_HISTORY_DIR = APP_HOME / "pronunciation-history"
+MAX_PRONUNCIATION_HISTORY = 20
+
 _write_lock = threading.Lock()
 _state_lock = threading.Lock()
 _voice_load_lock = threading.Lock()
@@ -431,6 +436,69 @@ def cancel_synthesis(request_id: str) -> None:
     os._exit(0)
 
 
+def read_pronunciation_config() -> dict[str, Any] | None:
+    if not PRONUNCIATION_CONFIG_PATH.is_file():
+        return None
+    value = json.loads(PRONUNCIATION_CONFIG_PATH.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise ValueError("Durable pronunciation config is not a JSON object")
+    return value
+
+
+def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temp_path.write_text(
+        json.dumps(value, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    os.replace(temp_path, path)
+
+
+def _archive_pronunciation_config(value: dict[str, Any]) -> None:
+    PRONUNCIATION_HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    revision = max(0, int(value.get("revision") or 0))
+    saved_at = max(0, int(value.get("savedAt") or 0))
+    stamp = saved_at or int(__import__("time").time() * 1000)
+    archive_path = PRONUNCIATION_HISTORY_DIR / (
+        f"{stamp:013d}-r{revision:06d}.json"
+    )
+    if not archive_path.exists():
+        _write_json_atomic(archive_path, value)
+
+    history = sorted(
+        PRONUNCIATION_HISTORY_DIR.glob("*.json"),
+        key=lambda path: path.stat().st_mtime,
+        reverse=True,
+    )
+    for stale in history[MAX_PRONUNCIATION_HISTORY:]:
+        try:
+            stale.unlink()
+        except OSError:
+            pass
+
+
+def write_pronunciation_config(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        raise ValueError("Pronunciation config must be a JSON object")
+
+    previous = None
+    try:
+        previous = read_pronunciation_config()
+    except Exception:
+        previous = None
+
+    if previous is not None and previous != value:
+        _archive_pronunciation_config(previous)
+
+    _write_json_atomic(PRONUNCIATION_CONFIG_PATH, value)
+    return {
+        "path": str(PRONUNCIATION_CONFIG_PATH),
+        "revision": max(0, int(value.get("revision") or 0)),
+        "savedAt": max(0, int(value.get("savedAt") or 0)),
+    }
+
+
 def handle_message(message: dict[str, Any]) -> None:
     message_type = str(message.get("type") or "")
     request_id = str(message.get("requestId") or "")
@@ -452,6 +520,42 @@ def handle_message(message: dict[str, Any]) -> None:
         start_default_voice_warmup()
     elif message_type == "voices":
         send_message({"type": "voices", "requestId": request_id, "voices": list_voices()})
+    elif message_type == "pronunciationConfigRead":
+        try:
+            send_message(
+                {
+                    "type": "pronunciationConfig",
+                    "requestId": request_id,
+                    "config": read_pronunciation_config(),
+                    "path": str(PRONUNCIATION_CONFIG_PATH),
+                }
+            )
+        except Exception as error:
+            send_message(
+                {
+                    "type": "error",
+                    "requestId": request_id,
+                    "message": f"Could not read durable pronunciation config: {error}",
+                }
+            )
+    elif message_type == "pronunciationConfigWrite":
+        try:
+            metadata = write_pronunciation_config(message.get("config"))
+            send_message(
+                {
+                    "type": "pronunciationConfigSaved",
+                    "requestId": request_id,
+                    **metadata,
+                }
+            )
+        except Exception as error:
+            send_message(
+                {
+                    "type": "error",
+                    "requestId": request_id,
+                    "message": f"Could not write durable pronunciation config: {error}",
+                }
+            )
     elif message_type == "synthesize":
         start_synthesis(message)
     elif message_type == "cancel":
