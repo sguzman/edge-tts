@@ -180,6 +180,36 @@ pronunciation revision used to build that request.
 Startup also waits for the saved pronunciation config before constructing the
 readable sentence model.
 
+## Durable pronunciation persistence
+
+User pronunciation rules are user-owned state and must survive unpacked
+extension path/ID changes.
+
+The primary browser copy remains in `chrome.storage.local` under
+`edgeTtsPronunciationConfigV1`, but every valid config is mirrored through
+the Linux native host to:
+
+```text
+~/.local/share/edge-natural-tts/pronunciation-config.json
+```
+
+Before replacing that durable file, the previous config is archived under:
+
+```text
+~/.local/share/edge-natural-tts/pronunciation-history/
+```
+
+The host retains the most recent 20 historical revisions.
+
+When an extension identity has no local config, the pronunciation engine first
+attempts to restore the durable copy and then repopulates
+`chrome.storage.local`. A genuinely empty state is surfaced explicitly in
+Options instead of silently presenting defaults as though they were saved user
+rules.
+
+Loading an existing local config also refreshes the durable copy immediately,
+so protection does not depend on the user making another edit.
+
 ## Offscreen highlighting
 
 When a page rejects its own `blob:` media URL, extension-owned offscreen
