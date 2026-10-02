@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  isVisuallyHiddenElement,
   relocateCursorAfterRebuild,
   segmentIndexForCharIndex,
   segmentIsLive,
@@ -151,4 +152,67 @@ test("cursor relocation refuses a changed prefix at the active token", () => {
   };
 
   assert.equal(relocateCursorAfterRebuild(anchor, freshModel), null);
+});
+
+
+test("screen-reader-only one-pixel content is not considered readable prose", () => {
+  const PreviousElement = global.Element;
+  const PreviousGetComputedStyle = global.getComputedStyle;
+
+  class MockElement {
+    closest(selector) {
+      return selector.includes(".sr-only") && this.srOnly ? this : null;
+    }
+  }
+
+  global.Element = MockElement;
+  global.getComputedStyle = (element) => element.style;
+
+  try {
+    const clipped = new MockElement();
+    clipped.style = {
+      opacity: "1",
+      clip: "rect(0px, 0px, 0px, 0px)",
+      clipPath: "none",
+      width: "1px",
+      height: "1px",
+      position: "absolute",
+      overflow: "hidden",
+      whiteSpace: "nowrap"
+    };
+    assert.equal(isVisuallyHiddenElement(clipped), true);
+
+    const srOnly = new MockElement();
+    srOnly.srOnly = true;
+    srOnly.style = {
+      opacity: "1",
+      clip: "auto",
+      clipPath: "none",
+      width: "auto",
+      height: "auto",
+      position: "static",
+      overflow: "visible",
+      whiteSpace: "normal"
+    };
+    assert.equal(isVisuallyHiddenElement(srOnly), true);
+
+    const visible = new MockElement();
+    visible.style = {
+      opacity: "1",
+      clip: "auto",
+      clipPath: "none",
+      width: "600px",
+      height: "40px",
+      position: "static",
+      overflow: "visible",
+      whiteSpace: "normal"
+    };
+    assert.equal(isVisuallyHiddenElement(visible), false);
+  } finally {
+    if (PreviousElement === undefined) delete global.Element;
+    else global.Element = PreviousElement;
+
+    if (PreviousGetComputedStyle === undefined) delete global.getComputedStyle;
+    else global.getComputedStyle = PreviousGetComputedStyle;
+  }
 });
