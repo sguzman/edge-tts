@@ -261,7 +261,11 @@
       const block = this.model?.blocks?.[this.currentBlockIndex];
       const segment = block?.segments?.[this.currentSegmentIndex];
       if (block && segment) {
-        this.highlighter?.highlight?.(block, segment);
+        const highlighted = this.highlighter?.highlight?.(block, segment);
+        if (highlighted !== true) {
+          this.markModelStale?.("audio-start-highlight-target-stale");
+          return;
+        }
       }
 
       return super.handleSpeechStart(latencyMs);
