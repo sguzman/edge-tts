@@ -1,6 +1,12 @@
 (function attachReader(root) {
   const extension = root.EdgeTtsExtension;
-  const { buildReadableModel, findSegmentInNode, firstBlockNearViewport } = extension.TextModel;
+  const {
+    buildReadableModel,
+    findSegmentInNode,
+    firstBlockNearViewport,
+    relocateCursorAfterRebuild,
+    segmentIsLive
+  } = extension.TextModel;
   const {
     DEFAULT_SENTENCE_COLOR,
     DEFAULT_WORD_COLOR,
@@ -110,6 +116,9 @@
       this.lifecycleSerial = 0;
       this.initialPiperRetryRemaining = 1;
       this.sessionSpeechStarted = false;
+      this.modelMutationObserver = null;
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
