@@ -31,6 +31,12 @@
 
   let currentConfig = cloneDefaults();
   let loadPromise = null;
+  let lastLoadSource = "defaults";
+  let lastBackupStatus = {
+    ok: false,
+    path: "",
+    error: ""
+  };
 
   function clone(value) {
     return JSON.parse(JSON.stringify(value));
@@ -142,6 +148,82 @@
     return clone(currentConfig);
   }
 
+  function getLastLoadSource() {
+    return lastLoadSource;
+  }
+
+  function getLastBackupStatus() {
+    return clone(lastBackupStatus);
+  }
+
+  async function readDurableBackup() {
+    if (!root.chrome?.runtime?.sendMessage) {
+      return { accepted: false, config: null, path: "" };
+    }
+
+    try {
+      const response = await root.chrome.runtime.sendMessage({
+        type: "EDGE_TTS_PRONUNCIATION_BACKUP_READ"
+      });
+      if (!response?.accepted) {
+        return {
+          accepted: false,
+          config: null,
+          path: "",
+          error: response?.error || ""
+        };
+      }
+      return {
+        accepted: true,
+        config: isPlainObject(response.config) ? response.config : null,
+        path: String(response.path || "")
+      };
+    } catch (error) {
+      return {
+        accepted: false,
+        config: null,
+        path: "",
+        error: error?.message || String(error)
+      };
+    }
+  }
+
+  async function writeDurableBackup(value) {
+    if (!root.chrome?.runtime?.sendMessage) {
+      lastBackupStatus = {
+        ok: false,
+        path: "",
+        error: "Native pronunciation backup is unavailable in this context."
+      };
+      return getLastBackupStatus();
+    }
+
+    try {
+      const response = await root.chrome.runtime.sendMessage({
+        type: "EDGE_TTS_PRONUNCIATION_BACKUP_WRITE",
+        config: value
+      });
+      lastBackupStatus = response?.accepted
+        ? {
+            ok: true,
+            path: String(response.path || ""),
+            error: ""
+          }
+        : {
+            ok: false,
+            path: "",
+            error: response?.error || "Native pronunciation backup was rejected."
+          };
+    } catch (error) {
+      lastBackupStatus = {
+        ok: false,
+        path: "",
+        error: error?.message || String(error)
+      };
+    }
+    return getLastBackupStatus();
+  }
+
   function setConfigForTests(value) {
     currentConfig = normalizeConfig(value);
     return getConfig();
@@ -149,14 +231,51 @@
 
   async function loadConfig({ force = false } = {}) {
     if (loadPromise && !force) return loadPromise;
-    if (!root.chrome?.storage?.local?.get) return getConfig();
+    if (!root.chrome?.storage?.local?.get) {
+      lastLoadSource = "defaults";
+      return getConfig();
+    }
 
     loadPromise = Promise.resolve(root.chrome.storage.local.get(STORAGE_KEY))
-      .then((stored) => {
-        currentConfig = normalizeConfig(stored?.[STORAGE_KEY]);
+      .then(async (stored) => {
+        const hasLocalConfig =
+          Object.prototype.hasOwnProperty.call(stored || {}, STORAGE_KEY) &&
+          isPlainObject(stored?.[STORAGE_KEY]);
+
+        if (hasLocalConfig) {
+          currentConfig = normalizeConfig(stored[STORAGE_KEY]);
+          lastLoadSource = "extension-storage";
+          return getConfig();
+        }
+
+        const backup = await readDurableBackup();
+        if (backup.accepted && isPlainObject(backup.config)) {
+          currentConfig = normalizeConfig(backup.config);
+          lastLoadSource = "durable-backup";
+          lastBackupStatus = {
+            ok: true,
+            path: backup.path,
+            error: ""
+          };
+          await root.chrome.storage.local.set({
+            [STORAGE_KEY]: currentConfig
+          });
+          return getConfig();
+        }
+
+        currentConfig = normalizeConfig(undefined);
+        lastLoadSource = "defaults";
+        lastBackupStatus = {
+          ok: false,
+          path: backup.path || "",
+          error: backup.error || ""
+        };
         return getConfig();
       })
-      .catch(() => getConfig())
+      .catch(() => {
+        lastLoadSource = "defaults";
+        return getConfig();
+      })
       .finally(() => {
         loadPromise = null;
       });
@@ -176,6 +295,12 @@
     if (root.chrome?.storage?.local?.set) {
       await root.chrome.storage.local.set({ [STORAGE_KEY]: currentConfig });
     }
+
+    lastLoadSource = "extension-storage";
+    // Mirror user-owned pronunciation state outside Chromium's extension-ID
+    // namespace. Do not fail the local save if Native Messaging is unavailable;
+    // Options surfaces backup status separately.
+    await writeDurableBackup(currentConfig);
     return getConfig();
   }
 
@@ -903,6 +1028,8 @@
     cloneDefaultConfig: cloneDefaults,
     normalizeConfig,
     getConfig,
+    getLastBackupStatus,
+    getLastLoadSource,
     loadConfig,
     saveConfig,
     resetConfig,
