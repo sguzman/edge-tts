@@ -211,6 +211,23 @@
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     const type = String(message?.type || "");
 
+    if (type === "EDGE_TTS_OFFSCREEN_PIPER_STOP_TAB") {
+      const targetTabId = Number(message?.tabId);
+      const matchesOwner =
+        playbackId &&
+        Number.isInteger(targetTabId) &&
+        ownerTabId === targetTabId;
+
+      if (matchesOwner) {
+        stopCurrent({ emit: true });
+      }
+      sendResponse({
+        accepted: true,
+        stopped: Boolean(matchesOwner)
+      });
+      return false;
+    }
+
     if (type === "EDGE_TTS_OFFSCREEN_PIPER_PLAY") {
       void play(message)
         .then(() => sendResponse({ accepted: true }))
