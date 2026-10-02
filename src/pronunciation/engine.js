@@ -245,6 +245,9 @@
         if (hasLocalConfig) {
           currentConfig = normalizeConfig(stored[STORAGE_KEY]);
           lastLoadSource = "extension-storage";
+          // Seed/refresh the extension-ID-independent copy immediately. This
+          // protects an existing custom config even if the user makes no edits.
+          await writeDurableBackup(currentConfig);
           return getConfig();
         }
 
@@ -283,23 +286,26 @@
   }
 
   async function saveConfig(value) {
+    const previous = getConfig();
     const next = normalizeConfig(value);
     const previousRevision = Math.max(
-      Number(currentConfig?.revision) || 0,
+      Number(previous?.revision) || 0,
       Number(value?.revision) || 0
     );
     next.revision = previousRevision + 1;
     next.savedAt = Date.now();
-    currentConfig = next;
 
+    // Preserve the last known user config before replacing it. On the first
+    // post-upgrade save this seeds the durable file; the second write archives
+    // it into pronunciation-history before installing the new revision.
+    await writeDurableBackup(previous);
+
+    currentConfig = next;
     if (root.chrome?.storage?.local?.set) {
       await root.chrome.storage.local.set({ [STORAGE_KEY]: currentConfig });
     }
 
     lastLoadSource = "extension-storage";
-    // Mirror user-owned pronunciation state outside Chromium's extension-ID
-    // namespace. Do not fail the local save if Native Messaging is unavailable;
-    // Options surfaces backup status separately.
     await writeDurableBackup(currentConfig);
     return getConfig();
   }
