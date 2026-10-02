@@ -216,3 +216,18 @@ test("screen-reader-only one-pixel content is not considered readable prose", ()
     else global.getComputedStyle = PreviousGetComputedStyle;
   }
 });
+
+
+test("ARIA status and alert announcements are excluded from readable prose", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "text-model.js"),
+    "utf8"
+  );
+
+  assert.match(source, /\[role='status'\]/);
+  assert.match(source, /\[role='alert'\]/);
+  assert.match(source, /A11Y_ONLY_SELECTOR/);
+  assert.match(source, /\.sr-only/);
+});
