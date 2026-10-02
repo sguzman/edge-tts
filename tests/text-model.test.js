@@ -1,7 +1,9 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  relocateCursorAfterRebuild,
   segmentIndexForCharIndex,
+  segmentIsLive,
   sentenceRanges,
   siteProfileForHostname,
   tokenizeText
@@ -54,4 +56,99 @@ test("X profile targets tweetText application containers", () => {
   assert.match(source, /\[data-testid='tweetText'\]/);
   assert.match(source, /function collectXCandidates/);
   assert.match(source, /profile === "x"/);
+});
+
+
+test("segmentIsLive rejects detached or rewritten text-node targets", () => {
+  const PreviousText = global.Text;
+  class MockText {}
+  global.Text = MockText;
+
+  try {
+    const node = new MockText();
+    node.isConnected = true;
+    node.nodeValue = "Hello world";
+
+    const segment = {
+      node,
+      nodeStart: 0,
+      nodeEnd: 5,
+      text: "Hello"
+    };
+
+    assert.equal(segmentIsLive(segment), true);
+
+    node.nodeValue = "Hallo world";
+    assert.equal(segmentIsLive(segment), false);
+
+    node.nodeValue = "Hello world";
+    node.isConnected = false;
+    assert.equal(segmentIsLive(segment), false);
+  } finally {
+    if (PreviousText === undefined) delete global.Text;
+    else global.Text = PreviousText;
+  }
+});
+
+test("cursor relocation survives a rerender when token prefix is unchanged", () => {
+  const anchor = {
+    blockIndex: 4,
+    segmentIndex: 2,
+    authorRole: "assistant",
+    segments: [
+      { text: "The" },
+      { text: "answer" },
+      { text: "continues" },
+      { text: "here" }
+    ]
+  };
+
+  const freshModel = {
+    blocks: [
+      {
+        index: 7,
+        authorRole: "assistant",
+        segments: [
+          { text: "The" },
+          { text: "answer" },
+          { text: "continues" },
+          { text: "here" },
+          { text: "now" }
+        ]
+      }
+    ]
+  };
+
+  assert.deepEqual(relocateCursorAfterRebuild(anchor, freshModel), {
+    blockIndex: 7,
+    segmentIndex: 2
+  });
+});
+
+test("cursor relocation refuses a changed prefix at the active token", () => {
+  const anchor = {
+    blockIndex: 1,
+    segmentIndex: 1,
+    authorRole: "assistant",
+    segments: [
+      { text: "Original" },
+      { text: "token" },
+      { text: "tail" }
+    ]
+  };
+  const freshModel = {
+    blocks: [
+      {
+        index: 1,
+        authorRole: "assistant",
+        segments: [
+          { text: "Original" },
+          { text: "replacement" },
+          { text: "tail" }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(relocateCursorAfterRebuild(anchor, freshModel), null);
 });
