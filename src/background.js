@@ -453,20 +453,29 @@ function cancelPronunciationTest() {
 
 function stopLinuxPiperForTab(tabId, requestId = null) {
   if (!Number.isInteger(tabId)) return false;
-  const active = [...linuxPiperRequests.entries()].find(([, request]) =>
+
+  const active = [...linuxPiperRequests.entries()].filter(([, request]) =>
     request.tabId === tabId && (!requestId || request.requestId === requestId)
   );
-  if (!active) return false;
+  if (active.length === 0) return false;
 
-  const [activeKey, activeRequest] = active;
-  linuxPiperRequests.delete(activeKey);
+  for (const [activeKey] of active) {
+    linuxPiperRequests.delete(activeKey);
+  }
 
-  // The native helper exits on cancel because onnxruntime inference itself is
-  // not cooperatively cancellable. Forget/disconnect this port immediately so
-  // a click-to-seek or resume cannot race a new synthesis onto a dying helper.
+  // Piper runs one native inference at a time. Cancelling any matching request
+  // terminates the helper process, so retire every request owned by this tab
+  // before disconnecting the port. This prevents stale prefetch entries from
+  // surviving Stop/Quit.
+  const activeRequest = active[0][1];
   const port = linuxPiperPort;
   linuxPiperPort = null;
   linuxPiperHandshake = null;
+  linuxPiperHandshakeReject = null;
+  if (linuxPiperHandshakeTimer !== null) {
+    clearTimeout(linuxPiperHandshakeTimer);
+    linuxPiperHandshakeTimer = null;
+  }
 
   try {
     port?.postMessage({ type: "cancel", requestId: activeRequest.requestId });
@@ -540,6 +549,40 @@ function stopLinuxPiperOffscreenForTab(tabId) {
   }
 
   return stopped;
+}
+
+async function hardStopOffscreenPiperForTab(tabId) {
+  if (!Number.isInteger(tabId)) return false;
+
+  const remembered = stopLinuxPiperOffscreenForTab(tabId);
+  let liveStopped = false;
+
+  try {
+    if (await hasLinuxPiperOffscreenDocument()) {
+      const response = await chrome.runtime.sendMessage({
+        type: "EDGE_TTS_OFFSCREEN_PIPER_STOP_TAB",
+        tabId
+      });
+      liveStopped = response?.accepted === true && response?.stopped === true;
+    }
+  } catch (_error) {
+    // The local session map was already cleared above. This path is a
+    // best-effort belt-and-suspenders stop against a surviving offscreen doc.
+  }
+
+  return remembered || liveStopped;
+}
+
+async function forceStopAudioForTab(tabId) {
+  if (!Number.isInteger(tabId)) return false;
+
+  stopLocalTtsForTab(tabId);
+  stopWinNaturalForTab(tabId);
+  stopLinuxPiperForTab(tabId);
+
+  await hardStopOffscreenPiperForTab(tabId);
+  await releaseAudioForTab(tabId);
+  return true;
 }
 
 async function loadAudioOwner() {
@@ -923,6 +966,21 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     void chrome.runtime.openOptionsPage();
     sendResponse({ opened: true });
     return false;
+  }
+
+  if (message?.type === "EDGE_TTS_FORCE_STOP_TAB_AUDIO") {
+    if (!Number.isInteger(tabId)) {
+      sendResponse({ stopped: false });
+      return false;
+    }
+
+    void forceStopAudioForTab(tabId)
+      .then((stopped) => sendResponse({ stopped }))
+      .catch((error) => sendResponse({
+        stopped: false,
+        error: error?.message || String(error)
+      }));
+    return true;
   }
 
   if (message?.type === "EDGE_TTS_AUDIO_CLAIM") {
