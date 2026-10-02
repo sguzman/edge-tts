@@ -26,7 +26,7 @@ const injectionPromises = new Map();
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
 const PIPER_OFFSCREEN_URL = "src/offscreen/piper-audio.html";
-const READER_SESSION_REVISION = 14;
+const READER_SESSION_REVISION = 15;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
@@ -1243,6 +1243,70 @@ async function injectReader(tabId) {
   });
 }
 
+function reloadTabAndWait(tabId, timeoutMs = 20_000) {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    let timer = null;
+
+    const cleanup = () => {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      try {
+        chrome.tabs.onUpdated.removeListener(onUpdated);
+      } catch (_error) {}
+    };
+
+    const finish = (callback, value) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      callback(value);
+    };
+
+    const onUpdated = (updatedTabId, changeInfo) => {
+      if (updatedTabId === tabId && changeInfo?.status === "complete") {
+        finish(resolve, true);
+      }
+    };
+
+    chrome.tabs.onUpdated.addListener(onUpdated);
+    timer = setTimeout(() => {
+      finish(
+        reject,
+        new Error("Timed out waiting for the page to reload after extension context invalidation.")
+      );
+    }, timeoutMs);
+
+    try {
+      const pendingReload = chrome.tabs.reload(tabId);
+      pendingReload?.catch?.((error) => finish(reject, error));
+    } catch (error) {
+      finish(reject, error);
+    }
+  });
+}
+
+async function injectReaderAndVerify(tabId) {
+  await injectReader(tabId);
+  return readerReady(tabId);
+}
+
+async function recoverReaderAfterDeadContext(tabId) {
+  // Chromium permanently invalidates an already-injected isolated world when
+  // an unpacked extension is reloaded. Re-executing our files in that same
+  // document can appear to succeed while chrome.runtime remains dead. A real
+  // page reload is the only reliable way to obtain a fresh extension world.
+  await reloadTabAndWait(tabId);
+
+  if (!(await injectReaderAndVerify(tabId))) {
+    throw new Error(
+      "Edge Natural TTS could not establish a live extension context after reloading the page."
+    );
+  }
+}
+
 async function ensureReader(tabId) {
   if (await readerReady(tabId)) {
     return;
@@ -1250,7 +1314,22 @@ async function ensureReader(tabId) {
 
   let pending = injectionPromises.get(tabId);
   if (!pending) {
-    pending = injectReader(tabId);
+    pending = (async () => {
+      // Fast path for ordinary first use: inject into the current document and
+      // verify that its chrome.runtime channel is actually alive.
+      if (await injectReaderAndVerify(tabId)) {
+        return;
+      }
+
+      // If executeScript succeeded but the reader still cannot answer a ping,
+      // the document is almost certainly carrying an invalidated extension
+      // world left behind by an extension reload/update. Recover exactly once
+      // by reloading the tab, then inject into the new document.
+      console.warn(
+        "Edge Natural TTS detected a dead extension context; reloading the tab once to recover."
+      );
+      await recoverReaderAfterDeadContext(tabId);
+    })();
     injectionPromises.set(tabId, pending);
   }
 
