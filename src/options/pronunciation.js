@@ -142,13 +142,13 @@
     return String($("#preview-spoken")?.value || "").trim();
   }
 
-  async function ensureTestAudio() {
-    const spokenText = transformedPreviewText();
-    if (!spokenText) {
+  async function ensureTestAudioForSpokenText(spokenText) {
+    const normalizedText = String(spokenText || "").trim();
+    if (!normalizedText) {
       throw new Error("Nothing remains after pronunciation transforms.");
     }
 
-    const cacheKey = spokenText;
+    const cacheKey = normalizedText;
     if (testAudio && testAudioKey === cacheKey && testAudioUrl) {
       return testAudio;
     }
@@ -156,13 +156,12 @@
     revokeTestAudio();
     testAudioKey = "";
     const serial = ++testSynthesisSerial;
-    $("#test-play").disabled = true;
     setTestStatus("Synthesizing Ryan test audio…");
 
     const response = await chrome.runtime.sendMessage({
       type: "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE",
       voiceId: "en_US-ryan-high",
-      text: spokenText
+      text: normalizedText
     });
 
     if (serial !== testSynthesisSerial) {
@@ -205,15 +204,21 @@
     return testAudio;
   }
 
+  async function playSpokenTest(spokenText, statusPrefix = "") {
+    const audio = await ensureTestAudioForSpokenText(spokenText);
+    audio.currentTime = 0;
+    applyTestSpeed();
+    await audio.play();
+    setTestStatus(
+      `${statusPrefix ? `${statusPrefix} · ` : ""}Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
+    );
+    return audio;
+  }
+
   async function playTestAudio() {
+    $("#test-play").disabled = true;
     try {
-      const audio = await ensureTestAudio();
-      audio.currentTime = 0;
-      applyTestSpeed();
-      await audio.play();
-      setTestStatus(
-        `Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
-      );
+      await playSpokenTest(transformedPreviewText());
     } catch (error) {
       setTestStatus(error?.message || String(error), "error");
     } finally {
@@ -327,6 +332,59 @@
     }
   }
 
+  const INLINE_TESTABLE_MAPS = new Set([
+    "pronunciation.customPronunciations",
+    "pronunciation.brandMap",
+    "abbreviations.case",
+    "abbreviations.nocase",
+    "normalization.replacements"
+  ]);
+
+  function inlineRuleTestSource(path, row) {
+    const key = String(row.querySelector("[data-key]")?.value || "").trim();
+    const value = String(row.querySelector("[data-value]")?.value || "").trim();
+    if (!key) {
+      throw new Error("This rule needs a source token before it can be tested.");
+    }
+
+    if (INLINE_TESTABLE_MAPS.has(path)) {
+      const draft = readForm();
+      const result = Pronunciation.transformText(key, draft);
+      return {
+        source: key,
+        spoken: String(result.text || "").trim(),
+        expectedValue: value
+      };
+    }
+
+    if (path === "acronyms.letterSounds") {
+      if (!value) {
+        throw new Error("This letter/digit mapping needs a spoken value.");
+      }
+      return { source: key, spoken: value, expectedValue: value };
+    }
+
+    throw new Error("This rule type needs context and cannot be tested as a standalone token.");
+  }
+
+  async function testMapRow(path, row, button) {
+    button.disabled = true;
+    try {
+      const test = inlineRuleTestSource(path, row);
+      if (!test.spoken) {
+        throw new Error(`${test.source} is dropped by the current rules.`);
+      }
+      await playSpokenTest(
+        test.spoken,
+        `${test.source} → ${test.spoken}`
+      );
+    } catch (error) {
+      setTestStatus(error?.message || String(error), "error");
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   function mapRows(path) {
     return [...document.querySelectorAll(`[data-map="${path}"] tbody tr`)];
   }
@@ -346,10 +404,26 @@
     row.innerHTML = `
       <td><input type="text" data-key></td>
       <td><input type="text" data-value></td>
-      <td><button type="button" data-remove>Remove</button></td>
+      <td class="rule-actions">
+        <button type="button" data-test-rule>Test</button>
+        <button type="button" data-remove>Remove</button>
+      </td>
     `;
     row.querySelector("[data-key]").value = key;
     row.querySelector("[data-value]").value = value;
+
+    const testButton = row.querySelector("[data-test-rule]");
+    const supportsInlineTest =
+      INLINE_TESTABLE_MAPS.has(path) ||
+      path === "acronyms.letterSounds";
+    testButton.hidden = !supportsInlineTest;
+    testButton.title = supportsInlineTest
+      ? "Play this rule using the current unsaved editor state"
+      : "This rule type requires surrounding context";
+    testButton.addEventListener("click", () => {
+      void testMapRow(path, row, testButton);
+    });
+
     row.querySelector("[data-remove]").addEventListener("click", () => {
       row.remove();
       handleRuleChange();
@@ -374,20 +448,56 @@
       <td><input type="text" data-pattern spellcheck="false"></td>
       <td><input type="text" data-replace></td>
       <td><input type="checkbox" data-case-sensitive></td>
+      <td class="regex-test-cell">
+        <input type="text" data-regex-test-source placeholder="Test text">
+        <button type="button" data-test-regex>Test</button>
+      </td>
       <td><button type="button" data-remove>Remove</button></td>
     `;
     row.querySelector("[data-pattern]").value = rule.pattern || "";
     row.querySelector("[data-replace]").value = rule.replace || "";
     row.querySelector("[data-case-sensitive]").checked = rule.caseSensitive === true;
+
+    const testButton = row.querySelector("[data-test-regex]");
+    testButton.addEventListener("click", async () => {
+      testButton.disabled = true;
+      try {
+        if (!validateRegexRow(row)) {
+          throw new Error("Fix the regex before testing it.");
+        }
+        const source = String(
+          row.querySelector("[data-regex-test-source]")?.value || ""
+        ).trim();
+        if (!source) {
+          throw new Error("Enter test text for this regex row.");
+        }
+        const draft = readForm();
+        const result = Pronunciation.transformText(source, draft);
+        const spoken = String(result.text || "").trim();
+        if (!spoken) {
+          throw new Error("The current rules drop this regex test text.");
+        }
+        await playSpokenTest(spoken, `${source} → ${spoken}`);
+      } catch (error) {
+        setTestStatus(error?.message || String(error), "error");
+      } finally {
+        testButton.disabled = false;
+      }
+    });
+
     row.querySelector("[data-remove]").addEventListener("click", () => {
       row.remove();
       handleRuleChange();
     });
-    row.addEventListener("input", () => {
+    row.addEventListener("input", (event) => {
+      if (event.target?.matches?.("[data-regex-test-source]")) return;
       validateRegexRow(row);
       handleRuleChange();
     });
-    row.addEventListener("change", handleRuleChange);
+    row.addEventListener("change", (event) => {
+      if (event.target?.matches?.("[data-regex-test-source]")) return;
+      handleRuleChange();
+    });
     body.appendChild(row);
     validateRegexRow(row);
   }
