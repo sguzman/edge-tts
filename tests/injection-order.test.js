@@ -58,6 +58,18 @@ test("fresh injection does not spend an extra readiness round trip before Start"
   assert.doesNotMatch(injectSource, /readerReady\(/);
 });
 
+test("dead extension contexts force one real tab reload before reinjection", () => {
+  assert.match(source, /function reloadTabAndWait\(/);
+  assert.match(source, /chrome\.tabs\.reload\(tabId\)/);
+  assert.match(source, /async function injectReaderAndVerify\(/);
+  assert.match(source, /await reloadTabAndWait\(tabId\)/);
+  assert.match(source, /await recoverReaderAfterDeadContext\(tabId\)/);
+  assert.match(
+    source,
+    /if \(await injectReaderAndVerify\(tabId\)\) \{[\s\S]*?return;[\s\S]*?\}/
+  );
+});
+
 test("Quit no longer asks the background to remove CSS and force full reinjection", () => {
   assert.equal(source.includes("EDGE_TTS_SESSION_QUIT"), false);
   assert.equal(source.includes("removeCSS"), false);
