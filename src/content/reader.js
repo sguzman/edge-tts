@@ -658,9 +658,24 @@
       }
 
       if (this.paused) {
+        const restartFromFreshModel = this.modelStale === true;
+        if (restartFromFreshModel) {
+          if (!this.rebuildAfterStaleModel()) {
+            this.stopped = true;
+            this.paused = false;
+            this.toolbar.setStopped();
+            this.toolbar.setStatus("No readable text found after page update");
+            return;
+          }
+        }
+
         this.paused = false;
         this.toolbar.setPaused(false);
-        this.toolbar.setStatus("Resuming…");
+        this.toolbar.setStatus(
+          restartFromFreshModel
+            ? "Rebuilding after page update…"
+            : "Resuming…"
+        );
 
         const granted = await this.claimAudioOwnership();
         if (
@@ -674,6 +689,12 @@
         }
 
         if (granted) {
+          if (restartFromFreshModel) {
+            this.toolbar.setStatus("Restarting on fresh page text…");
+            this.speakCurrentPosition();
+            return;
+          }
+
           let resumed = false;
           try {
             resumed = await Promise.resolve(
