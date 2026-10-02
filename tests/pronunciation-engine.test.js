@@ -137,3 +137,19 @@ test("schema 1 acronym defaults migrate to speech-safe separators", () => {
   assert.equal(migrated.acronyms.letterSeparator, ", ");
   assert.equal(migrated.pronunciation.brandMap.SQLite, "S, Q, Lite");
 });
+
+
+test("user custom pronunciations survive normalization and schema migration", () => {
+  const config = pronunciation.cloneDefaultConfig();
+  config.schemaVersion = 1;
+  config.pronunciation.customPronunciations = {
+    Hamas: "[[ həˈmɑːs ]]",
+    Huawei: "[[ hwɑːˈweɪ ]]"
+  };
+
+  const normalized = pronunciation.normalizeConfig(config);
+  assert.deepEqual(normalized.pronunciation.customPronunciations, {
+    Hamas: "[[ həˈmɑːs ]]",
+    Huawei: "[[ hwɑːˈweɪ ]]"
+  });
+});
