@@ -1288,19 +1288,15 @@ function reloadTabAndWait(tabId, timeoutMs = 20_000) {
   });
 }
 
-async function injectReaderAndVerify(tabId) {
-  await injectReader(tabId);
-  return readerReady(tabId);
-}
-
 async function recoverReaderAfterDeadContext(tabId) {
   // Chromium permanently invalidates an already-injected isolated world when
   // an unpacked extension is reloaded. Re-executing our files in that same
   // document can appear to succeed while chrome.runtime remains dead. A real
   // page reload is the only reliable way to obtain a fresh extension world.
   await reloadTabAndWait(tabId);
+  await injectReader(tabId);
 
-  if (!(await injectReaderAndVerify(tabId))) {
+  if (!(await readerReady(tabId))) {
     throw new Error(
       "Edge Natural TTS could not establish a live extension context after reloading the page."
     );
@@ -1314,22 +1310,10 @@ async function ensureReader(tabId) {
 
   let pending = injectionPromises.get(tabId);
   if (!pending) {
-    pending = (async () => {
-      // Fast path for ordinary first use: inject into the current document and
-      // verify that its chrome.runtime channel is actually alive.
-      if (await injectReaderAndVerify(tabId)) {
-        return;
-      }
-
-      // If executeScript succeeded but the reader still cannot answer a ping,
-      // the document is almost certainly carrying an invalidated extension
-      // world left behind by an extension reload/update. Recover exactly once
-      // by reloading the tab, then inject into the new document.
-      console.warn(
-        "Edge Natural TTS detected a dead extension context; reloading the tab once to recover."
-      );
-      await recoverReaderAfterDeadContext(tabId);
-    })();
+    // Keep the ordinary startup path minimal. executeScript resolves only
+    // after content-script.js has synchronously installed the toggle listener,
+    // so a post-injection ping here is pure latency.
+    pending = injectReader(tabId);
     injectionPromises.set(tabId, pending);
   }
 
@@ -1342,12 +1326,32 @@ async function ensureReader(tabId) {
   }
 }
 
+async function toggleReader(tabId) {
+  await ensureReader(tabId);
+
+  try {
+    await chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_TOGGLE_V2" });
+    return;
+  } catch (error) {
+    // A freshly injected reader that still cannot receive messages is the
+    // signature of an invalidated isolated world left behind by an unpacked
+    // extension reload. Recover only on this exceptional path so normal
+    // startup never pays an extra readiness round trip.
+    console.warn(
+      "Edge Natural TTS toggle could not reach the injected reader; reloading the tab once to recover.",
+      error
+    );
+  }
+
+  await recoverReaderAfterDeadContext(tabId);
+  await chrome.tabs.sendMessage(tabId, { type: "EDGE_TTS_TOGGLE_V2" });
+}
+
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id) return;
 
   try {
-    await ensureReader(tab.id);
-    await chrome.tabs.sendMessage(tab.id, { type: "EDGE_TTS_TOGGLE_V2" });
+    await toggleReader(tab.id);
   } catch (error) {
     console.warn("Edge Natural TTS could not run on this page.", error);
   }
