@@ -58,16 +58,31 @@ test("fresh injection does not spend an extra readiness round trip before Start"
   assert.doesNotMatch(injectSource, /readerReady\(/);
 });
 
-test("dead extension contexts force one real tab reload before reinjection", () => {
+test("fresh injection does not verify with a second ping before toggle", () => {
+  const ensureStart = source.indexOf("async function ensureReader");
+  const toggleStart = source.indexOf("async function toggleReader");
+  const ensureSource = source.slice(ensureStart, toggleStart);
+
+  assert.ok(ensureStart >= 0 && toggleStart > ensureStart);
+  assert.match(ensureSource, /pending = injectReader\(tabId\)/);
+  assert.equal(ensureSource.includes("injectReaderAndVerify"), false);
+  assert.equal((ensureSource.match(/readerReady\(tabId\)/g) || []).length, 1);
+});
+
+test("dead extension contexts recover only after the first toggle delivery fails", () => {
+  const toggleStart = source.indexOf("async function toggleReader");
+  const actionStart = source.indexOf("chrome.action.onClicked");
+  const toggleSource = source.slice(toggleStart, actionStart);
+
   assert.match(source, /function reloadTabAndWait\(/);
   assert.match(source, /chrome\.tabs\.reload\(tabId\)/);
-  assert.match(source, /async function injectReaderAndVerify\(/);
   assert.match(source, /await reloadTabAndWait\(tabId\)/);
-  assert.match(source, /await recoverReaderAfterDeadContext\(tabId\)/);
+  assert.match(toggleSource, /await ensureReader\(tabId\)/);
   assert.match(
-    source,
-    /if \(await injectReaderAndVerify\(tabId\)\) \{[\s\S]*?return;[\s\S]*?\}/
+    toggleSource,
+    /await chrome\.tabs\.sendMessage\(tabId, \{ type: "EDGE_TTS_TOGGLE_V2" \}\);/
   );
+  assert.match(toggleSource, /await recoverReaderAfterDeadContext\(tabId\)/);
 });
 
 test("Quit no longer asks the background to remove CSS and force full reinjection", () => {
