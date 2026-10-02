@@ -166,3 +166,43 @@ test("page reader no longer owns the inter-sentence timer", () => {
   assert.doesNotMatch(body, /setTimeout/);
   assert.match(body, /_speakLinuxPiperChunk\(activeGeneration\)/);
 });
+
+
+test("pronunciation tester treats paused reader playback as idle", () => {
+  assert.match(background, /function pausedLinuxPiperTabIds\(\)/);
+  assert.match(background, /session\?\.state === "paused"/);
+  assert.match(background, /function activeLinuxPiperReaderUse\(\)/);
+  assert.match(
+    background,
+    /session\?\.state !== "paused"/
+  );
+  assert.match(background, /cancelPausedLinuxPiperPrefetch\(\)/);
+  assert.doesNotMatch(
+    background,
+    /linuxPiperOffscreenSessions\.size > 0/
+  );
+});
+
+test("offscreen reader sessions track real playing and paused state", () => {
+  assert.match(background, /state: "starting"/);
+  assert.match(background, /eventType === "paused"/);
+  assert.match(background, /"sentence-pause"/);
+  assert.match(background, /\["started", "resumed", "boundary"\]\.includes\(eventType\)/);
+  assert.match(
+    background,
+    /message\.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE"[\s\S]*?session\.state = "paused"/
+  );
+  assert.match(
+    background,
+    /message\.type === "EDGE_TTS_PIPER_OFFSCREEN_RESUME"[\s\S]*?session\.state = "playing"/
+  );
+});
+
+test("new global offscreen playback forgets superseded stale session ids", () => {
+  assert.match(background, /function forgetSupersededOffscreenSessions/);
+  assert.match(background, /reason: "superseded"/);
+  assert.match(
+    background,
+    /forgetSupersededOffscreenSessions\(playbackId\)/
+  );
+});
