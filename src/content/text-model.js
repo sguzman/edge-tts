@@ -55,6 +55,8 @@
     "footer",
     "[hidden]",
     "[aria-hidden='true']",
+    "[role='status']",
+    "[role='alert']",
     "[data-edge-tts-ui]",
     EDITABLE_SELECTOR
   ].join(",");
