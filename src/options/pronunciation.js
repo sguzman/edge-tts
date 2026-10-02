@@ -44,6 +44,26 @@
     element.className = kind;
   }
 
+  function backupStatusText() {
+    const backup = Pronunciation.getLastBackupStatus?.();
+    if (!backup) return "";
+    if (backup.ok) {
+      return backup.path
+        ? ` · durable backup: ${backup.path}`
+        : " · durable backup OK";
+    }
+    return backup.error
+      ? ` · WARNING: durable backup failed: ${backup.error}`
+      : " · WARNING: durable backup unavailable";
+  }
+
+  function savedStatusMessage(prefix, config) {
+    return (
+      `${prefix} · revision ${Number(config?.revision) || 0}` +
+      backupStatusText()
+    );
+  }
+
   function showSaveToast(message, kind = "ok") {
     const toast = $("#save-toast");
     if (!toast) return;
@@ -585,13 +605,16 @@
         savedRevision = targetRevision;
 
         if (editRevision === targetRevision) {
-          setStatus(
-            `Saved automatically · revision ${Number(config.revision) || 0}.`,
-            "ok"
+          const message = savedStatusMessage(
+            "Saved automatically",
+            config
           );
+          const backup = Pronunciation.getLastBackupStatus?.();
+          setStatus(message, backup?.ok === false ? "error" : "ok");
           showSaveToast(
-            `Saved · revision ${Number(config.revision) || 0}`,
-            "ok"
+            `Saved · revision ${Number(config.revision) || 0}` +
+              (backup?.ok === false ? " · backup failed" : " · backed up"),
+            backup?.ok === false ? "error" : "ok"
           );
         } else {
           scheduleAutosave();
@@ -620,13 +643,13 @@
     config = await Pronunciation.saveConfig(draft);
     savedRevision = targetRevision;
     $("#raw-json").value = JSON.stringify(config, null, 2);
-    setStatus(
-      `Saved · revision ${Number(config.revision) || 0}.`,
-      "ok"
-    );
+    const message = savedStatusMessage("Saved", config);
+    const backup = Pronunciation.getLastBackupStatus?.();
+    setStatus(message, backup?.ok === false ? "error" : "ok");
     showSaveToast(
-      `Saved · revision ${Number(config.revision) || 0}`,
-      "ok"
+      `Saved · revision ${Number(config.revision) || 0}` +
+        (backup?.ok === false ? " · backup failed" : " · backed up"),
+      backup?.ok === false ? "error" : "ok"
     );
   }
 
@@ -735,8 +758,30 @@
     .then((loaded) => {
       config = loaded;
       render(config);
+
+      const source = Pronunciation.getLastLoadSource?.() || "unknown";
+      if (source === "durable-backup") {
+        const backup = Pronunciation.getLastBackupStatus?.();
+        setStatus(
+          `Recovered pronunciation rules from durable backup · revision ${Number(config.revision) || 0}` +
+            (backup?.path ? ` · ${backup.path}` : ""),
+          "ok"
+        );
+        showSaveToast("Recovered pronunciation rules from durable backup", "ok");
+        return;
+      }
+
+      if (source === "defaults") {
+        setStatus(
+          "No saved pronunciation config was found for this extension identity; defaults are loaded. Custom rules have NOT been intentionally deleted.",
+          "error"
+        );
+        showSaveToast("No saved custom rules found · defaults loaded", "error");
+        return;
+      }
+
       setStatus(
-        `Rules loaded · revision ${Number(config.revision) || 0}.`,
+        `Rules loaded from extension storage · revision ${Number(config.revision) || 0}.`,
         "ok"
       );
     })
