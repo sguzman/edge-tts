@@ -258,6 +258,65 @@ async function linuxPiperPronunciationConfigRpc(type, payload = {}) {
 }
 
 
+function pausedLinuxPiperTabIds() {
+  const ids = new Set();
+  for (const session of linuxPiperOffscreenSessions.values()) {
+    if (
+      session?.state === "paused" &&
+      Number.isInteger(session?.tabId)
+    ) {
+      ids.add(session.tabId);
+    }
+  }
+  return ids;
+}
+
+function activeLinuxPiperReaderUse() {
+  const pausedTabs = pausedLinuxPiperTabIds();
+
+  const activePlayback = [...linuxPiperOffscreenSessions.values()].some(
+    (session) =>
+      Number.isInteger(session?.tabId) &&
+      session?.state !== "paused"
+  );
+  if (activePlayback) return true;
+
+  return [...linuxPiperRequests.values()].some(
+    (request) =>
+      Number.isInteger(request?.tabId) &&
+      !pausedTabs.has(request.tabId)
+  );
+}
+
+function cancelPausedLinuxPiperPrefetch() {
+  const pausedTabs = pausedLinuxPiperTabIds();
+  for (const tabId of pausedTabs) {
+    while (
+      [...linuxPiperRequests.values()].some(
+        (request) => request?.tabId === tabId
+      )
+    ) {
+      if (!stopLinuxPiperForTab(tabId)) break;
+    }
+  }
+}
+
+function forgetSupersededOffscreenSessions(nextPlaybackId) {
+  for (const [existingId, session] of linuxPiperOffscreenSessions.entries()) {
+    if (existingId === nextPlaybackId) continue;
+    linuxPiperOffscreenSessions.delete(existingId);
+
+    if (Number.isInteger(session?.tabId)) {
+      void chrome.tabs.sendMessage(session.tabId, {
+        type: "EDGE_TTS_PIPER_OFFSCREEN_EVENT",
+        playbackId: existingId,
+        event: { type: "stopped", reason: "superseded" }
+      }).catch(() => {});
+    }
+  }
+}
+
+
 async function synthesizePronunciationTest(text, voiceId) {
   const normalizedText = String(text || "").trim();
   const normalizedVoiceId = String(voiceId || "en_US-ryan-high").trim();
@@ -266,16 +325,16 @@ async function synthesizePronunciationTest(text, voiceId) {
     throw new Error("Pronunciation test text is empty.");
   }
 
-  if (
-    [...linuxPiperRequests.values()].some((request) =>
-      Number.isInteger(request.tabId)
-    ) ||
-    linuxPiperOffscreenSessions.size > 0
-  ) {
+  if (activeLinuxPiperReaderUse()) {
     throw new Error(
-      "Piper is busy with an active reader. Stop the reader before running a pronunciation test."
+      "Piper is busy with actively playing reader audio. Pause or stop the reader before running a pronunciation test."
     );
   }
+
+  // A paused reader keeps its already-synthesized WAV alive for in-place
+  // resume. That is not active Piper use. Retire only speculative native
+  // prefetch work from paused tabs so the Options tester can synthesize.
+  cancelPausedLinuxPiperPrefetch();
 
   if (pronunciationTestRequestId) {
     throw new Error("A pronunciation test is already synthesizing.");
@@ -700,11 +759,22 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
     // Rehydrate in-memory routing after a service-worker restart. The offscreen
     // audio document survives independently and carries its owning tab id.
-    if (!session) {
-      linuxPiperOffscreenSessions.set(playbackId, { tabId: targetTabId });
-    }
-
     const event = message.event || {};
+    const eventType = String(event.type || "");
+    const nextState =
+      eventType === "paused"
+        ? "paused"
+        : eventType === "sentencePause"
+          ? "sentence-pause"
+          : ["started", "resumed", "boundary"].includes(eventType)
+            ? "playing"
+            : session?.state || "playing";
+
+    linuxPiperOffscreenSessions.set(playbackId, {
+      tabId: targetTabId,
+      state: nextState
+    });
+
     void chrome.tabs.sendMessage(targetTabId, {
       type: "EDGE_TTS_PIPER_OFFSCREEN_EVENT",
       playbackId,
@@ -733,7 +803,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
 
     stopLinuxPiperOffscreenForTab(tabId);
-    linuxPiperOffscreenSessions.set(playbackId, { tabId });
+    // The offscreen document owns one media element globally. Any other
+    // remembered playback id is necessarily stale/superseded.
+    forgetSupersededOffscreenSessions(playbackId);
+    linuxPiperOffscreenSessions.set(playbackId, {
+      tabId,
+      state: "starting"
+    });
 
     void sendLinuxPiperOffscreenCommand({
       type: "EDGE_TTS_OFFSCREEN_PIPER_PLAY",
@@ -787,7 +863,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // Do not require the volatile in-memory session map here. Chromium may
     // restart the service worker while the offscreen document keeps a paused
     // WAV alive. The offscreen document itself validates playbackId.
-    linuxPiperOffscreenSessions.set(playbackId, { tabId });
+    const existingSession = linuxPiperOffscreenSessions.get(playbackId);
+    linuxPiperOffscreenSessions.set(playbackId, {
+      tabId,
+      state: existingSession?.state || "playing"
+    });
 
     const internalType = String(message.type).replace(
       "EDGE_TTS_PIPER_OFFSCREEN_",
@@ -804,6 +884,17 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           linuxPiperOffscreenSessions.delete(playbackId);
           sendResponse(response || { accepted: true });
           return;
+        }
+
+        if (response?.accepted === true) {
+          const session = linuxPiperOffscreenSessions.get(playbackId);
+          if (session) {
+            if (message.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE") {
+              session.state = "paused";
+            } else if (message.type === "EDGE_TTS_PIPER_OFFSCREEN_RESUME") {
+              session.state = "playing";
+            }
+          }
         }
 
         // Pause/resume/rate/volume require an explicit acknowledgement from
