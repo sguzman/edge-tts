@@ -257,6 +257,7 @@
             error
           );
         }
+        void this.forceStopTabAudio();
         this.toolbar?.setPaused?.(true);
         this.toolbar?.setStatus?.(
           "Paused — page text changed; Resume will rebuild"
@@ -283,6 +284,7 @@
         );
       }
 
+      void this.forceStopTabAudio();
       this.releaseAudioOwnership();
       this.stopped = false;
       this.paused = true;
@@ -807,6 +809,7 @@
       this.clearResumeWatchdog();
       this.activeBatchEndBlockIndex = -1;
       this.discardLocalSpeechState();
+      void this.forceStopTabAudio();
       this.highlighter.clear();
       this.modelStale = false;
       this.staleCursorAnchor = null;
