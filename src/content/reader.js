@@ -158,6 +158,197 @@
       });
     }
 
+    disconnectModelMutationObserver() {
+      try {
+        this.modelMutationObserver?.disconnect?.();
+      } catch (_error) {}
+      this.modelMutationObserver = null;
+    }
+
+    activeModelBlockRange() {
+      const start = Math.max(0, Number(this.currentBlockIndex) || 0);
+      const rawEnd = Number(this.activeBatchEndBlockIndex);
+      const end =
+        Number.isInteger(rawEnd) && rawEnd >= start
+          ? rawEnd
+          : start;
+      return { start, end };
+    }
+
+    mutationTouchesActiveModel(mutation) {
+      const model = this.model;
+      if (!model?.blocks?.length) return false;
+
+      const { start, end } = this.activeModelBlockRange();
+      const activeBlocks = model.blocks.slice(start, end + 1);
+      if (!activeBlocks.length) return false;
+
+      if (mutation?.type === "characterData") {
+        const block = model.nodeToBlock?.get?.(mutation.target);
+        return Boolean(
+          block &&
+          block.index >= start &&
+          block.index <= end
+        );
+      }
+
+      if (mutation?.type !== "childList") return false;
+
+      const target = mutation.target;
+      if (
+        activeBlocks.some((block) =>
+          block?.element === target ||
+          block?.element?.contains?.(target)
+        )
+      ) {
+        return true;
+      }
+
+      for (const removed of mutation.removedNodes || []) {
+        if (
+          activeBlocks.some((block) =>
+            removed === block?.element ||
+            removed?.contains?.(block?.element)
+          )
+        ) {
+          return true;
+        }
+      }
+
+      return false;
+    }
+
+    captureStaleCursorAnchor() {
+      if (this.staleCursorAnchor || !this.model) return;
+      const block = this.model.blocks?.[this.currentBlockIndex];
+      if (!block?.segments?.length) return;
+
+      this.staleCursorAnchor = {
+        blockIndex: block.index,
+        segmentIndex: Math.max(
+          0,
+          Math.min(
+            Number(this.currentSegmentIndex) || 0,
+            block.segments.length - 1
+          )
+        ),
+        authorRole: String(block.authorRole || ""),
+        segments: block.segments.map((segment) => ({
+          text: String(segment.text || "")
+        }))
+      };
+    }
+
+    markModelStale(reason = "page-text-mutated") {
+      this.captureStaleCursorAnchor();
+      this.modelStale = true;
+      this.highlighter?.clear?.();
+
+      if (this.stopped) return false;
+
+      if (this.paused) {
+        this.toolbar?.setPaused?.(true);
+        this.toolbar?.setStatus?.(
+          "Paused — page text changed; Resume will rebuild"
+        );
+        return true;
+      }
+
+      this.lifecycleSerial += 1;
+      this.clearResumeWatchdog();
+      this.clearReliabilityTimers?.();
+      this.clearPlaybackLivenessWatchdog?.();
+      if (Number.isFinite(Number(this.batchRequestSerial))) {
+        this.batchRequestSerial += 1;
+      }
+      this.activeBatchRequest = null;
+      this.activeBatchEndBlockIndex = -1;
+
+      try {
+        this.discardLocalSpeechState();
+      } catch (error) {
+        console.warn(
+          "Edge Natural TTS could not cancel stale-DOM playback.",
+          error
+        );
+      }
+
+      this.releaseAudioOwnership();
+      this.stopped = false;
+      this.paused = true;
+      this.toolbar?.setPaused?.(true);
+      this.toolbar?.setStatus?.(
+        "Paused — page text changed; Resume will rebuild"
+      );
+
+      console.warn(
+        "Edge Natural TTS paused because its DOM model became stale (" +
+          String(reason) +
+          ")."
+      );
+      return true;
+    }
+
+    observeModelMutations() {
+      this.disconnectModelMutationObserver();
+      if (
+        !this.enabled ||
+        this.stopped ||
+        !this.model?.blocks?.length ||
+        typeof root.MutationObserver !== "function" ||
+        !document.body
+      ) {
+        return;
+      }
+
+      this.modelMutationObserver = new root.MutationObserver((mutations) => {
+        if (!this.enabled || this.stopped || this.modelStale) return;
+
+        if (
+          mutations.some((mutation) =>
+            this.mutationTouchesActiveModel(mutation)
+          )
+        ) {
+          this.markModelStale("active-readable-dom-mutated");
+        }
+      });
+
+      this.modelMutationObserver.observe(document.body, {
+        subtree: true,
+        childList: true,
+        characterData: true
+      });
+    }
+
+    restoreFreshCursorAfterMutation() {
+      const relocated = relocateCursorAfterRebuild?.(
+        this.staleCursorAnchor,
+        this.model
+      );
+      if (relocated) {
+        this.currentBlockIndex = relocated.blockIndex;
+        this.currentSegmentIndex = relocated.segmentIndex;
+        return true;
+      }
+
+      const startBlock = firstBlockNearViewport(this.model?.blocks || []);
+      if (!startBlock) return false;
+      this.currentBlockIndex = startBlock.index;
+      this.currentSegmentIndex = 0;
+      return true;
+    }
+
+    rebuildAfterStaleModel() {
+      this.disconnectModelMutationObserver();
+      this.rebuildModel();
+      const restored = this.restoreFreshCursorAfterMutation();
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
+      this.highlighter?.clear?.();
+      this.observeModelMutations();
+      return restored;
+    }
+
     async toggle() {
       if (this.enabled) {
         this.close();
