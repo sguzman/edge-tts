@@ -357,9 +357,12 @@
       };
     }
 
-    if (path === "acronyms.letterSounds") {
+    if (
+      path === "acronyms.letterSounds" ||
+      path === "technical.pathWords"
+    ) {
       if (!value) {
-        throw new Error("This letter/digit mapping needs a spoken value.");
+        throw new Error("This mapping needs a spoken value.");
       }
       return { source: key, spoken: value, expectedValue: value };
     }
@@ -415,7 +418,8 @@
     const testButton = row.querySelector("[data-test-rule]");
     const supportsInlineTest =
       INLINE_TESTABLE_MAPS.has(path) ||
-      path === "acronyms.letterSounds";
+      path === "acronyms.letterSounds" ||
+      path === "technical.pathWords";
     testButton.hidden = !supportsInlineTest;
     testButton.title = supportsInlineTest
       ? "Play this rule using the current unsaved editor state"
