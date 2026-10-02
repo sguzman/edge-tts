@@ -557,6 +557,18 @@
       }
     }
 
+    forceStopTabAudio() {
+      try {
+        return Promise.resolve(
+          chrome.runtime.sendMessage({
+            type: "EDGE_TTS_FORCE_STOP_TAB_AUDIO"
+          })
+        ).catch(() => ({ stopped: false }));
+      } catch (_error) {
+        return Promise.resolve({ stopped: false });
+      }
+    }
+
     suspendForOtherTab() {
       this.audioClaimSerial += 1;
       const shouldRemainPaused = !this.stopped;
@@ -618,17 +630,21 @@
       this.stopped = true;
       this.paused = false;
 
-      // Commit user-visible state before touching any transport. Stop must work
-      // even if a native helper is hung or has disappeared.
+      // Commit user-visible state first, then tear down local transport while
+      // this tab still owns it. Finally ask the background to hard-stop every
+      // per-tab backend/offscreen session by owner tab id so stale playback ids
+      // cannot survive Stop or Quit.
       this.toolbar.setStopped();
       this.highlighter.clear();
-      this.releaseAudioOwnership();
 
       try {
         this.discardLocalSpeechState();
       } catch (error) {
         console.warn("Edge Natural TTS transport failed while stopping.", error);
       }
+
+      void this.forceStopTabAudio();
+      this.releaseAudioOwnership();
     }
 
     async playPause() {
@@ -742,25 +758,46 @@
         }
       } else {
         this.clearResumeWatchdog();
-        this.paused = true;
-        this.toolbar.setPaused(true);
-        this.toolbar.setStatus("Paused");
-        this.releaseAudioOwnership();
+        this.toolbar.setStatus("Pausing…");
 
         let pausedInPlace = false;
         try {
-          pausedInPlace = this.speech?.pauseInPlace?.() === true;
+          pausedInPlace = await Promise.resolve(
+            this.speech?.pauseInPlace?.()
+          );
         } catch (error) {
           console.warn("Edge Natural TTS in-place pause failed.", error);
+          pausedInPlace = false;
         }
 
-        if (!pausedInPlace) {
-          try {
-            this.discardLocalSpeechState();
-          } catch (error) {
-            console.warn("Edge Natural TTS transport failed while pausing.", error);
-          }
+        if (
+          lifecycle !== this.lifecycleSerial ||
+          this.stopped ||
+          this.quitRequested
+        ) {
+          return;
         }
+
+        this.paused = true;
+        this.toolbar.setPaused(true);
+
+        if (pausedInPlace === true) {
+          this.toolbar.setStatus("Paused");
+          this.releaseAudioOwnership();
+          return;
+        }
+
+        // If the media player did not positively acknowledge pause, do not
+        // leave audible speech running. Kill both local state and the
+        // background/offscreen session, then resume later from the cursor.
+        try {
+          this.discardLocalSpeechState();
+        } catch (error) {
+          console.warn("Edge Natural TTS transport failed while pausing.", error);
+        }
+        await this.forceStopTabAudio();
+        this.releaseAudioOwnership();
+        this.toolbar.setStatus("Paused — playback hard-stopped");
       }
     }
 
