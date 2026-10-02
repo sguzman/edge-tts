@@ -59,6 +59,14 @@
     EDITABLE_SELECTOR
   ].join(",");
 
+  const A11Y_ONLY_SELECTOR = [
+    ".sr-only",
+    "[data-radix-visually-hidden]",
+    "[data-visually-hidden='true']",
+    "[class*='visually-hidden']",
+    "[class*='screen-reader-only']"
+  ].join(",");
+
   const CHATGPT_MESSAGE_SELECTOR = [
     "[data-message-author-role='user']",
     "[data-message-author-role='assistant']"
@@ -210,6 +218,44 @@
     return sentences;
   }
 
+  function numericCssPixels(value) {
+    const parsed = Number.parseFloat(String(value || ""));
+    return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
+  }
+
+  function isVisuallyHiddenElement(element, computedStyle = null) {
+    if (!(element instanceof Element)) return true;
+    if (element.closest(A11Y_ONLY_SELECTOR)) return true;
+
+    const style = computedStyle || getComputedStyle(element);
+    if (Number(style.opacity) === 0) return true;
+
+    const clip = String(style.clip || "").replace(/\s+/g, "").toLowerCase();
+    const clipPath = String(style.clipPath || "")
+      .replace(/\s+/g, "")
+      .toLowerCase();
+
+    if (
+      clip === "rect(0px,0px,0px,0px)" ||
+      clip === "rect(0,0,0,0)" ||
+      clipPath === "inset(50%)" ||
+      clipPath === "inset(100%)"
+    ) {
+      return true;
+    }
+
+    const width = numericCssPixels(style.width);
+    const height = numericCssPixels(style.height);
+    const onePixelClip =
+      (style.position === "absolute" || style.position === "fixed") &&
+      width <= 1 &&
+      height <= 1 &&
+      style.overflow === "hidden" &&
+      (style.whiteSpace === "nowrap" || clip.includes("rect("));
+
+    return onePixelClip;
+  }
+
   function isElementReadable(element, visibilityCache) {
     if (!(element instanceof Element)) {
       return false;
@@ -229,7 +275,8 @@
       readable =
         style.display !== "none" &&
         style.visibility !== "hidden" &&
-        style.contentVisibility !== "hidden";
+        style.contentVisibility !== "hidden" &&
+        !isVisuallyHiddenElement(element, style);
     }
 
     visibilityCache?.set(element, readable);
@@ -609,6 +656,7 @@
     sentenceRanges,
     siteProfileForHostname,
     collectXCandidates,
+    isVisuallyHiddenElement,
     tokenizeText
   };
 });
