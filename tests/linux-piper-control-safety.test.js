@@ -6,6 +6,8 @@ const path = require("node:path");
 const reader = fs.readFileSync(path.join(__dirname, "..", "src", "content", "reader.js"), "utf8");
 const piperEngine = fs.readFileSync(path.join(__dirname, "..", "src", "content", "linux-piper-engine.js"), "utf8");
 const piperHost = fs.readFileSync(path.join(__dirname, "..", "native", "linux-piper", "linux_piper_host.py"), "utf8");
+const background = fs.readFileSync(path.join(__dirname, "..", "src", "background.js"), "utf8");
+const offscreen = fs.readFileSync(path.join(__dirname, "..", "src", "offscreen", "piper-audio.js"), "utf8");
 
 test("Piper uses real sentence chunks with bounded synthesis time", () => {
   assert.match(piperEngine, /createPiperSentenceChunks/);
@@ -20,19 +22,30 @@ test("Piper native cancellation is process-authoritative", () => {
   assert.match(piperHost, /os\._exit\(0\)/);
 });
 
-test("reader commits Stop and Pause state before native cancellation", () => {
+test("Stop cancels local transport before releasing ownership and also hard-stops the tab", () => {
   const stopStart = reader.indexOf("    stop() {");
   const playPauseStart = reader.indexOf("    async playPause() {");
   assert.ok(stopStart >= 0 && playPauseStart > stopStart);
 
   const stopBody = reader.slice(stopStart, playPauseStart);
-  assert.ok(stopBody.indexOf("this.toolbar.setStopped()") < stopBody.indexOf("this.discardLocalSpeechState()"));
+  const cancelAt = stopBody.indexOf("this.discardLocalSpeechState()");
+  const hardStopAt = stopBody.indexOf("this.forceStopTabAudio()");
+  const releaseAt = stopBody.indexOf("this.releaseAudioOwnership()");
 
-  const pauseBody = reader.slice(playPauseStart, reader.indexOf("    refreshText() {", playPauseStart));
-  const pauseStatus = pauseBody.lastIndexOf('this.toolbar.setStatus("Paused")');
-  const pauseCancel = pauseBody.lastIndexOf("this.discardLocalSpeechState()");
-  assert.ok(pauseStatus >= 0);
-  assert.ok(pauseCancel > pauseStatus);
+  assert.ok(cancelAt >= 0);
+  assert.ok(hardStopAt > cancelAt);
+  assert.ok(releaseAt > cancelAt);
+});
+
+test("Pause requires acknowledgement and hard-stops playback if acknowledgement fails", () => {
+  const playPauseStart = reader.indexOf("    async playPause() {");
+  const refreshStart = reader.indexOf("    refreshText() {", playPauseStart);
+  const body = reader.slice(playPauseStart, refreshStart);
+
+  assert.match(body, /await Promise\.resolve\([\s\S]*?pauseInPlace/);
+  assert.match(body, /pausedInPlace === true/);
+  assert.match(body, /await this\.forceStopTabAudio\(\)/);
+  assert.match(body, /Paused — playback hard-stopped/);
 });
 
 test("reader invalidates stale startup work on lifecycle changes", () => {
@@ -87,4 +100,23 @@ test("cold Piper startup gets exactly one automatic retry before surfacing failu
   assert.match(reader, /this\.initialPiperRetryRemaining -= 1/);
   assert.match(reader, /retrying once/);
   assert.match(reader, /}, 300\);/);
+});
+
+
+test("background hard-stop does not depend on a remembered playback id", () => {
+  assert.match(background, /EDGE_TTS_FORCE_STOP_TAB_AUDIO/);
+  assert.match(background, /function forceStopAudioForTab/);
+  assert.match(background, /hardStopOffscreenPiperForTab/);
+  assert.match(offscreen, /EDGE_TTS_OFFSCREEN_PIPER_STOP_TAB/);
+  assert.match(offscreen, /ownerTabId === targetTabId/);
+});
+
+test("hard-stop retires every native Piper request owned by the tab", () => {
+  const start = background.indexOf("function stopLinuxPiperForTab");
+  const end = background.indexOf("async function hasLinuxPiperOffscreenDocument", start);
+  const body = background.slice(start, end);
+
+  assert.match(body, /\.filter\(\(\[, request\]\) =>/);
+  assert.match(body, /for \(const \[activeKey\] of active\)/);
+  assert.match(body, /linuxPiperRequests\.delete\(activeKey\)/);
 });
