@@ -371,20 +371,35 @@
   }
 
   async function testMapRow(path, row, button) {
+    const resultLabel = row.querySelector("[data-rule-test-result]");
+    const oldText = button.textContent;
     button.disabled = true;
+    button.textContent = "Testing…";
     try {
       const test = inlineRuleTestSource(path, row);
       if (!test.spoken) {
         throw new Error(`${test.source} is dropped by the current rules.`);
       }
+
+      if (resultLabel) {
+        resultLabel.textContent = `→ ${test.spoken}`;
+        resultLabel.title = `${test.source} → ${test.spoken}`;
+      }
+
       await playSpokenTest(
         test.spoken,
         `${test.source} → ${test.spoken}`
       );
     } catch (error) {
-      setTestStatus(error?.message || String(error), "error");
+      const message = error?.message || String(error);
+      if (resultLabel) {
+        resultLabel.textContent = message;
+        resultLabel.title = message;
+      }
+      setTestStatus(message, "error");
     } finally {
       button.disabled = false;
+      button.textContent = oldText;
     }
   }
 
@@ -408,8 +423,11 @@
       <td><input type="text" data-key></td>
       <td><input type="text" data-value></td>
       <td class="rule-actions">
-        <button type="button" data-test-rule>Test</button>
-        <button type="button" data-remove>Remove</button>
+        <div class="rule-action-buttons">
+          <button type="button" data-test-rule>Test</button>
+          <button type="button" data-remove>Remove</button>
+        </div>
+        <span class="rule-test-result" data-rule-test-result></span>
       </td>
     `;
     row.querySelector("[data-key]").value = key;
@@ -454,9 +472,14 @@
       <td><input type="checkbox" data-case-sensitive></td>
       <td class="regex-test-cell">
         <input type="text" data-regex-test-source placeholder="Test text">
-        <button type="button" data-test-regex>Test</button>
+        <span class="rule-test-result" data-rule-test-result></span>
       </td>
-      <td><button type="button" data-remove>Remove</button></td>
+      <td class="rule-actions">
+        <div class="rule-action-buttons">
+          <button type="button" data-test-regex>Test</button>
+          <button type="button" data-remove>Remove</button>
+        </div>
+      </td>
     `;
     row.querySelector("[data-pattern]").value = rule.pattern || "";
     row.querySelector("[data-replace]").value = rule.replace || "";
@@ -464,7 +487,10 @@
 
     const testButton = row.querySelector("[data-test-regex]");
     testButton.addEventListener("click", async () => {
+      const resultLabel = row.querySelector("[data-rule-test-result]");
+      const oldText = testButton.textContent;
       testButton.disabled = true;
+      testButton.textContent = "Testing…";
       try {
         if (!validateRegexRow(row)) {
           throw new Error("Fix the regex before testing it.");
@@ -481,11 +507,21 @@
         if (!spoken) {
           throw new Error("The current rules drop this regex test text.");
         }
+        if (resultLabel) {
+          resultLabel.textContent = `→ ${spoken}`;
+          resultLabel.title = `${source} → ${spoken}`;
+        }
         await playSpokenTest(spoken, `${source} → ${spoken}`);
       } catch (error) {
-        setTestStatus(error?.message || String(error), "error");
+        const message = error?.message || String(error);
+        if (resultLabel) {
+          resultLabel.textContent = message;
+          resultLabel.title = message;
+        }
+        setTestStatus(message, "error");
       } finally {
         testButton.disabled = false;
+        testButton.textContent = oldText;
       }
     });
 
