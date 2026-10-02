@@ -542,6 +542,29 @@
         this.audioOwner = response?.granted === true;
         return this.audioOwner;
       } catch (error) {
+        const message = String(error?.message || error || "");
+        if (/extension context invalidated/i.test(message)) {
+          // Chromium does not revive an isolated world after an unpacked
+          // extension reload. Stop retrying from this dead reader instance.
+          // The browser-action path will detect this state, reload the tab
+          // exactly once, and inject a fresh generation.
+          this.audioClaimSerial += 1;
+          this.audioOwner = false;
+          this.stopped = false;
+          this.paused = true;
+          this.clearResumeWatchdog?.();
+          this.clearReliabilityTimers?.();
+          this.clearPlaybackLivenessWatchdog?.();
+          this.toolbar?.setPaused?.(true);
+          this.toolbar?.setStatus?.(
+            "Extension reloaded — click the Edge Natural TTS browser button to reconnect"
+          );
+          console.warn(
+            "Edge Natural TTS extension context was invalidated; waiting for browser-action recovery."
+          );
+          return false;
+        }
+
         console.warn("Edge Natural TTS could not claim browser audio ownership.", error);
         this.audioOwner = false;
         return false;
