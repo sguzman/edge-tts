@@ -201,6 +201,63 @@ function ensureLinuxPiperPort() {
     });
 }
 
+async function linuxPiperPronunciationConfigRpc(type, payload = {}) {
+  const requestId =
+    `pronunciation-config-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const port = await ensureLinuxPiperPort();
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const cleanup = () => {
+      if (settled) return false;
+      settled = true;
+      clearTimeout(timer);
+      linuxPiperRequests.delete(requestId);
+      return true;
+    };
+
+    const fail = (error) => {
+      if (!cleanup()) return;
+      reject(error instanceof Error ? error : new Error(String(error)));
+    };
+
+    const timer = setTimeout(() => {
+      fail(new Error("Pronunciation config native backup request timed out."));
+    }, 5000);
+
+    linuxPiperRequests.set(requestId, {
+      requestId,
+      resolve,
+      reject: fail,
+      onMessage(response) {
+        if (response?.type === "error") {
+          fail(new Error(response.message || "Pronunciation config backup failed."));
+          return;
+        }
+
+        const expectedType =
+          type === "pronunciationConfigRead"
+            ? "pronunciationConfig"
+            : "pronunciationConfigSaved";
+        if (response?.type !== expectedType) return;
+        if (!cleanup()) return;
+        resolve(response);
+      }
+    });
+
+    try {
+      port.postMessage({
+        type,
+        requestId,
+        ...payload
+      });
+    } catch (error) {
+      fail(error);
+    }
+  });
+}
+
+
 async function synthesizePronunciationTest(text, voiceId) {
   const normalizedText = String(text || "").trim();
   const normalizedVoiceId = String(voiceId || "en_US-ryan-high").trim();
@@ -864,6 +921,44 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message?.type === "EDGE_TTS_WIN_NATURAL_STOP") {
     sendResponse({ stopped: stopWinNaturalForTab(tabId, message.requestId || null) });
     return false;
+  }
+
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_BACKUP_READ") {
+    void linuxPiperPronunciationConfigRpc("pronunciationConfigRead")
+      .then((response) => sendResponse({
+        accepted: true,
+        config: response?.config || null,
+        path: response?.path || ""
+      }))
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
+  }
+
+  if (message?.type === "EDGE_TTS_PRONUNCIATION_BACKUP_WRITE") {
+    const config = message?.config;
+    if (!config || typeof config !== "object" || Array.isArray(config)) {
+      sendResponse({ accepted: false, error: "Pronunciation config must be an object." });
+      return false;
+    }
+
+    void linuxPiperPronunciationConfigRpc(
+      "pronunciationConfigWrite",
+      { config }
+    )
+      .then((response) => sendResponse({
+        accepted: true,
+        path: response?.path || "",
+        revision: Number(response?.revision) || 0,
+        savedAt: Number(response?.savedAt) || 0
+      }))
+      .catch((error) => sendResponse({
+        accepted: false,
+        error: error?.message || String(error)
+      }));
+    return true;
   }
 
   if (message?.type === "EDGE_TTS_LINUX_PIPER_VOICES") {
