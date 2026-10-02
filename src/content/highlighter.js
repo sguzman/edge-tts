@@ -6,6 +6,27 @@
   const DEFAULT_WORD_COLOR = "#ffd60a";
   const DEFAULT_SENTENCE_COLOR = "#bde0fe";
 
+  function segmentCanHighlight(segment) {
+    const validator = extension.TextModel?.segmentIsLive;
+    if (typeof validator === "function") {
+      return validator(segment);
+    }
+
+    const node = segment?.node;
+    if (!(node instanceof Text) || !node.isConnected) return false;
+    const start = Number(segment.nodeStart);
+    const end = Number(segment.nodeEnd);
+    const value = String(node.nodeValue || "");
+    return (
+      Number.isInteger(start) &&
+      Number.isInteger(end) &&
+      start >= 0 &&
+      end >= start &&
+      end <= value.length &&
+      value.slice(start, end) === String(segment.text || "")
+    );
+  }
+
   function normalizeColor(color, fallback) {
     return /^#[0-9a-f]{6}$/i.test(color || "") ? color.toLowerCase() : fallback;
   }
@@ -15,6 +36,10 @@
   }
 
   function rangesForSegments(segments) {
+    if (!(segments || []).every(segmentCanHighlight)) {
+      return [];
+    }
+
     const ranges = [];
     let run = null;
 
@@ -27,19 +52,24 @@
       run = null;
     }
 
-    for (const segment of segments) {
-      if (!run || run.node !== segment.node) {
-        pushRun();
-        run = {
-          node: segment.node,
-          start: segment.nodeStart,
-          end: segment.nodeEnd
-        };
-      } else {
-        run.end = segment.nodeEnd;
+    try {
+      for (const segment of segments) {
+        if (!run || run.node !== segment.node) {
+          pushRun();
+          run = {
+            node: segment.node,
+            start: segment.nodeStart,
+            end: segment.nodeEnd
+          };
+        } else {
+          run.end = segment.nodeEnd;
+        }
       }
+      pushRun();
+    } catch (_error) {
+      return [];
     }
-    pushRun();
+
     return ranges;
   }
 
@@ -113,6 +143,21 @@
     highlight(block, segment) {
       this.ensureStyle();
 
+      if (!segmentCanHighlight(segment)) {
+        this.clear();
+        return false;
+      }
+
+      const sentence = block?.sentences?.[segment.sentenceIndex];
+      if (
+        this.usingCustomHighlight &&
+        sentence?.segments?.length &&
+        !sentence.segments.every(segmentCanHighlight)
+      ) {
+        this.clear();
+        return false;
+      }
+
       if (this.usingCustomHighlight) {
         root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
       } else if (this.lastRange) {
@@ -120,18 +165,28 @@
         selection?.removeAllRanges();
       }
 
-      const wordRange = document.createRange();
-      wordRange.setStart(segment.node, segment.nodeStart);
-      wordRange.setEnd(segment.node, segment.nodeEnd);
+      let wordRange;
+      try {
+        wordRange = document.createRange();
+        wordRange.setStart(segment.node, segment.nodeStart);
+        wordRange.setEnd(segment.node, segment.nodeEnd);
+      } catch (_error) {
+        this.clear();
+        return false;
+      }
       this.lastRange = wordRange;
 
       if (this.usingCustomHighlight) {
         const sentenceKey = `${segment.blockIndex}:${segment.sentenceIndex}`;
         if (sentenceKey !== this.currentSentenceKey) {
           root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
-          const sentence = block?.sentences?.[segment.sentenceIndex];
           if (sentence?.segments?.length) {
-            const sentenceHighlight = new root.Highlight(...rangesForSegments(sentence.segments));
+            const sentenceRanges = rangesForSegments(sentence.segments);
+            if (!sentenceRanges.length) {
+              this.clear();
+              return false;
+            }
+            const sentenceHighlight = new root.Highlight(...sentenceRanges);
             sentenceHighlight.priority = 1;
             root.CSS.highlights.set(SENTENCE_HIGHLIGHT_NAME, sentenceHighlight);
           }
@@ -148,6 +203,7 @@
       }
 
       this.keepRangeInView(wordRange, segment.node.parentElement);
+      return true;
     }
 
     keepRangeInView(range, element) {
@@ -176,6 +232,7 @@
     DEFAULT_WORD_COLOR,
     Highlighter,
     normalizeColor,
-    rangesForSegments
+    rangesForSegments,
+    segmentCanHighlight
   };
 })(globalThis);
