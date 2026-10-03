@@ -153,3 +153,50 @@ test("user custom pronunciations survive normalization and schema migration", ()
     Huawei: "[[ hwɑːˈweɪ ]]"
   });
 });
+
+
+test("arbitrary ALL-CAPS tokens of three or more letters are spelled out", () => {
+  const result = pronunciation.transformText(
+    "The ENG standard uses XYZ and ABCDEFG without garbling the sentence."
+  );
+
+  assert.equal(
+    result.text,
+    "The ee, en, jee standard uses ex, why, zee and ay, bee, see, dee, ee, eff, jee without garbling the sentence."
+  );
+  assert.ok(
+    result.transformations.some((item) => item.ruleId === "acronym")
+  );
+});
+
+test("automatic uppercase spelling is case-sensitive and configurable", () => {
+  const config = pronunciation.cloneDefaultConfig();
+  config.acronyms.tokens = [];
+  config.acronyms.autoUppercaseMinLength = 4;
+
+  assert.equal(
+    pronunciation.transformText("ENG ABCD AbCD lower", config).text,
+    "ENG ay, bee, see, dee AbCD lower"
+  );
+
+  config.acronyms.autoUppercaseMinLength = 0;
+  assert.equal(
+    pronunciation.transformText("ABCD", config).text,
+    "ABCD"
+  );
+});
+
+test("uppercase acronym threshold normalizes to a safe integer range", () => {
+  const config = pronunciation.cloneDefaultConfig();
+  config.acronyms.autoUppercaseMinLength = 2.6;
+  assert.equal(
+    pronunciation.normalizeConfig(config).acronyms.autoUppercaseMinLength,
+    3
+  );
+
+  config.acronyms.autoUppercaseMinLength = 999;
+  assert.equal(
+    pronunciation.normalizeConfig(config).acronyms.autoUppercaseMinLength,
+    32
+  );
+});
