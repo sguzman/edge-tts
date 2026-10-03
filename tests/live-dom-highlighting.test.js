@@ -24,12 +24,16 @@ test("highlighter fails closed when cached DOM segments are stale", () => {
   assert.match(highlighter, /this\.keepRangeInView\(wordRange, segment\.node\.parentElement\);\s*return true;/);
 });
 
-test("reader observes active readable DOM and pauses on mutation", () => {
+test("reader observes active DOM but defers ChatGPT mutations instead of killing playback", () => {
   assert.match(reader, /new root\.MutationObserver/);
   assert.match(reader, /characterData: true/);
   assert.match(reader, /childList: true/);
   assert.match(reader, /mutationTouchesActiveModel/);
   assert.match(reader, /markModelStale\("active-readable-dom-mutated"\)/);
+  assert.match(reader, /deferLiveChatGptRefresh/);
+  assert.match(reader, /this\.model\?\.profile !== "chatgpt"/);
+  assert.match(reader, /this\.liveModelRefreshPending = true/);
+  assert.match(reader, /already-prepared[\s\S]*audio finish/);
   assert.match(reader, /Paused — page text changed; Resume will rebuild/);
 });
 
@@ -105,4 +109,29 @@ test("current click-to-seek generation outranks and retires ghost readers", () =
   const clickEnd = reader.indexOf("    caretFromPoint(x, y) {", clickStart);
   const clickBody = reader.slice(clickStart, clickEnd);
   assert.match(clickBody, /if \(this\.retireStaleReaderGeneration\(\)\)/);
+});
+
+
+test("stale ChatGPT chunk targets rebuild and relocate instead of pausing", () => {
+  const speakStart = reader.indexOf("    speakCurrentPosition() {");
+  const speechStart = reader.indexOf("    handleSpeechStart(", speakStart);
+  const body = reader.slice(speakStart, speechStart);
+
+  assert.match(body, /!segmentIsLive\?\.\(currentSegment\)/);
+  assert.match(body, /this\.model\?\.profile === "chatgpt"/);
+  assert.match(body, /this\.refreshLiveChatGptCursor\(\)/);
+  assert.match(body, /return this\.speakCurrentPosition\(\)/);
+  assert.match(body, /this\.markModelStale\("speech-start-target-stale", true\)/);
+});
+
+test("live ChatGPT cursor refresh preserves unread position across a rerender", () => {
+  const start = reader.indexOf("    refreshLiveChatGptCursor() {");
+  const end = reader.indexOf("    markModelStale(", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /const anchor = this\.liveCursorAnchor\(\)/);
+  assert.match(body, /this\.rebuildModel\(\)/);
+  assert.match(body, /relocateCursorAfterRebuild\?\.\(anchor, this\.model\)/);
+  assert.match(body, /this\.currentBlockIndex = relocated\.blockIndex/);
+  assert.match(body, /this\.currentSegmentIndex = relocated\.segmentIndex/);
 });
