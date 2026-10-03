@@ -507,6 +507,12 @@
               return false;
             }
 
+            if (Number.isFinite(Number(response?.currentTime))) {
+              playback.currentTime = Math.max(
+                0,
+                Number(response.currentTime)
+              );
+            }
             playback.paused = true;
             this._clearBoundaryClock();
             this.directActive = false;
@@ -568,21 +574,61 @@
 
             playback.resumePending = false;
             if (!response?.accepted) {
-              // The offscreen AUDIO_PLAYBACK document may have been discarded
-              // while paused. Keep our canonical cursor/prepared WAV state,
-              // retire the stale session, and let ReaderApp restart from the
-              // current highlighted word instead of claiming playback resumed.
+              // Chromium may discard an AUDIO_PLAYBACK offscreen document
+              // after it has been silent for a while. The content script still
+              // owns the prepared WAV and the last confirmed media time, so
+              // rebuild the offscreen player at that checkpoint instead of
+              // re-synthesizing from the same reader word.
+              const checkpoint = Math.max(
+                0,
+                Number(playback.currentTime) || 0
+              );
+              const prepared = playback.prepared;
+              const alreadyStarted = playback.started === true;
+
               playback.paused = true;
               this.directActive = false;
               this.linuxPiperPausedInPlace = true;
-              this.linuxPiperOffscreenPlayback = null;
-              this.onStatus?.("Resume session expired — restarting...");
-              return false;
+              this._stopLinuxPiperOffscreenPlayback();
+              this.onStatus?.(
+                "Resume session expired — restoring audio checkpoint..."
+              );
+
+              return this._playLinuxPiperPreparedOffscreen(
+                generation,
+                prepared,
+                "resume checkpoint recovery",
+                {
+                  startTimeSeconds: checkpoint,
+                  alreadyStarted,
+                  failOnReject: false
+                }
+              ).then((restored) => {
+                if (restored === true) {
+                  this.linuxPiperPausedInPlace = false;
+                  this.directActive = true;
+                  this.onStatus?.("Reading");
+                  return true;
+                }
+
+                this.directActive = false;
+                this.linuxPiperPausedInPlace = true;
+                this.onStatus?.(
+                  "Resume checkpoint unavailable — restarting from current word..."
+                );
+                return false;
+              });
             }
 
             // audio.play() has actually resolved in the offscreen document.
             // The resumed event normally reaches us as well, but make local
             // state truthful from the confirmed command response.
+            if (Number.isFinite(Number(response?.currentTime))) {
+              playback.currentTime = Math.max(
+                0,
+                Number(response.currentTime)
+              );
+            }
             playback.paused = false;
             this.directActive = true;
             this.linuxPiperPausedInPlace = false;
@@ -973,19 +1019,30 @@
       this._speakLinuxPiperChunk(activeGeneration);
     }
 
-    _playLinuxPiperPreparedOffscreen(generation, prepared, reason) {
+    _playLinuxPiperPreparedOffscreen(
+      generation,
+      prepared,
+      reason,
+      {
+        startTimeSeconds = 0,
+        alreadyStarted = false,
+        failOnReject = true
+      } = {}
+    ) {
       if (
         generation !== this.generation ||
         prepared.chunkIndex !== this.currentChunkIndex
       ) {
-        return;
+        return Promise.resolve(false);
       }
 
       if (!prepared.audioBase64?.length) {
-        this._failLinuxPiper(
-          `page media rejected Piper WAV and no offscreen WAV copy was available: ${reason}`
-        );
-        return;
+        if (failOnReject) {
+          this._failLinuxPiper(
+            `page media rejected Piper WAV and no offscreen WAV copy was available: ${reason}`
+          );
+        }
+        return Promise.resolve(false);
       }
 
       try {
@@ -996,63 +1053,95 @@
       this.directAudio = null;
       this._revokeObjectUrl();
 
+      const checkpoint = Math.max(
+        0,
+        Number(startTimeSeconds) || 0
+      );
       const playbackId =
         `piper-offscreen-${generation}-${prepared.chunkIndex}-${Date.now()}`;
       this.linuxPiperOffscreenPlayback = {
         playbackId,
         generation,
         chunkIndex: prepared.chunkIndex,
-        currentTime: 0,
+        currentTime: checkpoint,
         paused: false,
-        started: false,
+        started: alreadyStarted === true,
         prepared
       };
-      this.directBoundaryIndex = 0;
-      this.currentChunkBoundaryIndex = -1;
+
+      const nextBoundary = this.directBoundaries.findIndex(
+        (boundary) =>
+          Math.max(0, Number(boundary.offsetSeconds) || 0) >
+          checkpoint + 0.025
+      );
+      this.directBoundaryIndex =
+        nextBoundary < 0 ? this.directBoundaries.length : nextBoundary;
+      this.currentChunkBoundaryIndex = Math.max(
+        -1,
+        this.directBoundaryIndex - 1
+      );
       this.directActive = false;
       this.linuxPiperPausedInPlace = false;
-      this.onStatus?.("Using extension audio fallback...");
+      this.onStatus?.(
+        checkpoint > 0
+          ? "Restoring Piper audio checkpoint..."
+          : "Using extension audio fallback..."
+      );
 
-      void root.chrome?.runtime?.sendMessage?.({
-        type: "EDGE_TTS_PIPER_OFFSCREEN_PLAY",
-        playbackId,
-        audioChunks: prepared.audioBase64,
-        boundaryOffsets: this.directBoundaries.map(
-          (boundary) => Math.max(0, Number(boundary.offsetSeconds) || 0)
-        ),
-        sentencePauseMs: prepared.payload?.sentenceFinal === false
-          ? 0
-          : Math.max(
-              0,
-              Number(this.currentOptions?.sentencePauseMs) || 0
-            ),
-        playbackRate: this.directPlaybackRate,
-        volume: Math.min(
-          1,
-          Math.max(0, Number(this.directOutputGain) || 0)
-        )
-      }).then((response) => {
+      return Promise.resolve(
+        root.chrome?.runtime?.sendMessage?.({
+          type: "EDGE_TTS_PIPER_OFFSCREEN_PLAY",
+          playbackId,
+          audioChunks: prepared.audioBase64,
+          boundaryOffsets: this.directBoundaries.map(
+            (boundary) => Math.max(0, Number(boundary.offsetSeconds) || 0)
+          ),
+          startTimeSeconds: checkpoint,
+          sentencePauseMs: prepared.payload?.sentenceFinal === false
+            ? 0
+            : Math.max(
+                0,
+                Number(this.currentOptions?.sentencePauseMs) || 0
+              ),
+          playbackRate: this.directPlaybackRate,
+          volume: Math.min(
+            1,
+            Math.max(0, Number(this.directOutputGain) || 0)
+          )
+        })
+      ).then((response) => {
         if (
           generation !== this.generation ||
           this.linuxPiperOffscreenPlayback?.playbackId !== playbackId
         ) {
-          return;
+          return false;
         }
         if (!response?.accepted) {
-          this._failLinuxPiper(
-            `extension-owned playback rejected: ${response?.error || "unknown error"}`
-          );
+          this.linuxPiperOffscreenPlayback = null;
+          this.directActive = false;
+          if (failOnReject) {
+            this._failLinuxPiper(
+              `extension-owned playback rejected: ${response?.error || "unknown error"}`
+            );
+          }
+          return false;
         }
+        return true;
       }).catch((error) => {
         if (
           generation !== this.generation ||
           this.linuxPiperOffscreenPlayback?.playbackId !== playbackId
         ) {
-          return;
+          return false;
         }
-        this._failLinuxPiper(
-          `extension-owned playback failed: ${error?.message || String(error)}`
-        );
+        this.linuxPiperOffscreenPlayback = null;
+        this.directActive = false;
+        if (failOnReject) {
+          this._failLinuxPiper(
+            `extension-owned playback failed: ${error?.message || String(error)}`
+          );
+        }
+        return false;
       });
     }
 
