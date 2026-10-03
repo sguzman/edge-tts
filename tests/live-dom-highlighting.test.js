@@ -52,3 +52,39 @@ test("boundary and early-audio highlighting both stop on stale targets", () => {
     /const highlighted = this\.highlighter\?\.highlight\?\.\(block, segment\);[\s\S]*?audio-start-highlight-target-stale/
   );
 });
+
+
+test("click-to-seek rebuilds a stale or unmapped live DOM target before seeking", () => {
+  const start = reader.indexOf("    async handlePageClick(event) {");
+  const end = reader.indexOf("    caretFromPoint(x, y) {", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /const resolveTarget = \(\) =>/);
+  assert.match(body, /this\.model\?\.nodeToBlock\?\.get\?\.\(caret\.node\)/);
+  assert.match(body, /if \(this\.modelStale \|\| !target\)/);
+  assert.match(body, /this\.rebuildModel\(\)/);
+  assert.match(body, /target = resolveTarget\(\)/);
+  assert.match(body, /Could not seek to clicked text/);
+});
+
+test("click-to-seek hard-stops stale transport before claiming a fresh audio session", () => {
+  const start = reader.indexOf("    async handlePageClick(event) {");
+  const end = reader.indexOf("    caretFromPoint(x, y) {", start);
+  const body = reader.slice(start, end);
+
+  const discardAt = body.indexOf("this.discardLocalSpeechState()");
+  const localOwnerResetAt = body.indexOf("this.audioOwner = false");
+  const hardStopAt = body.indexOf("await this.forceStopTabAudio()");
+  const claimAt = body.indexOf("await this.claimAudioOwnership()");
+  const speakAt = body.indexOf("this.speakCurrentPosition()", claimAt);
+
+  assert.ok(discardAt >= 0);
+  assert.ok(localOwnerResetAt > discardAt);
+  assert.ok(hardStopAt > localOwnerResetAt);
+  assert.ok(claimAt > hardStopAt);
+  assert.ok(speakAt > claimAt);
+  assert.doesNotMatch(
+    body,
+    /if \(this\.audioOwner\) \{[\s\S]*?this\.speakCurrentPosition\(\)/
+  );
+});
