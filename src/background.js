@@ -864,6 +864,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             Math.max(0, Number(value) || 0)
           )
         : [],
+      startTimeSeconds: Math.max(
+        0,
+        Number(message.startTimeSeconds) || 0
+      ),
       sentencePauseMs: Math.max(
         0,
         Math.min(1200, Number(message.sentencePauseMs) || 0)
