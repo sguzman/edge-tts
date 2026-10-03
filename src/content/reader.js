@@ -119,6 +119,7 @@
       this.modelMutationObserver = null;
       this.modelStale = false;
       this.staleCursorAnchor = null;
+      this.readerSessionToken = "";
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
         onBoundary: (segment) => this.handleBoundary(segment),
@@ -313,6 +314,7 @@
       }
 
       this.modelMutationObserver = new root.MutationObserver((mutations) => {
+        if (this.retireStaleReaderGeneration()) return;
         if (!this.enabled || this.stopped || this.modelStale) return;
 
         if (
@@ -544,10 +546,9 @@
       } catch (error) {
         const message = String(error?.message || error || "");
         if (/extension context invalidated/i.test(message)) {
-          // Chromium does not revive an isolated world after an unpacked
-          // extension reload. Stop retrying from this dead reader instance.
-          // The browser-action path will detect this state, reload the tab
-          // exactly once, and inject a fresh generation.
+          // This reader belongs to an orphaned extension generation. Stop
+          // retrying from it; the browser-action path will reinject the current
+          // generation into this same document without reloading the page.
           this.audioClaimSerial += 1;
           this.audioOwner = false;
           this.stopped = false;
@@ -631,15 +632,49 @@
       }
     }
 
+    readerGenerationIsCurrent() {
+      const token = String(this.readerSessionToken || "");
+      if (!token) return true;
+      return (
+        document.documentElement?.getAttribute?.(
+          "data-edge-tts-session-token"
+        ) === token
+      );
+    }
+
+    retireStaleReaderGeneration() {
+      if (this.readerGenerationIsCurrent()) return false;
+
+      this.enabled = false;
+      this.audioClaimSerial += 1;
+      this.clearResumeWatchdog?.();
+      this.clearReliabilityTimers?.();
+      this.clearPlaybackLivenessWatchdog?.();
+      this.disconnectModelMutationObserver();
+
+      try {
+        root.removeEventListener?.("click", this.boundClick, true);
+      } catch (_error) {}
+      try {
+        document.removeEventListener("click", this.boundClick, true);
+      } catch (_error) {}
+      this.pageClickListening = false;
+      return true;
+    }
+
     syncPageClickListener() {
       const shouldListen = Boolean(this.enabled && this.settings.clickToSeek);
       if (shouldListen === this.pageClickListening) {
         return;
       }
 
+      // Window capture runs before stale document-level listeners left behind
+      // by an older extension generation, so the current reader remains in
+      // control even on a tab that was open across an extension reload.
       if (shouldListen) {
-        document.addEventListener("click", this.boundClick, true);
+        root.addEventListener?.("click", this.boundClick, true);
       } else {
+        root.removeEventListener?.("click", this.boundClick, true);
         document.removeEventListener("click", this.boundClick, true);
       }
       this.pageClickListening = shouldListen;
@@ -1198,6 +1233,10 @@
     }
 
     async handlePageClick(event) {
+      if (this.retireStaleReaderGeneration()) {
+        return;
+      }
+
       if (
         !this.enabled ||
         !this.settings.clickToSeek ||
