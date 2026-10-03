@@ -125,7 +125,7 @@
       this.autoScroll = Boolean(enabled);
     }
 
-    clear() {
+    invalidateDomRanges() {
       if (this.usingCustomHighlight) {
         root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
         root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
@@ -137,6 +137,10 @@
       }
       this.lastRange = null;
       this.currentSentenceKey = null;
+    }
+
+    clear() {
+      this.invalidateDomRanges();
       this.lastScrollCheckAt = 0;
     }
 
