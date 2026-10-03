@@ -1107,9 +1107,7 @@
         this.directAudio?.removeAttribute?.("src");
         this.directAudio?.load?.();
       } catch (_error) {}
-      // Keep the tab-owned media element and its AudioContext alive. If this
-      // fallback finishes successfully, the next Piper sentence should return
-      // to tab-owned playback so Edge can attribute sound to the real tab.
+      this.directAudio = null;
       this._revokeObjectUrl();
 
       const checkpoint = Math.max(
@@ -1338,21 +1336,15 @@
       this._revokeObjectUrl();
       this.directObjectUrl = root.URL.createObjectURL(blob);
 
-      let audio;
       try {
-        audio =
-          this._ensureAudioElement?.() ||
-          root.document?.createElement?.("audio") ||
-          new root.Audio();
-      } catch (_error) {
-        audio = root.document?.createElement?.("audio") || new root.Audio();
-      }
-
-      try {
-        audio.pause?.();
-        audio.removeAttribute?.("src");
-        audio.load?.();
+        this.directAudio?.pause?.();
+        this.directAudio?.removeAttribute?.("src");
+        this.directAudio?.load?.();
       } catch (_error) {}
+
+      const audio =
+        root.document?.createElement?.("audio") ||
+        new root.Audio();
 
       audio.preload = "auto";
       audio.preservesPitch = true;
@@ -1362,14 +1354,10 @@
       audio.src = this.directObjectUrl;
       audio.playbackRate = this.directPlaybackRate;
       this.directAudio = audio;
-      if (typeof this._applyDirectGain === "function") {
-        this._applyDirectGain();
-      } else {
-        audio.volume = Math.min(
-          1,
-          Math.max(0, Number(this.directOutputGain) || 0)
-        );
-      }
+      audio.volume = Math.min(
+        1,
+        Math.max(0, Number(this.directOutputGain) || 0)
+      );
 
       const activeGeneration = prepared.generation;
       let pagePlaybackState = "starting";
@@ -1457,12 +1445,6 @@
 
       const startMediaPlayback = (attempt = 0) => {
         pagePlaybackState = "starting";
-
-        if (this.directAudioContext?.state === "suspended") {
-          try {
-            void this.directAudioContext.resume?.();
-          } catch (_error) {}
-        }
 
         void audio.play()
           .then(() => {
