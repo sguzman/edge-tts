@@ -5,11 +5,21 @@
   // world, retire that generation before rebuilding the module namespace.
   const previousSession = root.__EDGE_TTS_READER__;
   if (previousSession) {
+    const previousApp = previousSession.app;
+    if (previousApp) {
+      // Disable the old app before disposing the session so its own
+      // syncPageClickListener implementation removes whichever event target
+      // that generation used (document in older builds, window in newer ones).
+      try {
+        previousApp.enabled = false;
+        previousApp.syncPageClickListener?.();
+      } catch (_error) {}
+      try {
+        previousApp.disconnectModelMutationObserver?.();
+      } catch (_error) {}
+    }
     try {
       previousSession.dispose?.();
-    } catch (_error) {}
-    try {
-      previousSession.app?.stop?.();
     } catch (_error) {}
   }
 
