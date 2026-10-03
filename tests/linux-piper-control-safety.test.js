@@ -55,9 +55,11 @@ test("reader invalidates stale startup work on lifecycle changes", () => {
   assert.match(reader, /this\.lifecycleSerial \+= 1/);
 });
 
-test("Piper uses extension-owned playback with two-sentence look-ahead", () => {
+test("Piper uses tab-owned playback with offscreen fallback and two-sentence look-ahead", () => {
   assert.match(piperEngine, /linuxPiperPrefetchDepth = 2/);
   assert.match(piperEngine, /_fillLinuxPiperPrefetch/);
+  assert.match(piperEngine, /_ensureAudioElement/);
+  assert.match(piperEngine, /audio\.play\(\)/);
   assert.match(piperEngine, /_playLinuxPiperPreparedOffscreen/);
   assert.match(piperEngine, /EDGE_TTS_PIPER_OFFSCREEN_PLAY/);
 });
