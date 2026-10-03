@@ -90,6 +90,11 @@
       <h2>Acronyms</h2>
       <label for="acronym-tokens">Tokens, one per line</label>
       <textarea id="acronym-tokens" rows="8"></textarea>
+      <label>
+        Auto-spell ALL-CAPS tokens at least
+        <input id="auto-uppercase-min-length" type="number" min="0" max="32" step="1">
+        letters long (0 disables)
+      </label>
       <label>Letter separator <input id="letter-separator" type="text"></label>
       <label>Digit separator <input id="digit-separator" type="text"></label>
       <div class="map-section" data-map="acronyms.letterSounds">
