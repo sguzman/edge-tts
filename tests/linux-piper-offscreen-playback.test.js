@@ -134,7 +134,8 @@ test("Piper in-place resume waits for confirmed audio playback", () => {
 
   assert.match(body, /return Promise\.resolve/);
   assert.match(body, /response\?\.accepted/);
-  assert.match(body, /Resume session expired — restarting/);
+  assert.match(body, /Resume session expired — restoring audio checkpoint/);
+  assert.match(body, /startTimeSeconds: checkpoint/);
   assert.match(body, /return false/);
 });
 
