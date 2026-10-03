@@ -175,3 +175,15 @@ test("projected ChatGPT boundary adopts fresh live segment coordinates", () => {
   assert.match(body, /const freshSegment = block\?\.segments\?\.\[relocated\.segmentIndex\]/);
   assert.match(body, /return \{ block, segment: freshSegment \}/);
 });
+
+
+test("DOM replacement invalidates cached sentence ranges before fresh repaint", () => {
+  assert.match(highlighter, /invalidateDomRanges\(\)/);
+  assert.match(highlighter, /this\.currentSentenceKey = null/);
+
+  const start = reader.indexOf("    resolveLiveHighlightTarget(");
+  const end = reader.indexOf("    markModelStale(", start);
+  const body = reader.slice(start, end);
+  assert.match(body, /this\.highlighter\?\.invalidateDomRanges\?\.\(\)/);
+  assert.match(body, /return \{ block, segment: freshSegment \}/);
+});
