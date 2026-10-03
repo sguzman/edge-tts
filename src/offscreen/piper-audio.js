@@ -8,6 +8,7 @@
   let sentencePauseMs = 0;
   let boundaryOffsets = [];
   let boundaryIndex = 0;
+  let pausedCurrentTime = null;
 
   audio.preservesPitch = true;
   if ("webkitPreservesPitch" in audio) {
@@ -88,6 +89,7 @@
     sentencePauseMs = 0;
     boundaryOffsets = [];
     boundaryIndex = 0;
+    pausedCurrentTime = null;
 
     if (emit && previousId) {
       try {
@@ -108,6 +110,73 @@
       bytes[index] = binary.charCodeAt(index);
     }
     return bytes;
+  }
+
+  function boundaryIndexAfterTime(currentTime) {
+    const target = Math.max(0, Number(currentTime) || 0);
+    const next = boundaryOffsets.findIndex(
+      (offset) => offset > target + 0.02
+    );
+    return next < 0 ? boundaryOffsets.length : next;
+  }
+
+  async function waitForMetadata() {
+    if (audio.readyState >= 1 && Number.isFinite(Number(audio.duration))) {
+      return;
+    }
+
+    await new Promise((resolve, reject) => {
+      let settled = false;
+      let timer = null;
+
+      const cleanup = () => {
+        audio.removeEventListener("loadedmetadata", onReady);
+        audio.removeEventListener("error", onError);
+        if (timer !== null) {
+          clearTimeout(timer);
+          timer = null;
+        }
+      };
+      const finish = (callback) => {
+        if (settled) return;
+        settled = true;
+        cleanup();
+        callback();
+      };
+      const onReady = () => finish(resolve);
+      const onError = () => finish(() =>
+        reject(new Error("Piper WAV metadata failed to load before checkpoint seek."))
+      );
+
+      audio.addEventListener("loadedmetadata", onReady, { once: true });
+      audio.addEventListener("error", onError, { once: true });
+      timer = setTimeout(() => finish(() =>
+        reject(new Error("Piper WAV metadata timed out before checkpoint seek."))
+      ), 1500);
+      try {
+        audio.load();
+      } catch (_error) {}
+    });
+  }
+
+  async function restorePlaybackCheckpoint(currentTime) {
+    const requested = Math.max(0, Number(currentTime) || 0);
+    if (!(requested > 0)) {
+      boundaryIndex = 0;
+      return 0;
+    }
+
+    await waitForMetadata();
+    const duration = Number(audio.duration);
+    const maximum =
+      Number.isFinite(duration) && duration > 0
+        ? Math.max(0, duration - 0.02)
+        : requested;
+    const target = Math.min(requested, maximum);
+
+    audio.currentTime = target;
+    boundaryIndex = boundaryIndexAfterTime(target);
+    return target;
   }
 
   async function play(message) {
@@ -137,6 +206,7 @@
       Math.min(1200, Number(message.sentencePauseMs) || 0)
     );
     boundaryIndex = 0;
+    pausedCurrentTime = null;
 
     const blob = new Blob(chunks, { type: "audio/wav" });
     objectUrl = URL.createObjectURL(blob);
@@ -151,10 +221,13 @@
     );
 
     try {
+      const restoredTime = await restorePlaybackCheckpoint(
+        message.startTimeSeconds
+      );
       await audio.play();
       send({
         type: "started",
-        currentTime: Number(audio.currentTime) || 0,
+        currentTime: Number(audio.currentTime) || restoredTime || 0,
         duration: Number(audio.duration) || 0
       });
       startTick();
@@ -255,11 +328,18 @@
       try {
         audio.pause();
         clearTick();
+        pausedCurrentTime = Math.max(
+          0,
+          Number(audio.currentTime) || 0
+        );
         send({
           type: "paused",
-          currentTime: Number(audio.currentTime) || 0
+          currentTime: pausedCurrentTime
         });
-        sendResponse({ accepted: true });
+        sendResponse({
+          accepted: true,
+          currentTime: pausedCurrentTime
+        });
       } catch (error) {
         sendResponse({ accepted: false, error: error?.message || String(error) });
       }
@@ -267,14 +347,37 @@
     }
 
     if (type === "EDGE_TTS_OFFSCREEN_PIPER_RESUME") {
-      void audio.play()
-        .then(() => {
+      void Promise.resolve()
+        .then(async () => {
+          if (Number.isFinite(Number(pausedCurrentTime))) {
+            const checkpoint = Math.max(
+              0,
+              Number(pausedCurrentTime) || 0
+            );
+            if (
+              Math.abs((Number(audio.currentTime) || 0) - checkpoint) > 0.05
+            ) {
+              await restorePlaybackCheckpoint(checkpoint);
+            } else {
+              boundaryIndex = boundaryIndexAfterTime(checkpoint);
+            }
+          }
+
+          await audio.play();
+          pausedCurrentTime = null;
+          const currentTime = Math.max(
+            0,
+            Number(audio.currentTime) || 0
+          );
           send({
             type: "resumed",
-            currentTime: Number(audio.currentTime) || 0
+            currentTime
           });
           startTick();
-          sendResponse({ accepted: true });
+          sendResponse({
+            accepted: true,
+            currentTime
+          });
         })
         .catch((error) => {
           send({
