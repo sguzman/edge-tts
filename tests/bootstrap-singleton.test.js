@@ -45,3 +45,42 @@ test("quit-during-startup is guarded by the startup fast path", () => {
   assert.ok(source.includes("if (!this.enabled || this.quitRequested)"));
   assert.ok(!source.includes("await Promise.all([settingsReady, extensionVoicesReady, winNaturalVoicesReady]);"));
 });
+
+
+test("extension reload recovery reinjects without reloading the webpage", () => {
+  const background = fs.readFileSync(
+    path.join(__dirname, "..", "src", "background.js"),
+    "utf8"
+  );
+
+  const start = background.indexOf("async function recoverReaderAfterDeadContext");
+  const end = background.indexOf("async function ensureReader", start);
+  const body = background.slice(start, end);
+
+  assert.match(body, /await injectReader\(tabId\)/);
+  assert.match(body, /await readerReady\(tabId\)/);
+  assert.doesNotMatch(body, /chrome\.tabs\.reload/);
+  assert.doesNotMatch(background, /function reloadTabAndWait/);
+});
+
+test("reader reinjection starts from a clean namespace and generation token", () => {
+  const namespace = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "namespace.js"),
+    "utf8"
+  );
+  const content = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "content-script.js"),
+    "utf8"
+  );
+  const background = fs.readFileSync(
+    path.join(__dirname, "..", "src", "background.js"),
+    "utf8"
+  );
+
+  assert.match(namespace, /previousSession\.dispose/);
+  assert.match(namespace, /root\.EdgeTtsExtension = \{\}/);
+  assert.match(content, /data-edge-tts-session-token/);
+  assert.match(content, /readerSessionToken = sessionToken/);
+  assert.match(content, /const SESSION_REVISION = 16/);
+  assert.match(background, /const READER_SESSION_REVISION = 16/);
+});
