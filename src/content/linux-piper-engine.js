@@ -637,20 +637,56 @@
           })
           .catch((error) => {
             if (
-              this.linuxPiperOffscreenPlayback?.playbackId === playbackId
+              this.linuxPiperOffscreenPlayback?.playbackId !== playbackId
             ) {
-              playback.resumePending = false;
-              playback.paused = true;
-              this.directActive = false;
-              this.linuxPiperPausedInPlace = true;
-              this.linuxPiperOffscreenPlayback = null;
+              return false;
             }
+
+            playback.resumePending = false;
+            playback.paused = true;
+            this.directActive = false;
+            this.linuxPiperPausedInPlace = true;
+
+            const checkpoint = Math.max(
+              0,
+              Number(playback.currentTime) || 0
+            );
+            const prepared = playback.prepared;
+            const alreadyStarted = playback.started === true;
+            this._stopLinuxPiperOffscreenPlayback();
+
             console.warn(
-              "Edge Natural TTS offscreen resume transport failed.",
+              "Edge Natural TTS offscreen resume transport failed; restoring checkpoint.",
               error
             );
-            this.onStatus?.("Resume transport failed — restarting...");
-            return false;
+            this.onStatus?.(
+              "Resume transport failed — restoring audio checkpoint..."
+            );
+
+            return this._playLinuxPiperPreparedOffscreen(
+              generation,
+              prepared,
+              "resume transport recovery",
+              {
+                startTimeSeconds: checkpoint,
+                alreadyStarted,
+                failOnReject: false
+              }
+            ).then((restored) => {
+              if (restored === true) {
+                this.linuxPiperPausedInPlace = false;
+                this.directActive = true;
+                this.onStatus?.("Reading");
+                return true;
+              }
+
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.onStatus?.(
+                "Resume checkpoint unavailable — restarting from current word..."
+              );
+              return false;
+            });
           });
       }
 
