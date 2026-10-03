@@ -69,14 +69,18 @@ test("fresh injection does not verify with a second ping before toggle", () => {
   assert.equal((ensureSource.match(/readerReady\(tabId\)/g) || []).length, 1);
 });
 
-test("dead extension contexts recover only after the first toggle delivery fails", () => {
+test("dead extension contexts recover by reinjection without reloading the page", () => {
+  const recoverStart = source.indexOf("async function recoverReaderAfterDeadContext");
+  const ensureStart = source.indexOf("async function ensureReader", recoverStart);
+  const recoverSource = source.slice(recoverStart, ensureStart);
   const toggleStart = source.indexOf("async function toggleReader");
   const actionStart = source.indexOf("chrome.action.onClicked");
   const toggleSource = source.slice(toggleStart, actionStart);
 
-  assert.match(source, /function reloadTabAndWait\(/);
-  assert.match(source, /chrome\.tabs\.reload\(tabId\)/);
-  assert.match(source, /await reloadTabAndWait\(tabId\)/);
+  assert.doesNotMatch(source, /function reloadTabAndWait\(/);
+  assert.doesNotMatch(source, /chrome\.tabs\.reload\(/);
+  assert.match(recoverSource, /await injectReader\(tabId\)/);
+  assert.match(recoverSource, /await readerReady\(tabId\)/);
   assert.match(toggleSource, /await ensureReader\(tabId\)/);
   assert.match(
     toggleSource,
