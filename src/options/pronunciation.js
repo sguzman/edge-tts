@@ -620,6 +620,9 @@
       config.normalization.dropCurlyBraceText !== false;
 
     $("#acronym-tokens").value = (config.acronyms.tokens || []).join("\n");
+    $("#auto-uppercase-min-length").value = String(
+      config.acronyms.autoUppercaseMinLength ?? 3
+    );
     $("#letter-separator").value = config.acronyms.letterSeparator ?? " ";
     $("#digit-separator").value = config.acronyms.digitSeparator ?? " point ";
     $("#drop-tokens").value = (config.normalization.dropTokens || []).join("\n");
@@ -676,6 +679,10 @@
     next.normalization.dropCurlyBraceText = $("#drop-curly-brace-text").checked;
 
     next.acronyms.tokens = lines($("#acronym-tokens").value);
+    next.acronyms.autoUppercaseMinLength = Math.min(
+      32,
+      Math.max(0, Math.round(Number($("#auto-uppercase-min-length").value) || 0))
+    );
     next.acronyms.letterSeparator = $("#letter-separator").value;
     next.acronyms.digitSeparator = $("#digit-separator").value;
     next.normalization.dropTokens = lines($("#drop-tokens").value);
