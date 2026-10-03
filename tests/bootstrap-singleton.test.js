@@ -77,6 +77,8 @@ test("reader reinjection starts from a clean namespace and generation token", ()
     "utf8"
   );
 
+  assert.match(namespace, /previousApp\.enabled = false/);
+  assert.match(namespace, /previousApp\.syncPageClickListener/);
   assert.match(namespace, /previousSession\.dispose/);
   assert.match(namespace, /root\.EdgeTtsExtension = \{\}/);
   assert.match(content, /data-edge-tts-session-token/);
