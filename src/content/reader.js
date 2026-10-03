@@ -1212,13 +1212,34 @@
         return;
       }
 
-      const block = this.model?.nodeToBlock.get(caret.node);
-      if (!block) {
-        return;
+      const resolveTarget = () => {
+        const block = this.model?.nodeToBlock?.get?.(caret.node);
+        if (!block) return null;
+        const segment = findSegmentInNode(block, caret.node, caret.offset);
+        if (!segment) return null;
+        if (
+          typeof segmentIsLive === "function" &&
+          !segmentIsLive(segment)
+        ) {
+          return null;
+        }
+        return { block, segment };
+      };
+
+      let target = resolveTarget();
+
+      // Long-paused/dynamic tabs can retain a readable model whose Text nodes
+      // have since been replaced. Click-to-seek must use the DOM the user
+      // actually clicked, not silently fail because an old nodeToBlock map
+      // no longer recognizes that node.
+      if (this.modelStale || !target) {
+        this.rebuildModel();
+        this.staleCursorAnchor = null;
+        target = resolveTarget();
       }
 
-      const segment = findSegmentInNode(block, caret.node, caret.offset);
-      if (!segment) {
+      if (!target) {
+        this.toolbar?.setStatus?.("Could not seek to clicked text");
         return;
       }
 
@@ -1227,30 +1248,52 @@
 
       const lifecycle = ++this.lifecycleSerial;
       this.clearResumeWatchdog();
+      this.clearReliabilityTimers?.();
+      this.clearPlaybackLivenessWatchdog?.();
+      if (Number.isFinite(Number(this.batchRequestSerial))) {
+        this.batchRequestSerial += 1;
+      }
+      this.activeBatchRequest = null;
+      this.activeBatchEndBlockIndex = -1;
 
-      // A click-to-seek is a hard transport replacement, not a second request
-      // layered on top of the current sentence/prefetch pipeline.
+      // A click is an authoritative seek. Never try to resume or reuse a
+      // possibly stale paused transport from this tab. Retire local state,
+      // hard-stop every tab-owned backend/offscreen request, then claim a
+      // completely fresh audio session at the clicked segment.
       try {
         this.discardLocalSpeechState();
       } catch (error) {
-        console.warn("Edge Natural TTS could not replace speech for click-to-seek.", error);
+        console.warn(
+          "Edge Natural TTS could not replace speech for click-to-seek.",
+          error
+        );
       }
 
-      this.currentBlockIndex = block.index;
-      this.currentSegmentIndex = segment.segmentIndex;
-      this.activeBatchEndBlockIndex = -1;
+      this.audioClaimSerial += 1;
+      this.audioOwner = false;
+      this.currentBlockIndex = target.block.index;
+      this.currentSegmentIndex = target.segment.segmentIndex;
       this.stopped = false;
       this.paused = false;
       this.highlighter.clear();
+      this.toolbar.setPaused(false);
+      this.toolbar.setStatus("Seeking to clicked text…");
 
-      if (this.audioOwner) {
-        this.speakCurrentPosition();
+      await this.forceStopTabAudio();
+      if (
+        lifecycle !== this.lifecycleSerial ||
+        !this.enabled ||
+        this.stopped ||
+        this.paused ||
+        this.quitRequested
+      ) {
         return;
       }
 
       const granted = await this.claimAudioOwnership();
       if (
         lifecycle !== this.lifecycleSerial ||
+        !this.enabled ||
         this.stopped ||
         this.paused ||
         this.quitRequested
