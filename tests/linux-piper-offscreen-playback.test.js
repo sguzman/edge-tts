@@ -30,15 +30,16 @@ test("pronunciation branch can create an extension-owned audio document", () => 
   assert.match(background, /src\/offscreen\/piper-audio\.html/);
 });
 
-test("Piper uses extension-owned offscreen audio as its primary player", () => {
+test("Piper uses tab-owned audio as primary playback and keeps offscreen as fallback", () => {
   const start = piper.indexOf("    _playLinuxPiperPrepared(generation, prepared) {");
   const end = piper.indexOf("    _failLinuxPiper(message) {", start);
   const body = piper.slice(start, end);
 
+  assert.match(body, /Tab\.audible/);
+  assert.match(body, /_ensureAudioElement/);
+  assert.match(body, /audio\.play\(\)/);
+  assert.match(body, /startOffscreenFallback/);
   assert.match(body, /_playLinuxPiperPreparedOffscreen/);
-  assert.match(body, /primary Piper playback/);
-  assert.doesNotMatch(body, /createElement\?\.\("audio"\)/);
-  assert.doesNotMatch(body, /audio\.play\(\)/);
   assert.match(piper, /EDGE_TTS_PIPER_OFFSCREEN_PLAY/);
 });
 
@@ -77,15 +78,18 @@ test("Piper force-loads persisted pronunciation config before creating chunks", 
 });
 
 
-test("primary offscreen playback cannot trigger the page-media blocked state race", () => {
+test("tab-owned playback serializes autoplay refusal against offscreen fallback", () => {
   const playStart = piper.indexOf("    _playLinuxPiperPrepared(generation, prepared) {");
   const failStart = piper.indexOf("    _failLinuxPiper(message) {", playStart);
   const body = piper.slice(playStart, failStart);
 
-  assert.doesNotMatch(body, /onPlaybackBlocked/);
-  assert.doesNotMatch(body, /NotAllowedError/);
-  assert.match(body, /this\.directBoundaryIndex = 0/);
-  assert.match(body, /this\.currentChunkBoundaryIndex = -1/);
+  assert.match(body, /let pagePlaybackState = "starting"/);
+  assert.match(body, /let pendingMediaError = null/);
+  assert.match(body, /Never hand off while audio\.play\(\) is still settling/);
+  assert.match(body, /error\?\.name === "NotAllowedError"/);
+  assert.match(body, /pagePlaybackState = "blocked"/);
+  assert.match(body, /this\.onPlaybackBlocked\?\.\(error\)/);
+  assert.match(body, /pagePlaybackState === "playing"[\s\S]*?startOffscreenFallback/);
 });
 
 
@@ -151,7 +155,9 @@ test("Piper resume acknowledgement is bounded and falls back instead of hanging"
 });
 
 
-test("sentence pause is carried all the way into the extension-owned audio player", () => {
+test("sentence pause is applied exactly once for both tab and offscreen playback", () => {
+  assert.match(piper, /pauseAlreadyApplied/);
+  assert.match(piper, /this\.linuxPiperSentencePauseTimer = root\.setTimeout/);
   assert.match(piper, /sentencePauseMs: prepared\.payload\?\.sentenceFinal === false/);
   assert.match(background, /sentencePauseMs: Math\.max/);
   assert.match(offscreen, /let sentencePauseMs = 0/);
@@ -160,12 +166,11 @@ test("sentence pause is carried all the way into the extension-owned audio playe
   assert.match(offscreen, /sentencePauseMs/);
 });
 
-test("page reader no longer owns the inter-sentence timer", () => {
-  const start = piper.indexOf("    _finishLinuxPiperPreparedPlayback");
-  const end = piper.indexOf("    _playLinuxPiperPreparedOffscreen", start);
+test("offscreen ended events tell the reader that their sentence pause already elapsed", () => {
+  const start = piper.indexOf('      if (event.type === "ended")');
+  const end = piper.indexOf('      if (event.type === "stopped")', start);
   const body = piper.slice(start, end);
-  assert.doesNotMatch(body, /setTimeout/);
-  assert.match(body, /_speakLinuxPiperChunk\(activeGeneration\)/);
+  assert.match(body, /pauseAlreadyApplied: true/);
 });
 
 
@@ -237,4 +242,15 @@ test("background relays the Piper checkpoint into replacement offscreen playback
 
   assert.match(body, /startTimeSeconds:/);
   assert.match(body, /message\.startTimeSeconds/);
+});
+
+
+test("native tab-audible support comes from real tab media, not a fake tabs API flag", () => {
+  const start = piper.indexOf("    _playLinuxPiperPrepared(generation, prepared) {");
+  const end = piper.indexOf("    _failLinuxPiper(message) {", start);
+  const body = piper.slice(start, end);
+
+  assert.match(body, /the normal Piper reader path must render audio in this tab/);
+  assert.match(body, /audio\.src = this\.directObjectUrl/);
+  assert.doesNotMatch(body, /tabs\.update[\s\S]*audible/);
 });
