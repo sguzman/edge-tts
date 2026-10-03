@@ -160,3 +160,16 @@ test("letter sounds and path vocabulary can audition their configured spoken val
   assert.match(optionsJs, /path === "technical\.pathWords"/);
   assert.match(optionsJs, /spoken: value/);
 });
+
+
+test("pronunciation editor exposes automatic ALL-CAPS spelling threshold", () => {
+  const optionsJs = fs.readFileSync(
+    path.join(__dirname, "..", "src", "options", "pronunciation.js"),
+    "utf8"
+  );
+
+  assert.match(optionsHtml, /id="auto-uppercase-min-length"/);
+  assert.match(optionsHtml, /Auto-spell ALL-CAPS tokens at least/);
+  assert.match(optionsJs, /config\.acronyms\.autoUppercaseMinLength \?\? 3/);
+  assert.match(optionsJs, /next\.acronyms\.autoUppercaseMinLength/);
+});
