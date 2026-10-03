@@ -1030,7 +1030,11 @@
       return true;
     }
 
-    _finishLinuxPiperPreparedPlayback(activeGeneration, prepared) {
+    _finishLinuxPiperPreparedPlayback(
+      activeGeneration,
+      prepared,
+      { pauseAlreadyApplied = false } = {}
+    ) {
       if (activeGeneration !== this.generation) return;
 
       this._clearBoundaryClock();
@@ -1048,10 +1052,27 @@
         return;
       }
 
-      // The extension-owned audio document now owns the inter-sentence
-      // wall-clock pause and emits "ended" only after that gap. Continue
-      // immediately here so background-tab throttling cannot collapse or
-      // stretch the configured sentence pause.
+      // Offscreen fallback includes the configured sentence gap before it
+      // emits "ended". Tab-owned playback ends at the WAV boundary, so only
+      // that path needs the reader-side sentence timer.
+      const sentencePauseMs =
+        pauseAlreadyApplied || prepared?.payload?.sentenceFinal === false
+          ? 0
+          : Math.max(
+              0,
+              Number(this.currentOptions?.sentencePauseMs) || 0
+            );
+
+      if (sentencePauseMs > 0) {
+        this.onStatus?.(`Sentence pause ${sentencePauseMs} ms`);
+        this.linuxPiperSentencePauseTimer = root.setTimeout(() => {
+          this.linuxPiperSentencePauseTimer = null;
+          if (activeGeneration !== this.generation) return;
+          this._speakLinuxPiperChunk(activeGeneration);
+        }, sentencePauseMs);
+        return;
+      }
+
       this._speakLinuxPiperChunk(activeGeneration);
     }
 
@@ -1086,7 +1107,9 @@
         this.directAudio?.removeAttribute?.("src");
         this.directAudio?.load?.();
       } catch (_error) {}
-      this.directAudio = null;
+      // Keep the tab-owned media element and its AudioContext alive. If this
+      // fallback finishes successfully, the next Piper sentence should return
+      // to tab-owned playback so Edge can attribute sound to the real tab.
       this._revokeObjectUrl();
 
       const checkpoint = Math.max(
@@ -1265,7 +1288,11 @@
 
       if (event.type === "ended") {
         const prepared = playback.prepared;
-        this._finishLinuxPiperPreparedPlayback(this.generation, prepared);
+        this._finishLinuxPiperPreparedPlayback(
+          this.generation,
+          prepared,
+          { pauseAlreadyApplied: true }
+        );
         return true;
       }
 
@@ -1295,6 +1322,7 @@
         return;
       }
 
+      const payload = prepared.payload;
       this.directActive = false;
       this.linuxPiperPlaybackIndex = prepared.chunkIndex;
       this.linuxPiperPausedInPlace = false;
@@ -1302,23 +1330,241 @@
       this.directBoundaryIndex = 0;
       this.currentChunkBoundaryIndex = -1;
 
-      // Piper WAV playback belongs to the extension, not to arbitrary pages.
-      // The previous "page <audio> first, offscreen fallback second" design had
-      // a real startup race: page audio could reject with NotAllowedError and
-      // mark the reader Paused just before a media-safety error transferred the
-      // same WAV to offscreen playback. Audio would then play while the reader
-      // intentionally ignored start/boundary events because it believed it was
-      // paused. Use the extension-owned player from the outset.
+      // Edge's native speaker indicator is tied to Tab.audible, which is
+      // read-only and only becomes true when the tab itself produces sound.
+      // Therefore the normal Piper reader path must render audio in this tab.
+      // The offscreen document remains a fallback for page-media failures.
+      const blob = new Blob(prepared.audio, { type: "audio/wav" });
+      this._revokeObjectUrl();
+      this.directObjectUrl = root.URL.createObjectURL(blob);
+
+      let audio;
+      try {
+        audio =
+          this._ensureAudioElement?.() ||
+          root.document?.createElement?.("audio") ||
+          new root.Audio();
+      } catch (_error) {
+        audio = root.document?.createElement?.("audio") || new root.Audio();
+      }
+
+      try {
+        audio.pause?.();
+        audio.removeAttribute?.("src");
+        audio.load?.();
+      } catch (_error) {}
+
+      audio.preload = "auto";
+      audio.preservesPitch = true;
+      if ("webkitPreservesPitch" in audio) {
+        audio.webkitPreservesPitch = true;
+      }
+      audio.src = this.directObjectUrl;
+      audio.playbackRate = this.directPlaybackRate;
+      this.directAudio = audio;
+      if (typeof this._applyDirectGain === "function") {
+        this._applyDirectGain();
+      } else {
+        audio.volume = Math.min(
+          1,
+          Math.max(0, Number(this.directOutputGain) || 0)
+        );
+      }
+
+      const activeGeneration = prepared.generation;
+      let pagePlaybackState = "starting";
+      let pendingMediaError = null;
+
+      const mediaFailureDetail = () => {
+        const mediaCode = audio.error?.code;
+        const mediaMessage = String(audio.error?.message || "").trim();
+        return {
+          mediaCode,
+          mediaMessage,
+          detail:
+            `WAV playback failed${mediaCode ? ` (media ${mediaCode})` : ""}` +
+            `${mediaMessage ? `: ${mediaMessage}` : ""}; ` +
+            `readyState=${audio.readyState}; networkState=${audio.networkState}`
+        };
+      };
+
+      const startOffscreenFallback = (reason) => {
+        if (
+          activeGeneration !== this.generation ||
+          prepared.chunkIndex !== this.currentChunkIndex ||
+          pagePlaybackState === "fallback"
+        ) {
+          return false;
+        }
+
+        const checkpoint = Math.max(
+          0,
+          Number(audio.currentTime) || 0
+        );
+        const alreadyStarted = pagePlaybackState === "playing";
+        pagePlaybackState = "fallback";
+        this._clearBoundaryClock();
+        this.directActive = false;
+
+        void this._playLinuxPiperPreparedOffscreen(
+          activeGeneration,
+          prepared,
+          reason,
+          {
+            startTimeSeconds: checkpoint,
+            alreadyStarted,
+            failOnReject: true
+          }
+        );
+        return true;
+      };
+
+      audio.onended = () => {
+        if (
+          activeGeneration !== this.generation ||
+          pagePlaybackState !== "playing" ||
+          this.directAudio !== audio
+        ) {
+          return;
+        }
+
+        pagePlaybackState = "ended";
+        this._finishLinuxPiperPreparedPlayback(
+          activeGeneration,
+          prepared,
+          { pauseAlreadyApplied: false }
+        );
+      };
+
+      audio.onerror = () => {
+        if (activeGeneration !== this.generation) return;
+        pendingMediaError = mediaFailureDetail();
+
+        // Never hand off while audio.play() is still settling. In the old
+        // implementation a page-media error could start offscreen playback
+        // while a simultaneous NotAllowedError marked the reader Paused.
+        // Waiting for the play promise gives one authority over that decision.
+        if (pagePlaybackState === "playing") {
+          startOffscreenFallback(pendingMediaError.detail);
+        }
+      };
+
       this.onStatus?.(
         prepared.prefetch
           ? "Playing prefetched Piper audio..."
           : "Playing Piper audio..."
       );
-      this._playLinuxPiperPreparedOffscreen(
-        generation,
-        prepared,
-        "primary Piper playback"
-      );
+
+      const startMediaPlayback = (attempt = 0) => {
+        pagePlaybackState = "starting";
+
+        if (this.directAudioContext?.state === "suspended") {
+          try {
+            void this.directAudioContext.resume?.();
+          } catch (_error) {}
+        }
+
+        void audio.play()
+          .then(() => {
+            if (
+              activeGeneration !== this.generation ||
+              prepared.chunkIndex !== this.currentChunkIndex ||
+              pagePlaybackState === "fallback"
+            ) {
+              return;
+            }
+
+            pagePlaybackState = "playing";
+            this.directActive = true;
+            this.linuxPiperPausedInPlace = false;
+            this.onStart?.(
+              payload.segments?.[0],
+              Math.max(
+                0,
+                (root.performance?.now?.() ?? Date.now()) - this.requestedAt
+              )
+            );
+
+            // Defensive fallback: even if Piper returned no word boundaries,
+            // audible tab-owned speech must still have a visible highlight.
+            if (
+              this.directBoundaries.length === 0 &&
+              payload.segments?.[0]
+            ) {
+              this.onBoundary?.(
+                payload.segments[0],
+                {
+                  type: "linux-piper-boundary-fallback",
+                  directAudio: true,
+                  audioOffset: 0,
+                  duration: 0,
+                  spokenText: ""
+                }
+              );
+            }
+
+            this._startLinuxPiperBoundaryClock(activeGeneration);
+            this._fillLinuxPiperPrefetch(activeGeneration);
+
+            if (pendingMediaError) {
+              startOffscreenFallback(pendingMediaError.detail);
+            }
+          })
+          .catch((error) => {
+            if (
+              activeGeneration !== this.generation ||
+              prepared.chunkIndex !== this.currentChunkIndex ||
+              pagePlaybackState === "fallback"
+            ) {
+              return;
+            }
+
+            if (error?.name === "NotAllowedError") {
+              // CPU synthesis can outlive the browser-action activation.
+              // Keep the prepared WAV and wait for an explicit toolbar Resume
+              // click instead of silently moving sound outside the tab.
+              pagePlaybackState = "blocked";
+              this._clearBoundaryClock();
+              this.directActive = false;
+              this.linuxPiperPausedInPlace = true;
+              this.onPlaybackBlocked?.(error);
+              return;
+            }
+
+            if (pendingMediaError) {
+              startOffscreenFallback(pendingMediaError.detail);
+              return;
+            }
+
+            if (
+              error?.name === "AbortError" &&
+              attempt < 1 &&
+              this.directAudio === audio
+            ) {
+              this.onStatus?.("Retrying Piper media start...");
+              root.setTimeout(() => {
+                if (
+                  activeGeneration === this.generation &&
+                  this.directAudio === audio &&
+                  pagePlaybackState !== "fallback" &&
+                  !this.linuxPiperPausedInPlace
+                ) {
+                  startMediaPlayback(attempt + 1);
+                }
+              }, 150);
+              return;
+            }
+
+            pagePlaybackState = "failed";
+            this._failLinuxPiper(
+              `audio.play() failed: ${error?.name || "Error"}: ` +
+              `${error?.message || String(error)}; ` +
+              `readyState=${audio.readyState}; networkState=${audio.networkState}`
+            );
+          });
+      };
+
+      startMediaPlayback();
     }
 
     _failLinuxPiper(message) {
