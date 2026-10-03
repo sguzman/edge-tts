@@ -157,6 +157,7 @@
     acronyms: {
       enabled: true,
       tokens: ["CSS","HTML","HTTP","HTTPS","URL","API","CPU","GPU","JSON","SQL","XML","TTS","XTTS","LLM"],
+      autoUppercaseMinLength: 3,
       letterSeparator: ", ",
       digitSeparator: " point ",
       letterSounds: LETTER_SOUNDS
