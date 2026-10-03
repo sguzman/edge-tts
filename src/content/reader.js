@@ -296,6 +296,7 @@
       }
 
       this.rebuildModel();
+      this.highlighter?.invalidateDomRanges?.();
       const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
       if (!relocated) {
         return false;
@@ -366,6 +367,11 @@
       }
 
       this.rebuildModel();
+      // A rebuilt ChatGPT model can preserve the same logical
+      // block:sentence key while every Range target has changed identity.
+      // Drop only the DOM-backed highlight cache before repainting the fresh
+      // boundary below; do not touch playback state.
+      this.highlighter?.invalidateDomRanges?.();
       const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
       if (!relocated) {
         return null;
