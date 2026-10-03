@@ -58,7 +58,7 @@ test("reader invalidates stale startup work on lifecycle changes", () => {
 test("Piper uses tab-owned playback with offscreen fallback and two-sentence look-ahead", () => {
   assert.match(piperEngine, /linuxPiperPrefetchDepth = 2/);
   assert.match(piperEngine, /_fillLinuxPiperPrefetch/);
-  assert.match(piperEngine, /_ensureAudioElement/);
+  assert.match(piperEngine, /createElement\\?\\.\\("audio"\\)/);
   assert.match(piperEngine, /audio\.play\(\)/);
   assert.match(piperEngine, /_playLinuxPiperPreparedOffscreen/);
   assert.match(piperEngine, /EDGE_TTS_PIPER_OFFSCREEN_PLAY/);
