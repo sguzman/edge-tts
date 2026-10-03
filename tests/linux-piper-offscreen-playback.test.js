@@ -36,7 +36,7 @@ test("Piper uses tab-owned audio as primary playback and keeps offscreen as fall
   const body = piper.slice(start, end);
 
   assert.match(body, /Tab\.audible/);
-  assert.match(body, /_ensureAudioElement/);
+  assert.match(body, /createElement\\?\\.\\("audio"\\)/);
   assert.match(body, /audio\.play\(\)/);
   assert.match(body, /startOffscreenFallback/);
   assert.match(body, /_playLinuxPiperPreparedOffscreen/);
