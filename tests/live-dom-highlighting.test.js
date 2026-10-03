@@ -46,15 +46,33 @@ test("stale reader playback is cancelled and fresh DOM is rebuilt before resume"
   assert.match(reader, /relocateCursorAfterRebuild/);
 });
 
-test("boundary and early-audio highlighting both stop on stale targets", () => {
-  assert.match(
-    reader,
-    /const highlighted = this\.highlighter\.highlight\(block, segment\);[\s\S]*?boundary-highlight-target-stale/
+test("ChatGPT highlight recovery reprojects stale boundaries without stopping speech", () => {
+  assert.match(reader, /resolveLiveHighlightTarget\(segment, forceRebuild = false\)/);
+  assert.match(reader, /relocateCursorAfterRebuild\?\.\(anchor, this\.model\)/);
+  assert.match(reader, /String\(freshSegment\.text \|\| ""\) !== String\(segment\?\.text \|\| ""\)/);
+
+  const boundaryStart = reader.indexOf("    handleBoundary(segment) {");
+  const boundaryEnd = reader.indexOf("    handleBlockEnd()", boundaryStart);
+  const boundaryBody = reader.slice(boundaryStart, boundaryEnd);
+
+  assert.match(boundaryBody, /this\.resolveLiveHighlightTarget/);
+  assert.match(boundaryBody, /this\.model\?\.profile === "chatgpt"/);
+  assert.match(boundaryBody, /this\.liveModelRefreshPending = true/);
+  assert.doesNotMatch(
+    boundaryBody,
+    /this\.model\?\.profile === "chatgpt"[\s\S]*?markModelStale/
   );
-  assert.match(
-    reliable,
-    /const highlighted = this\.highlighter\?\.highlight\?\.\(block, segment\);[\s\S]*?audio-start-highlight-target-stale/
-  );
+});
+
+test("audio-start highlight failure on ChatGPT does not become a playback failure", () => {
+  const start = reliable.indexOf("    handleSpeechStart(latencyMs) {");
+  const end = reliable.indexOf("    handleBoundary(segment) {", start);
+  const body = reliable.slice(start, end);
+
+  assert.match(body, /this\.resolveLiveHighlightTarget\?\./);
+  assert.match(body, /this\.model\?\.profile === "chatgpt"/);
+  assert.match(body, /this\.liveModelRefreshPending = true/);
+  assert.match(body, /return super\.handleSpeechStart\(latencyMs\)/);
 });
 
 
@@ -134,4 +152,26 @@ test("live ChatGPT cursor refresh preserves unread position across a rerender", 
   assert.match(body, /relocateCursorAfterRebuild\?\.\(anchor, this\.model\)/);
   assert.match(body, /this\.currentBlockIndex = relocated\.blockIndex/);
   assert.match(body, /this\.currentSegmentIndex = relocated\.segmentIndex/);
+});
+
+
+test("ChatGPT mutation deferral no longer explicitly erases a still-valid highlight", () => {
+  const start = reader.indexOf("    deferLiveChatGptRefresh(");
+  const end = reader.indexOf("    liveCursorAnchor()", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /this\.liveModelRefreshPending = true/);
+  assert.doesNotMatch(body, /highlighter\?\.clear/);
+});
+
+test("projected ChatGPT boundary adopts fresh live segment coordinates", () => {
+  const start = reader.indexOf("    resolveLiveHighlightTarget(");
+  const end = reader.indexOf("    markModelStale(", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /const directSegment = directBlock\?\.segments\?\.\[segmentIndex\]/);
+  assert.match(body, /segmentIsLive\?\.\(directSegment\)/);
+  assert.match(body, /this\.rebuildModel\(\)/);
+  assert.match(body, /const freshSegment = block\?\.segments\?\.\[relocated\.segmentIndex\]/);
+  assert.match(body, /return \{ block, segment: freshSegment \}/);
 });
