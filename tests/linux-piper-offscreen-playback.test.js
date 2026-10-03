@@ -206,3 +206,34 @@ test("new global offscreen playback forgets superseded stale session ids", () =>
     /forgetSupersededOffscreenSessions\(playbackId\)/
   );
 });
+
+
+test("long-paused Piper resumes from a media checkpoint when the offscreen document expires", () => {
+  const resumeStart = piper.indexOf("    resumeInPlace() {");
+  const speakStart = piper.indexOf("    speak(block, startSegmentIndex, options = {}) {", resumeStart);
+  const body = piper.slice(resumeStart, speakStart);
+
+  assert.match(body, /Resume session expired — restoring audio checkpoint/);
+  assert.match(body, /startTimeSeconds: checkpoint/);
+  assert.match(body, /alreadyStarted/);
+  assert.match(body, /failOnReject: false/);
+  assert.match(body, /resume transport recovery/);
+});
+
+test("offscreen Piper preserves and restores paused media time", () => {
+  assert.match(offscreen, /let pausedCurrentTime = null/);
+  assert.match(offscreen, /pausedCurrentTime = Math\.max/);
+  assert.match(offscreen, /currentTime: pausedCurrentTime/);
+  assert.match(offscreen, /restorePlaybackCheckpoint/);
+  assert.match(offscreen, /audio\.currentTime = target/);
+  assert.match(offscreen, /boundaryIndexAfterTime/);
+});
+
+test("background relays the Piper checkpoint into replacement offscreen playback", () => {
+  const routeAt = background.indexOf('message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PLAY"');
+  const nextRoute = background.indexOf('message?.type === "EDGE_TTS_PIPER_OFFSCREEN_PAUSE"', routeAt);
+  const body = background.slice(routeAt, nextRoute);
+
+  assert.match(body, /startTimeSeconds:/);
+  assert.match(body, /message\.startTimeSeconds/);
+});
