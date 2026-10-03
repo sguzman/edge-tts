@@ -257,7 +257,6 @@
       // audio finish and refresh the model only when speech next needs a live
       // DOM target.
       this.liveModelRefreshPending = true;
-      this.highlighter?.clear?.();
       console.debug(
         "Edge Natural TTS deferred live ChatGPT model refresh (" +
           String(reason) +
@@ -308,6 +307,85 @@
       this.modelStale = false;
       this.staleCursorAnchor = null;
       return true;
+    }
+
+    liveHighlightAnchor(segment) {
+      const blockIndex = Number(segment?.blockIndex);
+      const segmentIndex = Number(segment?.segmentIndex);
+      const block = this.model?.blocks?.[blockIndex];
+      if (
+        !block?.segments?.length ||
+        !Number.isInteger(segmentIndex) ||
+        segmentIndex < 0 ||
+        segmentIndex >= block.segments.length
+      ) {
+        return null;
+      }
+
+      return {
+        blockIndex: block.index,
+        segmentIndex,
+        authorRole: String(block.authorRole || ""),
+        segments: block.segments.map((candidate) => ({
+          text: String(candidate.text || "")
+        }))
+      };
+    }
+
+    resolveLiveHighlightTarget(segment, forceRebuild = false) {
+      const blockIndex = Number(segment?.blockIndex);
+      const segmentIndex = Number(segment?.segmentIndex);
+      if (!Number.isInteger(blockIndex) || !Number.isInteger(segmentIndex)) {
+        return null;
+      }
+
+      const directBlock = this.model?.blocks?.[blockIndex];
+      const directSegment = directBlock?.segments?.[segmentIndex];
+
+      // Boundary events can outlive the Text nodes they were created from.
+      // Once the model has been rebuilt, the same logical word usually exists
+      // at the same block/segment coordinate even though the old event still
+      // points at a detached Text node.
+      if (
+        !forceRebuild &&
+        directBlock &&
+        directSegment &&
+        String(directSegment.text || "") === String(segment?.text || "") &&
+        segmentIsLive?.(directSegment)
+      ) {
+        return { block: directBlock, segment: directSegment };
+      }
+
+      if (this.model?.profile !== "chatgpt") {
+        return null;
+      }
+
+      const anchor = this.liveHighlightAnchor(segment);
+      if (!anchor) {
+        return null;
+      }
+
+      this.rebuildModel();
+      const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
+      if (!relocated) {
+        return null;
+      }
+
+      const block = this.model?.blocks?.[relocated.blockIndex];
+      const freshSegment = block?.segments?.[relocated.segmentIndex];
+      if (
+        !block ||
+        !freshSegment ||
+        String(freshSegment.text || "") !== String(segment?.text || "") ||
+        !segmentIsLive?.(freshSegment)
+      ) {
+        return null;
+      }
+
+      this.liveModelRefreshPending = false;
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
+      return { block, segment: freshSegment };
     }
 
     markModelStale(reason = "page-text-mutated", forcePause = false) {
@@ -1202,14 +1280,47 @@
       if (this.stopped || this.paused || !this.audioOwner) return;
       this.boundarySerial += 1;
       this.clearResumeWatchdog();
-      this.currentBlockIndex = segment.blockIndex;
-      this.currentSegmentIndex = segment.segmentIndex;
-      const block = this.model?.blocks[segment.blockIndex];
-      const highlighted = this.highlighter.highlight(block, segment);
+
+      let target = this.resolveLiveHighlightTarget(
+        segment,
+        this.liveModelRefreshPending === true
+      );
+
+      // A pending refresh may have been raised by an unrelated mutation in the
+      // active ChatGPT batch while this exact boundary target remained valid.
+      // Avoid throwing away a perfectly usable live coordinate.
+      if (!target && segmentIsLive?.(segment)) {
+        const block = this.model?.blocks?.[segment.blockIndex];
+        if (block) {
+          target = { block, segment };
+        }
+      }
+
+      const cursorSegment = target?.segment || segment;
+      this.currentBlockIndex = cursorSegment.blockIndex;
+      this.currentSegmentIndex = cursorSegment.segmentIndex;
+
+      const highlighted =
+        target &&
+        this.highlighter.highlight(target.block, target.segment);
+
       if (highlighted !== true) {
+        if (this.model?.profile === "chatgpt") {
+          // Highlighting is a visualization concern. A transient ChatGPT DOM
+          // replacement must never pause or cancel healthy speech. Keep the
+          // cursor moving and let the next boundary retry projection.
+          this.liveModelRefreshPending = true;
+          if (!this.paused && !this.stopped) {
+            this.toolbar.setStatus("Reading");
+          }
+          return;
+        }
+
         this.markModelStale("boundary-highlight-target-stale");
         return;
       }
+
+      this.liveModelRefreshPending = false;
       if (!this.paused && !this.stopped) {
         this.toolbar.setStatus("Reading");
       }
