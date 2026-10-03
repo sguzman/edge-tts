@@ -261,8 +261,21 @@
       const block = this.model?.blocks?.[this.currentBlockIndex];
       const segment = block?.segments?.[this.currentSegmentIndex];
       if (block && segment) {
-        const highlighted = this.highlighter?.highlight?.(block, segment);
-        if (highlighted !== true) {
+        const target =
+          this.resolveLiveHighlightTarget?.(
+            segment,
+            this.liveModelRefreshPending === true
+          ) || { block, segment };
+        const highlighted =
+          target?.block &&
+          target?.segment &&
+          this.highlighter?.highlight?.(target.block, target.segment);
+
+        if (highlighted !== true && this.model?.profile === "chatgpt") {
+          // Audio start can race ChatGPT replacing the just-modeled Text node.
+          // Do not convert a missing visual target into a playback failure.
+          this.liveModelRefreshPending = true;
+        } else if (highlighted !== true) {
           this.markModelStale?.("audio-start-highlight-target-stale");
           return;
         }
