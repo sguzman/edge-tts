@@ -82,6 +82,13 @@
       app = null;
 
       try {
+        if (currentApp) {
+          currentApp.enabled = false;
+          currentApp.syncPageClickListener?.();
+          currentApp.disconnectModelMutationObserver?.();
+        }
+      } catch (_error) {}
+      try {
         currentApp?.stop?.();
       } catch (_error) {}
       try {
