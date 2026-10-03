@@ -1,5 +1,5 @@
 (function bootstrapEdgeTts(root) {
-  const SESSION_REVISION = 15;
+  const SESSION_REVISION = 16;
   const extension = root.EdgeTtsExtension;
   if (!extension?.Reader?.ReaderApp) {
     console.error("Edge Natural TTS reader modules did not initialize.");
@@ -38,12 +38,26 @@
     root.__EDGE_TTS_READER__ = null;
   }
 
-  let app = new extension.Reader.ReaderApp();
+  const sessionToken =
+    `${SESSION_REVISION}:${Date.now()}:${Math.random().toString(16).slice(2)}`;
+  document.documentElement?.setAttribute?.(
+    "data-edge-tts-session-token",
+    sessionToken
+  );
+
+  const createReaderApp = () => {
+    const nextApp = new extension.Reader.ReaderApp();
+    nextApp.readerSessionToken = sessionToken;
+    return nextApp;
+  };
+
+  let app = createReaderApp();
   let disposed = false;
   let onMessage = null;
 
   const session = {
     revision: SESSION_REVISION,
+    token: sessionToken,
     get app() {
       return app;
     },
@@ -101,7 +115,7 @@
 
     if (message?.type === "EDGE_TTS_TOGGLE_V2") {
       if (!app) {
-        app = new extension.Reader.ReaderApp();
+        app = createReaderApp();
       }
       void app.toggle();
       sendResponse({ accepted: true, revision: SESSION_REVISION });
