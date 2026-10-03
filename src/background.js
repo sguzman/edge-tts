@@ -26,7 +26,7 @@ const injectionPromises = new Map();
 const AUDIO_OWNER_STORAGE_KEY = "edgeTtsAudioOwnerTabId";
 const PIPER_TRACE_STORAGE_KEY = "edgeTtsLastPiperRequestV1";
 const PIPER_OFFSCREEN_URL = "src/offscreen/piper-audio.html";
-const READER_SESSION_REVISION = 15;
+const READER_SESSION_REVISION = 16;
 let audioOwnerTabId = null;
 let audioOwnerLoaded = false;
 let audioMutationChain = Promise.resolve();
@@ -1238,71 +1238,34 @@ async function injectReader(tabId) {
     files: READER_CSS
   });
 
-  // executeScript resolves only after every listed file has executed. Because
-  // content-script.js is last and registers the wake-up listener synchronously,
-  // another post-injection PING round-trip is redundant startup latency.
+  // Programmatic injection runs from the current extension generation. The
+  // first reader file retires any same-world stale generation before the new
+  // module stack is attached, so an extension reload never requires reloading
+  // the webpage itself.
   await chrome.scripting.executeScript({
     target: { tabId },
     files: READER_FILES
   });
 }
 
-function reloadTabAndWait(tabId, timeoutMs = 20_000) {
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    let timer = null;
-
-    const cleanup = () => {
-      if (timer !== null) {
-        clearTimeout(timer);
-        timer = null;
-      }
-      try {
-        chrome.tabs.onUpdated.removeListener(onUpdated);
-      } catch (_error) {}
-    };
-
-    const finish = (callback, value) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      callback(value);
-    };
-
-    const onUpdated = (updatedTabId, changeInfo) => {
-      if (updatedTabId === tabId && changeInfo?.status === "complete") {
-        finish(resolve, true);
-      }
-    };
-
-    chrome.tabs.onUpdated.addListener(onUpdated);
-    timer = setTimeout(() => {
-      finish(
-        reject,
-        new Error("Timed out waiting for the page to reload after extension context invalidation.")
-      );
-    }, timeoutMs);
-
-    try {
-      const pendingReload = chrome.tabs.reload(tabId);
-      pendingReload?.catch?.((error) => finish(reject, error));
-    } catch (error) {
-      finish(reject, error);
-    }
-  });
-}
-
 async function recoverReaderAfterDeadContext(tabId) {
-  // Chromium permanently invalidates an already-injected isolated world when
-  // an unpacked extension is reloaded. Re-executing our files in that same
-  // document can appear to succeed while chrome.runtime remains dead. A real
-  // page reload is the only reliable way to obtain a fresh extension world.
-  await reloadTabAndWait(tabId);
+  // An extension reload can orphan the previous content script, but the page
+  // document is still perfectly usable. Reinject the current generation into
+  // the existing tab and verify its runtime bridge instead of reloading the
+  // user's page.
+  injectionPromises.delete(tabId);
   await injectReader(tabId);
 
+  if (await readerReady(tabId)) {
+    return;
+  }
+
+  // One clean retry handles partial module execution without ever navigating
+  // or reloading the page.
+  await injectReader(tabId);
   if (!(await readerReady(tabId))) {
     throw new Error(
-      "Edge Natural TTS could not establish a live extension context after reloading the page."
+      "Edge Natural TTS could not establish a live extension context after reinjection."
     );
   }
 }
@@ -1342,7 +1305,7 @@ async function toggleReader(tabId) {
     // extension reload. Recover only on this exceptional path so normal
     // startup never pays an extra readiness round trip.
     console.warn(
-      "Edge Natural TTS toggle could not reach the injected reader; reloading the tab once to recover.",
+      "Edge Natural TTS toggle could not reach the injected reader; reinjecting into the existing tab.",
       error
     );
   }
