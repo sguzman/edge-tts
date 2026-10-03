@@ -21,7 +21,12 @@
       normalization: {},
       technical: {},
       abbreviations: { case: {}, nocase: {}, regex: [] },
-      acronyms: { enabled: false, tokens: [], letterSounds: {} },
+      acronyms: {
+        enabled: false,
+        tokens: [],
+        autoUppercaseMinLength: 3,
+        letterSounds: {}
+      },
       pronunciation: {
         yearMode: "none",
         brandMap: {},
@@ -139,6 +144,14 @@
         setObjectAtPath(normalized, path, override);
       }
     }
+
+    const autoUppercaseMinLength = Number(
+      normalized.acronyms?.autoUppercaseMinLength
+    );
+    normalized.acronyms.autoUppercaseMinLength =
+      Number.isFinite(autoUppercaseMinLength)
+        ? Math.min(32, Math.max(0, Math.round(autoUppercaseMinLength)))
+        : 3;
 
     normalized.schemaVersion = 2;
     return normalized;
@@ -639,6 +652,20 @@
       const pattern = new RegExp(
         `\\b(${escapeRegex(token)})(\\d+(?:\\.\\d+)*)?\\b`,
         "gi"
+      );
+      out = out.replace(pattern, (match, letters, digits) =>
+        expandAcronymToken(match, letters, digits, cfg)
+      );
+    }
+
+    const autoUppercaseMinLength = Math.min(
+      32,
+      Math.max(0, Math.round(Number(cfg.autoUppercaseMinLength) || 0))
+    );
+    if (autoUppercaseMinLength > 0) {
+      const pattern = new RegExp(
+        `\\b([A-Z]{${autoUppercaseMinLength},})(\\d+(?:\\.\\d+)*)?\\b`,
+        "g"
       );
       out = out.replace(pattern, (match, letters, digits) =>
         expandAcronymToken(match, letters, digits, cfg)
