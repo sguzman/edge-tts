@@ -88,3 +88,21 @@ test("click-to-seek hard-stops stale transport before claiming a fresh audio ses
     /if \(this\.audioOwner\) \{[\s\S]*?this\.speakCurrentPosition\(\)/
   );
 });
+
+
+test("current click-to-seek generation outranks and retires ghost readers", () => {
+  assert.match(reader, /readerGenerationIsCurrent\(\)/);
+  assert.match(reader, /retireStaleReaderGeneration\(\)/);
+  assert.match(reader, /data-edge-tts-session-token/);
+
+  const syncStart = reader.indexOf("    syncPageClickListener() {");
+  const syncEnd = reader.indexOf("    stop() {", syncStart);
+  const syncBody = reader.slice(syncStart, syncEnd);
+  assert.match(syncBody, /root\.addEventListener\?\.\("click", this\.boundClick, true\)/);
+  assert.match(syncBody, /root\.removeEventListener\?\.\("click", this\.boundClick, true\)/);
+
+  const clickStart = reader.indexOf("    async handlePageClick(event) {");
+  const clickEnd = reader.indexOf("    caretFromPoint(x, y) {", clickStart);
+  const clickBody = reader.slice(clickStart, clickEnd);
+  assert.match(clickBody, /if \(this\.retireStaleReaderGeneration\(\)\)/);
+});
