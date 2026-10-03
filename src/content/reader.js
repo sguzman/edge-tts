@@ -119,6 +119,7 @@
       this.modelMutationObserver = null;
       this.modelStale = false;
       this.staleCursorAnchor = null;
+      this.liveModelRefreshPending = false;
       this.readerSessionToken = "";
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
@@ -240,9 +241,83 @@
       };
     }
 
-    markModelStale(reason = "page-text-mutated") {
+    deferLiveChatGptRefresh(reason = "page-text-mutated") {
+      if (
+        this.model?.profile !== "chatgpt" ||
+        this.stopped ||
+        this.paused ||
+        !this.audioOwner
+      ) {
+        return false;
+      }
+
+      // ChatGPT routinely rewrites/replaces the active assistant DOM while it
+      // streams and again when generation finalizes. That invalidates cached
+      // highlight nodes, not the reading session. Let the already-prepared
+      // audio finish and refresh the model only when speech next needs a live
+      // DOM target.
+      this.liveModelRefreshPending = true;
+      this.highlighter?.clear?.();
+      console.debug(
+        "Edge Natural TTS deferred live ChatGPT model refresh (" +
+          String(reason) +
+          ")."
+      );
+      return true;
+    }
+
+    liveCursorAnchor() {
+      const block = this.model?.blocks?.[this.currentBlockIndex];
+      if (!block?.segments?.length) return null;
+
+      return {
+        blockIndex: block.index,
+        segmentIndex: Math.max(
+          0,
+          Math.min(
+            Number(this.currentSegmentIndex) || 0,
+            block.segments.length - 1
+          )
+        ),
+        authorRole: String(block.authorRole || ""),
+        segments: block.segments.map((segment) => ({
+          text: String(segment.text || "")
+        }))
+      };
+    }
+
+    refreshLiveChatGptCursor() {
+      if (this.model?.profile !== "chatgpt") {
+        return false;
+      }
+
+      const anchor = this.liveCursorAnchor();
+      if (!anchor) {
+        return false;
+      }
+
+      this.rebuildModel();
+      const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
+      if (!relocated) {
+        return false;
+      }
+
+      this.currentBlockIndex = relocated.blockIndex;
+      this.currentSegmentIndex = relocated.segmentIndex;
+      this.liveModelRefreshPending = false;
+      this.modelStale = false;
+      this.staleCursorAnchor = null;
+      return true;
+    }
+
+    markModelStale(reason = "page-text-mutated", forcePause = false) {
+      if (!forcePause && this.deferLiveChatGptRefresh(reason)) {
+        return true;
+      }
+
       this.captureStaleCursorAnchor();
       this.modelStale = true;
+      this.liveModelRefreshPending = false;
       this.highlighter?.clear?.();
 
       if (this.stopped) return false;
@@ -929,6 +1004,7 @@
       const startedAt = performance.now();
       this.model = buildReadableModel(document);
       this.modelStale = false;
+      this.liveModelRefreshPending = false;
       console.debug(
         `Edge Natural TTS modeled ${this.model.blocks.length} ${this.model.profile} blocks in ${Math.round(
           performance.now() - startedAt
@@ -1063,7 +1139,17 @@
 
       const currentSegment = block.segments?.[this.currentSegmentIndex];
       if (currentSegment && !segmentIsLive?.(currentSegment)) {
-        this.markModelStale("speech-start-target-stale");
+        if (
+          this.model?.profile === "chatgpt" &&
+          this.refreshLiveChatGptCursor()
+        ) {
+          // The live page replaced our cached Text nodes between chunks. We
+          // relocated the unread cursor onto the fresh snapshot; continue
+          // naturally instead of pausing the reader.
+          return this.speakCurrentPosition();
+        }
+
+        this.markModelStale("speech-start-target-stale", true);
         return;
       }
 
