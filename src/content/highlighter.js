@@ -147,26 +147,11 @@
     highlight(block, segment) {
       this.ensureStyle();
 
+      // A boundary can race a framework DOM replacement. Do not erase the
+      // last known-good visual merely because this one boundary cannot be
+      // projected; the reader can remap/retry on the next boundary.
       if (!segmentCanHighlight(segment)) {
-        this.clear();
         return false;
-      }
-
-      const sentence = block?.sentences?.[segment.sentenceIndex];
-      if (
-        this.usingCustomHighlight &&
-        sentence?.segments?.length &&
-        !sentence.segments.every(segmentCanHighlight)
-      ) {
-        this.clear();
-        return false;
-      }
-
-      if (this.usingCustomHighlight) {
-        root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
-      } else if (this.lastRange) {
-        const selection = root.getSelection();
-        selection?.removeAllRanges();
       }
 
       let wordRange;
@@ -175,31 +160,41 @@
         wordRange.setStart(segment.node, segment.nodeStart);
         wordRange.setEnd(segment.node, segment.nodeEnd);
       } catch (_error) {
-        this.clear();
         return false;
       }
+
       this.lastRange = wordRange;
 
       if (this.usingCustomHighlight) {
-        const sentenceKey = `${segment.blockIndex}:${segment.sentenceIndex}`;
-        if (sentenceKey !== this.currentSentenceKey) {
-          root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
-          if (sentence?.segments?.length) {
-            const sentenceRanges = rangesForSegments(sentence.segments);
-            if (!sentenceRanges.length) {
-              this.clear();
-              return false;
-            }
-            const sentenceHighlight = new root.Highlight(...sentenceRanges);
-            sentenceHighlight.priority = 1;
-            root.CSS.highlights.set(SENTENCE_HIGHLIGHT_NAME, sentenceHighlight);
-          }
-          this.currentSentenceKey = sentenceKey;
-        }
-
+        // The current word is authoritative and independent from sentence
+        // shading. A stale future/past segment in the same sentence must not
+        // make the current word disappear.
         const wordHighlight = new root.Highlight(wordRange);
         wordHighlight.priority = 2;
         root.CSS.highlights.set(WORD_HIGHLIGHT_NAME, wordHighlight);
+
+        const sentence = block?.sentences?.[segment.sentenceIndex];
+        const sentenceKey = `${segment.blockIndex}:${segment.sentenceIndex}`;
+        const sentenceIsLive = Boolean(
+          sentence?.segments?.length &&
+          sentence.segments.every(segmentCanHighlight)
+        );
+
+        if (!sentenceIsLive) {
+          root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
+          this.currentSentenceKey = null;
+        } else if (sentenceKey !== this.currentSentenceKey) {
+          const sentenceRanges = rangesForSegments(sentence.segments);
+          if (sentenceRanges.length) {
+            const sentenceHighlight = new root.Highlight(...sentenceRanges);
+            sentenceHighlight.priority = 1;
+            root.CSS.highlights.set(SENTENCE_HIGHLIGHT_NAME, sentenceHighlight);
+            this.currentSentenceKey = sentenceKey;
+          } else {
+            root.CSS.highlights.delete(SENTENCE_HIGHLIGHT_NAME);
+            this.currentSentenceKey = null;
+          }
+        }
       } else {
         const selection = root.getSelection();
         selection?.removeAllRanges();
