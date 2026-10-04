@@ -156,7 +156,7 @@
     },
     acronyms: {
       enabled: true,
-      tokens: ["CSS","HTML","HTTP","HTTPS","URL","API","CPU","GPU","JSON","SQL","XML","TTS","XTTS","LLM"],
+      tokens: [],
       autoUppercaseMinLength: 3,
       letterSeparator: ", ",
       digitSeparator: " point ",
