@@ -15,7 +15,7 @@ test("Lantern Leaf pronunciation defaults survive the port", () => {
   assert.equal(config.pronunciation.customPronunciations.Cato, "Kay toe");
   assert.equal(config.abbreviations.case["Dr."], "Doctor");
   assert.equal(config.abbreviations.case["p."], "page");
-  assert.ok(config.acronyms.tokens.includes("GPU"));
+  assert.deepEqual(config.acronyms.tokens, []);
   assert.equal(config.acronyms.letterSounds.G, "jee");
   assert.equal(config.normalization.replacements["%"], " percent ");
 });
@@ -198,5 +198,17 @@ test("uppercase acronym threshold normalizes to a safe integer range", () => {
   assert.equal(
     pronunciation.normalizeConfig(config).acronyms.autoUppercaseMinLength,
     32
+  );
+});
+
+
+test("default acronym exceptions stay empty because ALL-CAPS auto-spelling covers 3+ letters", () => {
+  const config = defaults.cloneDefaultConfig();
+
+  assert.deepEqual(config.acronyms.tokens, []);
+  assert.equal(config.acronyms.autoUppercaseMinLength, 3);
+  assert.equal(
+    pronunciation.transformText("GPU ENG JSON", config).text,
+    "jee, pee, you ee, en, jee jay, ess, oh, en"
   );
 });
