@@ -16,11 +16,17 @@ const reliable = fs.readFileSync(
   "utf8"
 );
 
-test("highlighter fails closed when cached DOM segments are stale", () => {
+test("word highlighting survives stale sentence members and transient projection misses", () => {
   assert.match(highlighter, /function segmentCanHighlight/);
-  assert.match(highlighter, /!segmentCanHighlight\(segment\)/);
-  assert.match(highlighter, /this\.clear\(\);\s*return false;/);
+  assert.match(highlighter, /if \(!segmentCanHighlight\(segment\)\) \{\s*return false;\s*\}/);
+  assert.match(highlighter, /const wordHighlight = new root\.Highlight\(wordRange\)/);
   assert.match(highlighter, /sentence\.segments\.every\(segmentCanHighlight\)/);
+  assert.match(highlighter, /if \(!sentenceIsLive\)/);
+  assert.match(highlighter, /root\.CSS\.highlights\.delete\(SENTENCE_HIGHLIGHT_NAME\)/);
+  assert.doesNotMatch(
+    highlighter,
+    /!sentence\.segments\.every\(segmentCanHighlight\)[\s\S]{0,120}this\.clear\(\)/
+  );
   assert.match(highlighter, /this\.keepRangeInView\(wordRange, segment\.node\.parentElement\);\s*return true;/);
 });
 
@@ -186,4 +192,23 @@ test("DOM replacement invalidates cached sentence ranges before fresh repaint", 
   const body = reader.slice(start, end);
   assert.match(body, /this\.highlighter\?\.invalidateDomRanges\?\.\(\)/);
   assert.match(body, /return \{ block, segment: freshSegment \}/);
+});
+
+
+test("failed ChatGPT remap preserves last known-good highlight until replacement is proven", () => {
+  const refreshStart = reader.indexOf("    refreshLiveChatGptCursor() {");
+  const refreshEnd = reader.indexOf("    liveHighlightAnchor(", refreshStart);
+  const refreshBody = reader.slice(refreshStart, refreshEnd);
+  const refreshRelocate = refreshBody.indexOf("relocateCursorAfterRebuild");
+  const refreshInvalidate = refreshBody.indexOf("invalidateDomRanges");
+  assert.ok(refreshRelocate >= 0);
+  assert.ok(refreshInvalidate > refreshRelocate);
+
+  const resolveStart = reader.indexOf("    resolveLiveHighlightTarget(");
+  const resolveEnd = reader.indexOf("    markModelStale(", resolveStart);
+  const resolveBody = reader.slice(resolveStart, resolveEnd);
+  const freshValidation = resolveBody.indexOf("!segmentIsLive?.(freshSegment)");
+  const invalidate = resolveBody.indexOf("invalidateDomRanges");
+  assert.ok(freshValidation >= 0);
+  assert.ok(invalidate > freshValidation);
 });
