@@ -173,3 +173,10 @@ test("pronunciation editor exposes automatic ALL-CAPS spelling threshold", () =>
   assert.match(optionsJs, /config\.acronyms\.autoUppercaseMinLength \?\? 3/);
   assert.match(optionsJs, /next\.acronyms\.autoUppercaseMinLength/);
 });
+
+
+test("acronym token list is labeled as explicit exceptions rather than required defaults", () => {
+  assert.match(optionsHtml, /Explicit acronym exceptions, one per line/);
+  assert.match(optionsHtml, /short or nonstandard-case tokens/);
+  assert.match(optionsHtml, /Enable acronym \/ ALL-CAPS spelling/);
+});
