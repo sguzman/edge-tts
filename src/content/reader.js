@@ -296,12 +296,15 @@
       }
 
       this.rebuildModel();
-      this.highlighter?.invalidateDomRanges?.();
       const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
       if (!relocated) {
         return false;
       }
 
+      // Keep the last known-good visual until a replacement cursor is proven.
+      // Invalidating before relocation created visible blank gaps whenever one
+      // transient rebuild could not map the cursor.
+      this.highlighter?.invalidateDomRanges?.();
       this.currentBlockIndex = relocated.blockIndex;
       this.currentSegmentIndex = relocated.segmentIndex;
       this.liveModelRefreshPending = false;
@@ -367,11 +370,6 @@
       }
 
       this.rebuildModel();
-      // A rebuilt ChatGPT model can preserve the same logical
-      // block:sentence key while every Range target has changed identity.
-      // Drop only the DOM-backed highlight cache before repainting the fresh
-      // boundary below; do not touch playback state.
-      this.highlighter?.invalidateDomRanges?.();
       const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
       if (!relocated) {
         return null;
@@ -388,6 +386,11 @@
         return null;
       }
 
+      // A rebuilt ChatGPT model can preserve the same logical
+      // block:sentence key while every Range target has changed identity.
+      // Invalidate only after the fresh target is proven so a failed transient
+      // remap cannot blank an otherwise still-visible highlight.
+      this.highlighter?.invalidateDomRanges?.();
       this.liveModelRefreshPending = false;
       this.modelStale = false;
       this.staleCursorAnchor = null;
