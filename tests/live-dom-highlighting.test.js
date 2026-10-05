@@ -54,10 +54,10 @@ test("stale reader playback is cancelled and fresh DOM is rebuilt before resume"
 
 test("ChatGPT highlight recovery reprojects stale boundaries without stopping speech", () => {
   assert.match(reader, /resolveLiveHighlightTarget\(segment, forceRebuild = false\)/);
-  assert.match(reader, /relocateCursorAfterRebuild\?\.\(anchor, this\.model\)/);
+  assert.match(reader, /relocateCursorAfterRebuild\?\.\(anchor, visualModel\)/);
   assert.match(reader, /String\(freshSegment\.text \|\| ""\) !== String\(segment\?\.text \|\| ""\)/);
 
-  const boundaryStart = reader.indexOf("    handleBoundary(segment) {");
+  const boundaryStart = reader.indexOf("    handleBoundary(segment, metadata = null) {");
   const boundaryEnd = reader.indexOf("    handleBlockEnd()", boundaryStart);
   const boundaryBody = reader.slice(boundaryStart, boundaryEnd);
 
@@ -72,7 +72,7 @@ test("ChatGPT highlight recovery reprojects stale boundaries without stopping sp
 
 test("audio-start highlight failure on ChatGPT does not become a playback failure", () => {
   const start = reliable.indexOf("    handleSpeechStart(latencyMs) {");
-  const end = reliable.indexOf("    handleBoundary(segment) {", start);
+  const end = reliable.indexOf("    handleBoundary(segment, metadata = null) {", start);
   const body = reliable.slice(start, end);
 
   assert.match(body, /this\.resolveLiveHighlightTarget\?\./);
@@ -170,45 +170,75 @@ test("ChatGPT mutation deferral no longer explicitly erases a still-valid highli
   assert.doesNotMatch(body, /highlighter\?\.clear/);
 });
 
-test("projected ChatGPT boundary adopts fresh live segment coordinates", () => {
+test("projected ChatGPT boundary uses a display-only model and never replaces playback state", () => {
   const start = reader.indexOf("    resolveLiveHighlightTarget(");
   const end = reader.indexOf("    markModelStale(", start);
   const body = reader.slice(start, end);
 
   assert.match(body, /const directSegment = directBlock\?\.segments\?\.\[segmentIndex\]/);
   assert.match(body, /segmentIsLive\?\.\(directSegment\)/);
-  assert.match(body, /this\.rebuildModel\(\)/);
+  assert.match(body, /visualModel = this\.buildLiveHighlightModel\(\)/);
+  assert.match(body, /relocateCursorAfterRebuild\?\.\(anchor, visualModel\)/);
   assert.match(body, /const freshSegment = block\?\.segments\?\.\[relocated\.segmentIndex\]/);
+  assert.match(body, /this\.liveHighlightModel = visualModel/);
+  assert.doesNotMatch(body, /this\.rebuildModel\(\)/);
+  assert.doesNotMatch(body, /this\.model = visualModel/);
   assert.match(body, /return \{ block, segment: freshSegment \}/);
 });
 
 
-test("DOM replacement invalidates cached sentence ranges before fresh repaint", () => {
-  assert.match(highlighter, /invalidateDomRanges\(\)/);
+test("DOM replacement invalidates only sentence cache before fresh repaint", () => {
+  assert.match(highlighter, /invalidateSentenceCache\(\)/);
   assert.match(highlighter, /this\.currentSentenceKey = null/);
 
   const start = reader.indexOf("    resolveLiveHighlightTarget(");
   const end = reader.indexOf("    markModelStale(", start);
   const body = reader.slice(start, end);
-  assert.match(body, /this\.highlighter\?\.invalidateDomRanges\?\.\(\)/);
+  assert.match(body, /this\.highlighter\?\.invalidateSentenceCache\?\.\(\)/);
+  assert.doesNotMatch(body, /invalidateDomRanges/);
   assert.match(body, /return \{ block, segment: freshSegment \}/);
 });
 
 
-test("failed ChatGPT remap preserves last known-good highlight until replacement is proven", () => {
-  const refreshStart = reader.indexOf("    refreshLiveChatGptCursor() {");
-  const refreshEnd = reader.indexOf("    liveHighlightAnchor(", refreshStart);
-  const refreshBody = reader.slice(refreshStart, refreshEnd);
-  const refreshRelocate = refreshBody.indexOf("relocateCursorAfterRebuild");
-  const refreshInvalidate = refreshBody.indexOf("invalidateDomRanges");
-  assert.ok(refreshRelocate >= 0);
-  assert.ok(refreshInvalidate > refreshRelocate);
+test("failed ChatGPT remap preserves last known-good visual and schedules immediate repair", () => {
+  const deferStart = reader.indexOf("    deferLiveChatGptRefresh(");
+  const deferEnd = reader.indexOf("    clearLiveHighlightRepair()", deferStart);
+  const deferBody = reader.slice(deferStart, deferEnd);
+  assert.match(deferBody, /this\.liveHighlightModel = null/);
+  assert.match(deferBody, /this\.scheduleLiveHighlightRepair\(\)/);
+  assert.doesNotMatch(deferBody, /highlighter.*clear/);
 
-  const resolveStart = reader.indexOf("    resolveLiveHighlightTarget(");
-  const resolveEnd = reader.indexOf("    markModelStale(", resolveStart);
-  const resolveBody = reader.slice(resolveStart, resolveEnd);
-  const freshValidation = resolveBody.indexOf("!segmentIsLive?.(freshSegment)");
-  const invalidate = resolveBody.indexOf("invalidateDomRanges");
-  assert.ok(freshValidation >= 0);
-  assert.ok(invalidate > freshValidation);
+  const repairStart = reader.indexOf("    scheduleLiveHighlightRepair() {");
+  const repairEnd = reader.indexOf("    liveCursorAnchor()", repairStart);
+  const repairBody = reader.slice(repairStart, repairEnd);
+  assert.match(repairBody, /requestAnimationFrame/);
+  assert.match(repairBody, /resolveLiveHighlightTarget\(segment, true\)/);
+  assert.match(repairBody, /highlighter\?\.highlight/);
+});
+
+
+test("visual remapping can never rewrite or regress the playback cursor", () => {
+  const start = reader.indexOf("    handleBoundary(segment, metadata = null) {");
+  const end = reader.indexOf("    handleBlockEnd()", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /const incomingBlockIndex = Number\(segment\?\.blockIndex\)/);
+  assert.match(body, /const incomingSegmentIndex = Number\(segment\?\.segmentIndex\)/);
+  assert.match(body, /const regressive =/);
+  assert.match(body, /if \(regressive\)/);
+  assert.match(body, /this\.currentBlockIndex = incomingBlockIndex/);
+  assert.match(body, /this\.currentSegmentIndex = incomingSegmentIndex/);
+  assert.doesNotMatch(body, /currentBlockIndex = target/);
+  assert.doesNotMatch(body, /currentSegmentIndex = target/);
+});
+
+test("zero-time direct boundary does not claim Reading before media progress", () => {
+  assert.match(reader, /onBoundary: \(segment, metadata\) => this\.handleBoundary\(segment, metadata\)/);
+  const start = reader.indexOf("    handleBoundary(segment, metadata = null) {");
+  const end = reader.indexOf("    handleBlockEnd()", start);
+  const body = reader.slice(start, end);
+
+  assert.match(body, /metadata\?\.directAudio !== true/);
+  assert.match(body, /directOffset > 0\.03/);
+  assert.match(body, /progressConfirmed \? "Reading" : "Playback started…"/);
 });
