@@ -213,11 +213,13 @@
         return;
       }
 
-      // Direct Natural synthesis has its own websocket timeout. Do not start
-      // the reader-level 'no playback progress' timer until the MP3 is actually
-      // playing; otherwise a healthy but slow synthesis/download can be killed
-      // by a watchdog designed for Web Speech's dead-utterance failure mode.
-      if (this.speech?.directSessionMode && !this.speech?.isSpeaking?.()) {
+      // Direct audio (Natural MP3 / Piper WAV) owns an actual media clock.
+      // Boundary silence is not evidence that its transport is stalled: long
+      // sentences and imperfect boundary streams can legitimately go seconds
+      // without a word callback. Reader-level recovery used to cancel healthy
+      // Piper audio and restart from a nearby token, producing repeated lines.
+      // Direct backends must diagnose stalls from their media clock instead.
+      if (this.speech?.directSessionMode) {
         return;
       }
 
