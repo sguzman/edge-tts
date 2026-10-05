@@ -230,3 +230,19 @@ test("real boundary progress rearms the failsafe instead of forcing recovery", a
 
   assert.equal(app.cancelCalls, 0);
 });
+
+
+test("direct audio never uses boundary silence to restart the reader cursor", async () => {
+  const app = new FailSafeReaderApp();
+  app.speech.directSessionMode = true;
+  app.playbackLivenessTimeoutMs = 100;
+  app.armPlaybackLivenessWatchdog();
+
+  await new Promise((resolve) => setTimeout(resolve, 160));
+
+  assert.equal(app.playbackLivenessTimer, null);
+  assert.equal(app.cancelCalls, 0);
+  assert.equal(app.currentBlockIndex, 0);
+  assert.equal(app.currentSegmentIndex, 0);
+  assert.equal(app.speakCalls, 0);
+});
