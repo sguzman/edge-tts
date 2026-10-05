@@ -242,3 +242,32 @@ test("zero-time direct boundary does not claim Reading before media progress", (
   assert.match(body, /directOffset > 0\.03/);
   assert.match(body, /progressConfirmed \? "Reading" : "Playback started…"/);
 });
+
+
+test("ChatGPT visual remapping uses local context before strict full-prefix relocation", () => {
+  const start = reader.indexOf("    resolveLiveHighlightTarget(");
+  const end = reader.indexOf("    markModelStale(", start);
+  const body = reader.slice(start, end);
+
+  assert.match(reader, /relocateSegmentByLocalContext/);
+  assert.match(body, /relocateSegmentByLocalContext\?\.\(anchor, visualModel\)/);
+  assert.match(body, /relocateCursorAfterRebuild\?\.\(anchor, visualModel\)/);
+
+  const localAt = body.indexOf("relocateSegmentByLocalContext");
+  const strictAt = body.indexOf("relocateCursorAfterRebuild");
+  assert.ok(localAt >= 0);
+  assert.ok(strictAt > localAt);
+});
+
+test("visual remapping no longer requires the entire paragraph prefix to remain identical", () => {
+  const textModel = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "text-model.js"),
+    "utf8"
+  );
+
+  assert.match(textModel, /function relocateSegmentByLocalContext/);
+  assert.match(textModel, /const radius = 4/);
+  assert.match(textModel, /contextMatches/);
+  assert.match(textModel, /segmentDistance/);
+  assert.match(textModel, /blockDistance/);
+});
