@@ -125,6 +125,13 @@
       this.autoScroll = Boolean(enabled);
     }
 
+    invalidateSentenceCache() {
+      // The logical sentence key can survive a framework rerender even when
+      // its DOM Range objects no longer do. Forget only the cache key; keep the
+      // last known-good ranges visible until a fresh boundary paints over them.
+      this.currentSentenceKey = null;
+    }
+
     invalidateDomRanges() {
       if (this.usingCustomHighlight) {
         root.CSS.highlights.delete(WORD_HIGHLIGHT_NAME);
