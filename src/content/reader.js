@@ -5,6 +5,7 @@
     findSegmentInNode,
     firstBlockNearViewport,
     relocateCursorAfterRebuild,
+    relocateSegmentByLocalContext,
     segmentIsLive
   } = extension.TextModel;
   const {
@@ -437,7 +438,15 @@
       // the current Piper batch, boundary objects and batch-end cursor all
       // belong to that immutable playback snapshot.
       visualModel = this.buildLiveHighlightModel();
-      const relocated = relocateCursorAfterRebuild?.(anchor, visualModel);
+
+      // Display projection must tolerate a framework rewrite earlier in the
+      // paragraph. Full-prefix matching is appropriate for relocating the
+      // playback cursor, but it is too strict for a visual-only highlight:
+      // one edited token near the start used to make every later word in that
+      // paragraph unhighlightable until the next block.
+      const relocated =
+        relocateSegmentByLocalContext?.(anchor, visualModel) ||
+        relocateCursorAfterRebuild?.(anchor, visualModel);
       if (!relocated) {
         return null;
       }
