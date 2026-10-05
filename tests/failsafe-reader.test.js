@@ -232,6 +232,47 @@ test("real boundary progress rearms the failsafe instead of forcing recovery", a
 });
 
 
+test("direct Piper batch handoff retries the same cursor instead of silently dying", async () => {
+  const app = new FailSafeReaderApp();
+  app.selectedVoice = { __edgeTtsSource: "linux-piper" };
+  app.speech.directSessionMode = true;
+  app.speech.directActive = false;
+  app.speech.linuxPiperPausedInPlace = false;
+  app.speech.linuxPiperSentencePauseTimer = null;
+  app.speech.linuxPiperRequests = new Map();
+  app.directContinuationTimeoutMs = 100;
+  app.failsafeRestartDelayMs = 10;
+
+  app.speakCurrentPosition();
+  await new Promise((resolve) => setTimeout(resolve, 130));
+
+  assert.equal(app.cancelCalls, 1);
+  assert.equal(app.currentBlockIndex, 0);
+  assert.equal(app.currentSegmentIndex, 0);
+  assert.equal(app.speakCalls, 2);
+  assert.equal(app.status, "Recovering Piper batch handoff…");
+
+  app.stop();
+});
+
+test("direct continuation watchdog defers to an active Piper synthesis request", async () => {
+  const app = new FailSafeReaderApp();
+  app.selectedVoice = { __edgeTtsSource: "linux-piper" };
+  app.speech.directSessionMode = true;
+  app.speech.directActive = false;
+  app.speech.linuxPiperPausedInPlace = false;
+  app.speech.linuxPiperSentencePauseTimer = null;
+  app.speech.linuxPiperRequests = new Map([["request-1", {}]]);
+  app.directContinuationTimeoutMs = 100;
+
+  app.speakCurrentPosition();
+  await new Promise((resolve) => setTimeout(resolve, 130));
+
+  assert.equal(app.cancelCalls, 0);
+  assert.equal(app.speakCalls, 1);
+  app.stop();
+});
+
 test("direct audio never uses boundary silence to restart the reader cursor", async () => {
   const app = new FailSafeReaderApp();
   app.speech.directSessionMode = true;
