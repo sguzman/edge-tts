@@ -125,7 +125,7 @@
       this.readerSessionToken = "";
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
-        onBoundary: (segment) => this.handleBoundary(segment),
+        onBoundary: (segment, metadata) => this.handleBoundary(segment, metadata),
         onEnd: () => this.handleBlockEnd(),
         onError: (error) => this.handleError(error),
         onStart: (_segment, latencyMs) => this.handleSpeechStart(latencyMs),
@@ -1351,7 +1351,7 @@
       console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
     }
 
-    handleBoundary(segment) {
+    handleBoundary(segment, metadata = null) {
       if (this.stopped || this.paused || !this.audioOwner) return;
 
       const incomingBlockIndex = Number(segment?.blockIndex);
@@ -1408,7 +1408,13 @@
           this.liveModelRefreshPending = true;
           this.scheduleLiveHighlightRepair();
           if (!this.paused && !this.stopped) {
-            this.toolbar.setStatus("Reading");
+            const directOffset = Number(metadata?.audioOffset);
+            const progressConfirmed =
+              metadata?.directAudio !== true ||
+              (Number.isFinite(directOffset) && directOffset > 0.03);
+            this.toolbar.setStatus(
+              progressConfirmed ? "Reading" : "Playback started…"
+            );
           }
           return;
         }
@@ -1419,7 +1425,13 @@
 
       this.liveModelRefreshPending = false;
       if (!this.paused && !this.stopped) {
-        this.toolbar.setStatus("Reading");
+        const directOffset = Number(metadata?.audioOffset);
+        const progressConfirmed =
+          metadata?.directAudio !== true ||
+          (Number.isFinite(directOffset) && directOffset > 0.03);
+        this.toolbar.setStatus(
+          progressConfirmed ? "Reading" : "Playback started…"
+        );
       }
     }
 
