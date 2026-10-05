@@ -1374,7 +1374,6 @@
             duration: boundary.durationSeconds,
             spokenText: boundary.text
           });
-          this.onStatus?.("Reading");
         }
         return true;
       }
