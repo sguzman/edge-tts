@@ -26,6 +26,7 @@ class BaseReaderApp {
     this.finished = false;
     this.status = "";
     this.highlighted = null;
+    this.lastBoundaryMetadata = null;
     this.toolbar = { setStatus: (status) => (this.status = status) };
     this.highlighter = {
       highlight: (_block, segment) => {
@@ -41,8 +42,9 @@ class BaseReaderApp {
 
   handleSpeechStart() {}
 
-  handleBoundary() {
+  handleBoundary(_segment, metadata = null) {
     this.boundarySerial += 1;
+    this.lastBoundaryMetadata = metadata;
   }
 
   stop() {
@@ -130,4 +132,19 @@ test("final batch finishes the document instead of scheduling another batch", ()
 
   assert.equal(app.finished, true);
   assert.equal(app.baseSpeakCalls, 0);
+});
+
+
+test("reliability wrapper preserves direct-audio boundary timing metadata", () => {
+  const app = new ReliableReaderApp();
+  const segment = app.model.blocks[1].segments[1];
+  const metadata = {
+    directAudio: true,
+    audioOffset: 0.75,
+    type: "linux-piper-boundary"
+  };
+
+  app.handleBoundary(segment, metadata);
+
+  assert.deepEqual(app.lastBoundaryMetadata, metadata);
 });
