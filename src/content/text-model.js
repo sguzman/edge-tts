@@ -562,6 +562,136 @@
     };
   }
 
+  function relocateSegmentByLocalContext(anchor, freshModel) {
+    if (
+      !anchor ||
+      !Array.isArray(anchor.segments) ||
+      !Array.isArray(freshModel?.blocks)
+    ) {
+      return null;
+    }
+
+    const sourceIndex = Number(anchor.segmentIndex);
+    if (
+      !Number.isInteger(sourceIndex) ||
+      sourceIndex < 0 ||
+      sourceIndex >= anchor.segments.length
+    ) {
+      return null;
+    }
+
+    const sourceToken = String(anchor.segments[sourceIndex]?.text || "");
+    if (!sourceToken) return null;
+
+    const sourceRole = String(anchor.authorRole || "");
+    const sourceBlockIndex = Number(anchor.blockIndex);
+    const candidates = [];
+    const radius = 4;
+
+    for (const block of freshModel.blocks) {
+      if (String(block?.authorRole || "") !== sourceRole) continue;
+      const segments = Array.isArray(block?.segments) ? block.segments : [];
+      if (!segments.length) continue;
+
+      for (let index = 0; index < segments.length; index += 1) {
+        if (String(segments[index]?.text || "") !== sourceToken) continue;
+
+        let matched = 1;
+        let compared = 1;
+        let leftMatched = 0;
+        let rightMatched = 0;
+
+        for (let delta = 1; delta <= radius; delta += 1) {
+          const sourceLeft = sourceIndex - delta;
+          const freshLeft = index - delta;
+          if (sourceLeft >= 0 && freshLeft >= 0) {
+            compared += 1;
+            if (
+              String(anchor.segments[sourceLeft]?.text || "") ===
+              String(segments[freshLeft]?.text || "")
+            ) {
+              matched += 1;
+              leftMatched += 1;
+            }
+          }
+
+          const sourceRight = sourceIndex + delta;
+          const freshRight = index + delta;
+          if (
+            sourceRight < anchor.segments.length &&
+            freshRight < segments.length
+          ) {
+            compared += 1;
+            if (
+              String(anchor.segments[sourceRight]?.text || "") ===
+              String(segments[freshRight]?.text || "")
+            ) {
+              matched += 1;
+              rightMatched += 1;
+            }
+          }
+        }
+
+        const contextMatches = leftMatched + rightMatched;
+        const blockDistance = Number.isFinite(sourceBlockIndex)
+          ? Math.abs(Number(block.index) - sourceBlockIndex)
+          : 0;
+        const segmentDistance = Math.abs(index - sourceIndex);
+
+        candidates.push({
+          blockIndex: block.index,
+          segmentIndex: index,
+          matched,
+          compared,
+          contextMatches,
+          blockDistance,
+          segmentDistance
+        });
+      }
+    }
+
+    if (!candidates.length) return null;
+
+    candidates.sort((left, right) =>
+      right.contextMatches - left.contextMatches ||
+      right.matched - left.matched ||
+      left.blockDistance - right.blockDistance ||
+      left.segmentDistance - right.segmentDistance
+    );
+
+    const best = candidates[0];
+    const tied = candidates[1];
+
+    // A unique same-coordinate token is safe even when nearby text was
+    // rewritten. Otherwise require at least one neighboring token to agree so
+    // common words like "the" do not jump to an unrelated occurrence.
+    const sameCoordinate =
+      best.blockDistance === 0 &&
+      best.segmentDistance === 0;
+
+    if (
+      !sameCoordinate &&
+      best.contextMatches === 0
+    ) {
+      return null;
+    }
+
+    if (
+      tied &&
+      tied.contextMatches === best.contextMatches &&
+      tied.matched === best.matched &&
+      tied.blockDistance === best.blockDistance &&
+      tied.segmentDistance === best.segmentDistance
+    ) {
+      return null;
+    }
+
+    return {
+      blockIndex: best.blockIndex,
+      segmentIndex: best.segmentIndex
+    };
+  }
+
   function findSegmentInNode(block, node, offset) {
     const matching = block.segments.filter((segment) => segment.node === node);
     if (matching.length === 0) {
@@ -652,6 +782,7 @@
     findSegmentInNode,
     matchingSegmentPrefixLength,
     relocateCursorAfterRebuild,
+    relocateSegmentByLocalContext,
     segmentIsLive,
     firstBlockNearViewport,
     segmentIndexForCharIndex,
