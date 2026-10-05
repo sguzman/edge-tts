@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 const {
   isVisuallyHiddenElement,
   relocateCursorAfterRebuild,
+  relocateSegmentByLocalContext,
   segmentIndexForCharIndex,
   segmentIsLive,
   sentenceRanges,
@@ -230,4 +231,122 @@ test("ARIA status and alert announcements are excluded from readable prose", () 
   assert.match(source, /\[role='alert'\]/);
   assert.match(source, /A11Y_ONLY_SELECTOR/);
   assert.match(source, /\.sr-only/);
+});
+
+
+test("display relocation survives an earlier token rewrite inside the same paragraph", () => {
+  const anchor = {
+    blockIndex: 3,
+    segmentIndex: 6,
+    authorRole: "assistant",
+    segments: [
+      { text: "This" },
+      { text: "is" },
+      { text: "the" },
+      { text: "old" },
+      { text: "paragraph" },
+      { text: "and" },
+      { text: "highlight" },
+      { text: "must" },
+      { text: "continue" }
+    ]
+  };
+
+  const freshModel = {
+    blocks: [
+      {
+        index: 3,
+        authorRole: "assistant",
+        segments: [
+          { text: "This" },
+          { text: "is" },
+          { text: "the" },
+          { text: "final" },
+          { text: "paragraph" },
+          { text: "and" },
+          { text: "highlight" },
+          { text: "must" },
+          { text: "continue" }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(relocateCursorAfterRebuild(anchor, freshModel), null);
+  assert.deepEqual(relocateSegmentByLocalContext(anchor, freshModel), {
+    blockIndex: 3,
+    segmentIndex: 6
+  });
+});
+
+test("display relocation survives an insertion before the active word", () => {
+  const anchor = {
+    blockIndex: 8,
+    segmentIndex: 4,
+    authorRole: "assistant",
+    segments: [
+      { text: "Keep" },
+      { text: "the" },
+      { text: "current" },
+      { text: "word" },
+      { text: "highlighted" },
+      { text: "through" },
+      { text: "rerenders" }
+    ]
+  };
+
+  const freshModel = {
+    blocks: [
+      {
+        index: 8,
+        authorRole: "assistant",
+        segments: [
+          { text: "Keep" },
+          { text: "the" },
+          { text: "newly" },
+          { text: "current" },
+          { text: "word" },
+          { text: "highlighted" },
+          { text: "through" },
+          { text: "rerenders" }
+        ]
+      }
+    ]
+  };
+
+  assert.deepEqual(relocateSegmentByLocalContext(anchor, freshModel), {
+    blockIndex: 8,
+    segmentIndex: 5
+  });
+});
+
+test("display relocation refuses an ambiguous repeated token with no local context", () => {
+  const anchor = {
+    blockIndex: 0,
+    segmentIndex: 1,
+    authorRole: "assistant",
+    segments: [
+      { text: "alpha" },
+      { text: "the" },
+      { text: "omega" }
+    ]
+  };
+
+  const freshModel = {
+    blocks: [
+      {
+        index: 4,
+        authorRole: "assistant",
+        segments: [
+          { text: "one" },
+          { text: "the" },
+          { text: "two" },
+          { text: "the" },
+          { text: "three" }
+        ]
+      }
+    ]
+  };
+
+  assert.equal(relocateSegmentByLocalContext(anchor, freshModel), null);
 });
