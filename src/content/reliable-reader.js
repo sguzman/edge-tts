@@ -284,11 +284,11 @@
       return super.handleSpeechStart(latencyMs);
     }
 
-    handleBoundary(segment) {
+    handleBoundary(segment, metadata = null) {
       this.clearBatchStartWatchdog();
       this.activeBatchRequest = null;
       this.resetNoBoundaryRecovery();
-      return super.handleBoundary(segment);
+      return super.handleBoundary(segment, metadata);
     }
 
     handleBlockEnd() {
