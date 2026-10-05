@@ -120,6 +120,8 @@
       this.modelStale = false;
       this.staleCursorAnchor = null;
       this.liveModelRefreshPending = false;
+      this.liveHighlightModel = null;
+      this.liveHighlightRepairFrame = null;
       this.readerSessionToken = "";
       this.highlighter = new Highlighter();
       this.speech = new SpeechEngine({
@@ -257,12 +259,64 @@
       // audio finish and refresh the model only when speech next needs a live
       // DOM target.
       this.liveModelRefreshPending = true;
+      this.liveHighlightModel = null;
+      this.scheduleLiveHighlightRepair();
       console.debug(
         "Edge Natural TTS deferred live ChatGPT model refresh (" +
           String(reason) +
           ")."
       );
       return true;
+    }
+
+    clearLiveHighlightRepair() {
+      if (this.liveHighlightRepairFrame !== null) {
+        try {
+          root.cancelAnimationFrame?.(this.liveHighlightRepairFrame);
+        } catch (_error) {}
+        this.liveHighlightRepairFrame = null;
+      }
+    }
+
+    scheduleLiveHighlightRepair() {
+      if (
+        this.liveHighlightRepairFrame !== null ||
+        this.model?.profile !== "chatgpt" ||
+        this.stopped ||
+        this.paused ||
+        !this.audioOwner
+      ) {
+        return;
+      }
+
+      const run = () => {
+        this.liveHighlightRepairFrame = null;
+        if (
+          this.model?.profile !== "chatgpt" ||
+          this.stopped ||
+          this.paused ||
+          !this.audioOwner
+        ) {
+          return;
+        }
+
+        const block = this.model?.blocks?.[this.currentBlockIndex];
+        const segment = block?.segments?.[this.currentSegmentIndex];
+        if (!segment) return;
+
+        const target = this.resolveLiveHighlightTarget(segment, true);
+        if (
+          target?.block &&
+          target?.segment &&
+          this.highlighter?.highlight?.(target.block, target.segment) === true
+        ) {
+          this.liveModelRefreshPending = false;
+        }
+      };
+
+      this.liveHighlightRepairFrame =
+        root.requestAnimationFrame?.(run) ??
+        root.setTimeout(run, 0);
     }
 
     liveCursorAnchor() {
@@ -301,12 +355,14 @@
         return false;
       }
 
-      // Keep the last known-good visual until a replacement cursor is proven.
-      // Invalidating before relocation created visible blank gaps whenever one
-      // transient rebuild could not map the cursor.
-      this.highlighter?.invalidateDomRanges?.();
+      // This runs only when speech is about to start a fresh batch. At that
+      // safe boundary the playback model may be replaced. Do not clear the
+      // last visible highlight here; audio-start / boundary projection will
+      // paint the fresh DOM target as soon as playback advances.
       this.currentBlockIndex = relocated.blockIndex;
       this.currentSegmentIndex = relocated.segmentIndex;
+      this.liveHighlightModel = this.model;
+      this.highlighter?.invalidateSentenceCache?.();
       this.liveModelRefreshPending = false;
       this.modelStale = false;
       this.staleCursorAnchor = null;
@@ -336,6 +392,17 @@
       };
     }
 
+    buildLiveHighlightModel() {
+      const startedAt = performance.now();
+      const model = buildReadableModel(document);
+      console.debug(
+        `Edge Natural TTS built display-only ${model.blocks.length} ${model.profile} blocks in ${Math.round(
+          performance.now() - startedAt
+        )}ms`
+      );
+      return model;
+    }
+
     resolveLiveHighlightTarget(segment, forceRebuild = false) {
       const blockIndex = Number(segment?.blockIndex);
       const segmentIndex = Number(segment?.segmentIndex);
@@ -343,13 +410,10 @@
         return null;
       }
 
-      const directBlock = this.model?.blocks?.[blockIndex];
+      let visualModel = this.liveHighlightModel || this.model;
+      const directBlock = visualModel?.blocks?.[blockIndex];
       const directSegment = directBlock?.segments?.[segmentIndex];
 
-      // Boundary events can outlive the Text nodes they were created from.
-      // Once the model has been rebuilt, the same logical word usually exists
-      // at the same block/segment coordinate even though the old event still
-      // points at a detached Text node.
       if (
         !forceRebuild &&
         directBlock &&
@@ -369,13 +433,16 @@
         return null;
       }
 
-      this.rebuildModel();
-      const relocated = relocateCursorAfterRebuild?.(anchor, this.model);
+      // Highlight recovery is display-only. Never replace this.model here:
+      // the current Piper batch, boundary objects and batch-end cursor all
+      // belong to that immutable playback snapshot.
+      visualModel = this.buildLiveHighlightModel();
+      const relocated = relocateCursorAfterRebuild?.(anchor, visualModel);
       if (!relocated) {
         return null;
       }
 
-      const block = this.model?.blocks?.[relocated.blockIndex];
+      const block = visualModel?.blocks?.[relocated.blockIndex];
       const freshSegment = block?.segments?.[relocated.segmentIndex];
       if (
         !block ||
@@ -386,14 +453,9 @@
         return null;
       }
 
-      // A rebuilt ChatGPT model can preserve the same logical
-      // block:sentence key while every Range target has changed identity.
-      // Invalidate only after the fresh target is proven so a failed transient
-      // remap cannot blank an otherwise still-visible highlight.
-      this.highlighter?.invalidateDomRanges?.();
+      this.liveHighlightModel = visualModel;
+      this.highlighter?.invalidateSentenceCache?.();
       this.liveModelRefreshPending = false;
-      this.modelStale = false;
-      this.staleCursorAnchor = null;
       return { block, segment: freshSegment };
     }
 
@@ -405,6 +467,8 @@
       this.captureStaleCursorAnchor();
       this.modelStale = true;
       this.liveModelRefreshPending = false;
+      this.liveHighlightModel = null;
+      this.clearLiveHighlightRepair();
       this.highlighter?.clear?.();
 
       if (this.stopped) return false;
@@ -848,6 +912,7 @@
       this.modelStale = false;
       this.staleCursorAnchor = null;
       this.clearResumeWatchdog();
+      this.clearLiveHighlightRepair();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
       this.paused = false;
@@ -1090,6 +1155,7 @@
       this.disconnectModelMutationObserver();
       const startedAt = performance.now();
       this.model = buildReadableModel(document);
+      this.liveHighlightModel = this.model;
       this.modelStale = false;
       this.liveModelRefreshPending = false;
       console.debug(
@@ -1281,12 +1347,43 @@
       if (this.stopped || this.paused || !this.audioOwner) return;
       this.sessionSpeechStarted = true;
       this.clearResumeWatchdog();
-      this.toolbar.setStatus("Reading");
+      this.toolbar.setStatus("Playback started…");
       console.debug(`Edge Natural TTS first audio started in ${Math.round(latencyMs)}ms`);
     }
 
     handleBoundary(segment) {
       if (this.stopped || this.paused || !this.audioOwner) return;
+
+      const incomingBlockIndex = Number(segment?.blockIndex);
+      const incomingSegmentIndex = Number(segment?.segmentIndex);
+      if (
+        !Number.isInteger(incomingBlockIndex) ||
+        !Number.isInteger(incomingSegmentIndex)
+      ) {
+        return;
+      }
+
+      // Playback progress belongs exclusively to the immutable audio snapshot.
+      // A visual DOM remap may point somewhere else, but it must never rewrite
+      // the transport cursor. Also reject stale/out-of-order boundaries so no
+      // recovery path can move playback backward and reread text.
+      const currentBlockIndex = Number(this.currentBlockIndex);
+      const currentSegmentIndex = Number(this.currentSegmentIndex);
+      const regressive =
+        incomingBlockIndex < currentBlockIndex ||
+        (
+          incomingBlockIndex === currentBlockIndex &&
+          incomingSegmentIndex < currentSegmentIndex
+        );
+      if (regressive) {
+        console.debug(
+          `Edge Natural TTS ignored regressive boundary ${incomingBlockIndex}:${incomingSegmentIndex} behind ${currentBlockIndex}:${currentSegmentIndex}`
+        );
+        return;
+      }
+
+      this.currentBlockIndex = incomingBlockIndex;
+      this.currentSegmentIndex = incomingSegmentIndex;
       this.boundarySerial += 1;
       this.clearResumeWatchdog();
 
@@ -1295,9 +1392,6 @@
         this.liveModelRefreshPending === true
       );
 
-      // A pending refresh may have been raised by an unrelated mutation in the
-      // active ChatGPT batch while this exact boundary target remained valid.
-      // Avoid throwing away a perfectly usable live coordinate.
       if (!target && segmentIsLive?.(segment)) {
         const block = this.model?.blocks?.[segment.blockIndex];
         if (block) {
@@ -1305,20 +1399,14 @@
         }
       }
 
-      const cursorSegment = target?.segment || segment;
-      this.currentBlockIndex = cursorSegment.blockIndex;
-      this.currentSegmentIndex = cursorSegment.segmentIndex;
-
       const highlighted =
         target &&
         this.highlighter.highlight(target.block, target.segment);
 
       if (highlighted !== true) {
         if (this.model?.profile === "chatgpt") {
-          // Highlighting is a visualization concern. A transient ChatGPT DOM
-          // replacement must never pause or cancel healthy speech. Keep the
-          // cursor moving and let the next boundary retry projection.
           this.liveModelRefreshPending = true;
+          this.scheduleLiveHighlightRepair();
           if (!this.paused && !this.stopped) {
             this.toolbar.setStatus("Reading");
           }
@@ -1355,6 +1443,7 @@
 
     finishDocument() {
       this.clearResumeWatchdog();
+      this.clearLiveHighlightRepair();
       this.disconnectModelMutationObserver();
       this.activeBatchEndBlockIndex = -1;
       this.stopped = true;
