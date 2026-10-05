@@ -268,8 +268,8 @@
       return result;
     }
 
-    handleBoundary(segment) {
-      const result = super.handleBoundary(segment);
+    handleBoundary(segment, metadata = null) {
+      const result = super.handleBoundary(segment, metadata);
       this.armPlaybackLivenessWatchdog();
       return result;
     }
