@@ -86,7 +86,7 @@
 
       // Piper is a first-class startup backend on Linux. Unlike optional
       // Windows Natural discovery, its catalog must settle before the initial
-      // voice choice when Ryan is the saved/default voice; otherwise the first
+      // voice choice when Piper is the saved/default backend; otherwise the first
       // auto-start races discovery and can stall until Stop -> Play.
       const linuxPiperVoicesReady =
         this.speech.refreshLinuxPiperVoices?.() || Promise.resolve();
