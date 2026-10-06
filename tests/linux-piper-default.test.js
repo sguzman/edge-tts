@@ -26,7 +26,7 @@ test("passive voice refresh does not overwrite the saved preference", () => {
   const refreshBody = reader.slice(refreshStart, speakStart);
 
   assert.doesNotMatch(refreshBody, /this\.settings\.voiceName = this\.selectedVoice\.name/);
-  assert.match(refreshBody, /savedVoiceName \|\| this\.selectedVoice\?\.name/);
+  assert.match(refreshBody, /this\.selectedVoice\?\.name \|\| savedVoiceName/);
 });
 
 
