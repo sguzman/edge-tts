@@ -58,9 +58,10 @@ test("native Piper helper advertises idle before synthesisEnd for immediate pref
 });
 
 
-test("Ryan warms in parallel with native host startup", () => {
+test("default HFC voice warms in parallel with native host startup", () => {
   assert.match(host, /_voice_load_lock = threading\.Lock\(\)/);
   assert.match(host, /def start_default_voice_warmup\(\)/);
+  assert.match(host, /voice_id = "en_US-hfc_female-medium"/);
   assert.match(host, /target=warm_default_voice/);
   const mainAt = host.indexOf("def main() -> None:");
   const warmAt = host.indexOf("start_default_voice_warmup()", mainAt);
