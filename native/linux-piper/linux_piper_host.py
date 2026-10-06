@@ -198,7 +198,7 @@ def get_voice(voice_id: str) -> Any:
 
 
 def warm_default_voice() -> None:
-    voice_id = "en_US-ryan-high"
+    voice_id = "en_US-hfc_female-medium"
     try:
         voice_model_path(voice_id)
     except Exception:
@@ -516,7 +516,7 @@ def handle_message(message: dict[str, Any]) -> None:
             }
         )
         # Only after the handshake has been flushed do we begin expensive
-        # Piper/onnxruntime import and Ryan model warm-up.
+        # Piper/onnxruntime import and default model warm-up.
         start_default_voice_warmup()
     elif message_type == "voices":
         send_message({"type": "voices", "requestId": request_id, "voices": list_voices()})
