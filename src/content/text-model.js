@@ -34,17 +34,21 @@
     "[data-slate-editor='true']"
   ].join(",");
 
-  const EDITABLE_SELECTOR = [
+  const HARD_EDITABLE_CONTROL_SELECTOR = [
     "textarea",
     "input",
     "select",
-    CHATGPT_RICH_DOCUMENT_SELECTOR,
-    "[role='textbox']",
-    "[role='searchbox']",
-    "[role='combobox']",
     ".monaco-editor",
     ".CodeMirror",
     ".cm-editor"
+  ].join(",");
+
+  const EDITABLE_SELECTOR = [
+    HARD_EDITABLE_CONTROL_SELECTOR,
+    CHATGPT_RICH_DOCUMENT_SELECTOR,
+    "[role='textbox']",
+    "[role='searchbox']",
+    "[role='combobox']"
   ].join(",");
 
   const EXCLUDED_SELECTOR = [
@@ -294,6 +298,8 @@
 
     let readable = true;
     if (element.closest(EXCLUDED_SELECTOR)) {
+      readable = false;
+    } else if (element.closest(HARD_EDITABLE_CONTROL_SELECTOR)) {
       readable = false;
     } else if (
       element.closest(EDITABLE_SELECTOR) &&
