@@ -27,20 +27,24 @@
     "th"
   ].join(",");
 
+  const CHATGPT_RICH_DOCUMENT_SELECTOR = [
+    "[contenteditable]:not([contenteditable='false'])",
+    ".ProseMirror",
+    "[data-lexical-editor='true']",
+    "[data-slate-editor='true']"
+  ].join(",");
+
   const EDITABLE_SELECTOR = [
     "textarea",
     "input",
     "select",
-    "[contenteditable]:not([contenteditable='false'])",
+    CHATGPT_RICH_DOCUMENT_SELECTOR,
     "[role='textbox']",
     "[role='searchbox']",
     "[role='combobox']",
-    ".ProseMirror",
     ".monaco-editor",
     ".CodeMirror",
-    ".cm-editor",
-    "[data-lexical-editor='true']",
-    "[data-slate-editor='true']"
+    ".cm-editor"
   ].join(",");
 
   const EXCLUDED_SELECTOR = [
@@ -57,8 +61,7 @@
     "[aria-hidden='true']",
     "[role='status']",
     "[role='alert']",
-    "[data-edge-tts-ui]",
-    EDITABLE_SELECTOR
+    "[data-edge-tts-ui]"
   ].join(",");
 
   const A11Y_ONLY_SELECTOR = [
@@ -258,6 +261,28 @@
     return onePixelClip;
   }
 
+  function isChatGptAssistantRichDocumentContent(element) {
+    if (!(element instanceof Element)) {
+      return false;
+    }
+
+    const messageRoot = element.closest?.(
+      "[data-message-author-role='assistant']"
+    );
+    const documentRoot = element.closest?.(
+      CHATGPT_RICH_DOCUMENT_SELECTOR
+    );
+
+    return Boolean(
+      messageRoot &&
+      documentRoot &&
+      (
+        messageRoot === documentRoot ||
+        messageRoot.contains?.(documentRoot)
+      )
+    );
+  }
+
   function isElementReadable(element, visibilityCache) {
     if (!(element instanceof Element)) {
       return false;
@@ -269,6 +294,11 @@
 
     let readable = true;
     if (element.closest(EXCLUDED_SELECTOR)) {
+      readable = false;
+    } else if (
+      element.closest(EDITABLE_SELECTOR) &&
+      !isChatGptAssistantRichDocumentContent(element)
+    ) {
       readable = false;
     } else {
       // Avoid getBoundingClientRect() while building the model. Repeated layout
@@ -375,6 +405,27 @@
     return true;
   }
 
+  function collectChatGptEmbeddedDocumentRoots(root, visibilityCache) {
+    const possibleRoots = [];
+    if (root.matches?.(CHATGPT_RICH_DOCUMENT_SELECTOR)) {
+      possibleRoots.push(root);
+    }
+    possibleRoots.push(
+      ...Array.from(root.querySelectorAll(CHATGPT_RICH_DOCUMENT_SELECTOR))
+    );
+
+    return possibleRoots.filter((element) => {
+      if (!isElementReadable(element, visibilityCache)) {
+        return false;
+      }
+
+      const parentDocument = element.parentElement?.closest?.(
+        CHATGPT_RICH_DOCUMENT_SELECTOR
+      );
+      return !parentDocument || !root.contains?.(parentDocument);
+    });
+  }
+
   function collectChatGptCandidates(doc, visibilityCache) {
     const roots = Array.from(doc.querySelectorAll(CHATGPT_MESSAGE_SELECTOR)).filter(
       (element) =>
@@ -391,10 +442,34 @@
       const nested = Array.from(root.querySelectorAll(BLOCK_SELECTOR)).filter((element) =>
         shouldKeepCandidate(element, visibilityCache)
       );
+      const embeddedDocuments = collectChatGptEmbeddedDocumentRoots(
+        root,
+        visibilityCache
+      );
 
       if (nested.length > 0) {
         candidates.push(...nested);
-      } else if (shouldKeepCandidate(root, visibilityCache)) {
+      }
+
+      // ChatGPT writing/document blocks can be rich editable surfaces whose
+      // visible prose is rendered mostly as divs. If normal semantic block
+      // extraction found nothing inside one of those documents, treat that
+      // document root as a readable block. Controls remain excluded by the
+      // hard UI selectors and text-node readability checks.
+      for (const documentRoot of embeddedDocuments) {
+        const hasSemanticCandidate = nested.some((element) =>
+          documentRoot === element || documentRoot.contains?.(element)
+        );
+        if (!hasSemanticCandidate) {
+          candidates.push(documentRoot);
+        }
+      }
+
+      if (
+        nested.length === 0 &&
+        embeddedDocuments.length === 0 &&
+        shouldKeepCandidate(root, visibilityCache)
+      ) {
         // User messages are often plain divs rather than paragraphs.
         candidates.push(root);
       }
@@ -789,6 +864,7 @@
     sentenceRanges,
     siteProfileForHostname,
     collectXCandidates,
+    isChatGptAssistantRichDocumentContent,
     isVisuallyHiddenElement,
     tokenizeText
   };
