@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
+  isChatGptAssistantRichDocumentContent,
   isVisuallyHiddenElement,
   relocateCursorAfterRebuild,
   relocateSegmentByLocalContext,
@@ -216,6 +217,80 @@ test("screen-reader-only one-pixel content is not considered readable prose", ()
     if (PreviousGetComputedStyle === undefined) delete global.getComputedStyle;
     else global.getComputedStyle = PreviousGetComputedStyle;
   }
+});
+
+
+test("ChatGPT assistant rich documents are readable but outside editables are not", () => {
+  const PreviousElement = global.Element;
+
+  class MockElement {
+    constructor() {
+      this.messageRoot = null;
+      this.documentRoot = null;
+      this.containsTargets = new Set();
+    }
+
+    closest(selector) {
+      if (
+        selector.includes("[data-message-author-role='assistant']") &&
+        this.messageRoot
+      ) {
+        return this.messageRoot;
+      }
+      if (selector.includes("contenteditable") && this.documentRoot) {
+        return this.documentRoot;
+      }
+      return null;
+    }
+
+    contains(target) {
+      return this.containsTargets.has(target);
+    }
+  }
+
+  global.Element = MockElement;
+
+  try {
+    const message = new MockElement();
+    const documentRoot = new MockElement();
+    const paragraph = new MockElement();
+
+    message.containsTargets.add(documentRoot);
+    paragraph.messageRoot = message;
+    paragraph.documentRoot = documentRoot;
+
+    assert.equal(
+      isChatGptAssistantRichDocumentContent(paragraph),
+      true
+    );
+
+    const composerParagraph = new MockElement();
+    composerParagraph.documentRoot = documentRoot;
+    assert.equal(
+      isChatGptAssistantRichDocumentContent(composerParagraph),
+      false
+    );
+  } finally {
+    if (PreviousElement === undefined) delete global.Element;
+    else global.Element = PreviousElement;
+  }
+});
+
+test("ChatGPT writing-block extraction keeps code editors hard-excluded", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const source = fs.readFileSync(
+    path.join(__dirname, "..", "src", "content", "text-model.js"),
+    "utf8"
+  );
+
+  assert.match(source, /CHATGPT_RICH_DOCUMENT_SELECTOR/);
+  assert.match(source, /HARD_EDITABLE_CONTROL_SELECTOR/);
+  assert.match(source, /\.monaco-editor/);
+  assert.match(source, /\.CodeMirror/);
+  assert.match(source, /function collectChatGptEmbeddedDocumentRoots/);
+  assert.match(source, /documentRoot\.contains\?\.\(element\)/);
+  assert.match(source, /candidates\.push\(documentRoot\)/);
 });
 
 
