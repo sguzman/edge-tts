@@ -89,7 +89,7 @@ test("pronunciation editor shows fixed save feedback independent of scroll posit
   assert.match(optionsCss, /font-size: 1\.05rem/);
 });
 
-test("test bench previews current rules and plays real Ryan Piper audio with browser speed control", () => {
+test("test bench previews current rules and plays real HFC Piper audio with browser speed control", () => {
   const optionsJs = fs.readFileSync(
     path.join(__dirname, "..", "src", "options", "pronunciation.js"),
     "utf8"
@@ -100,7 +100,7 @@ test("test bench previews current rules and plays real Ryan Piper audio with bro
   assert.match(optionsHtml, /id="test-speed"/);
   assert.match(optionsHtml, /id="preview-spoken"/);
   assert.match(optionsJs, /EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE/);
-  assert.match(optionsJs, /voiceId: "en_US-ryan-high"/);
+  assert.match(optionsJs, /voiceId: "en_US-hfc_female-medium"/);
   assert.match(optionsJs, /new Audio\(testAudioUrl\)/);
   assert.match(optionsJs, /testAudio\.playbackRate = speed/);
   assert.match(optionsJs, /testAudio\.preservesPitch = true/);
