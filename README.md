@@ -85,7 +85,7 @@ Before that first click, the extension has no JavaScript, CSS, DOM observers, ev
 
 ChatGPT is a large, continuously mutating web application, so the reader deliberately avoids treating the whole application DOM as an article.
 
-On `chatgpt.com` and `chat.openai.com`, the text model prefers only message containers marked as user or assistant messages. Sidebar controls, the composer, navigation, and other app chrome are not part of the reading model.
+On `chatgpt.com` and `chat.openai.com`, the text model prefers only message containers marked as user or assistant messages. Sidebar controls, the composer, navigation, and other app chrome are not part of the reading model. Assistant-owned rich writing/document blocks are explicitly readable even when ChatGPT implements them as editable ProseMirror/Lexical/Slate surfaces; their buttons, status text, and code-editor controls remain excluded.
 
 The extension also does **no background MutationObserver scanning**. Model building happens only when the reader starts, when Start is pressed after stopping, or when **Refresh text** is pressed.
 
