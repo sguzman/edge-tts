@@ -34,7 +34,10 @@
   ].join(",");
   const isWinNaturalVoice = (voice) => voice?.__edgeTtsSource === "win-natural";
   const isLinuxPiperVoice = (voice) => voice?.__edgeTtsSource === "linux-piper";
-  const DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-ryan-high";
+  const DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-hfc_female-medium";
+  const DEFAULT_LINUX_PIPER_VOICE_NAME = "Hfc Female Medium";
+  const LEGACY_LINUX_PIPER_DEFAULT_VOICE_ID = "en_US-ryan-high";
+  const LEGACY_LINUX_PIPER_DEFAULT_VOICE_NAME = "Ryan High";
 
   function voiceSourceKey(voice) {
     if (isLinuxPiperVoice(voice)) return "linux-piper";
@@ -52,7 +55,7 @@
   const DEFAULT_SENTENCE_PAUSE_MS = 300;
 
   const DEFAULT_SETTINGS = {
-    settingsVersion: 4,
+    settingsVersion: 5,
     rate: 1,
     voiceName: "",
     voiceSource: "linux-piper",
@@ -1213,7 +1216,7 @@
         return voice.name === savedVoiceName;
       });
 
-      const defaultRyan = voices.find(
+      const defaultPiperVoice = voices.find(
         (voice) =>
           isLinuxPiperVoice(voice) &&
           voice.voiceId === DEFAULT_LINUX_PIPER_VOICE_ID
@@ -1221,18 +1224,24 @@
 
       const prefersPiper =
         savedVoiceSource === "linux-piper" ||
-        (!savedVoiceSource && savedVoiceName === "Ryan High");
+        (
+          !savedVoiceSource &&
+          (
+            savedVoiceName === DEFAULT_LINUX_PIPER_VOICE_NAME ||
+            savedVoiceName === LEGACY_LINUX_PIPER_DEFAULT_VOICE_NAME
+          )
+        );
 
       this.selectedVoice = prefersPiper
         ? (
             savedVoice ||
-            defaultRyan ||
+            defaultPiperVoice ||
             voices.find(isLinuxPiperVoice) ||
             null
           )
         : (
             savedVoice ||
-            defaultRyan ||
+            defaultPiperVoice ||
             voices.find(isLinuxPiperVoice) ||
             voices.find(isWinNaturalVoice) ||
             voices.find(isNaturalVoice) ||
@@ -1251,7 +1260,13 @@
     prefersLinuxPiper() {
       return (
         this.settings.voiceSource === "linux-piper" ||
-        (!this.settings.voiceSource && this.settings.voiceName === "Ryan High")
+        (
+          !this.settings.voiceSource &&
+          (
+            this.settings.voiceName === DEFAULT_LINUX_PIPER_VOICE_NAME ||
+            this.settings.voiceName === LEGACY_LINUX_PIPER_DEFAULT_VOICE_NAME
+          )
+        )
       );
     }
 
@@ -1775,17 +1790,48 @@
         const requiresSafetyMigration = storedSettingsVersion < 2;
         const requiresRyanDefaultMigration = storedSettingsVersion < 3;
         const requiresVoiceIdentityMigration = storedSettingsVersion < 4;
-        const migratedVoiceName = requiresRyanDefaultMigration
-          ? "Ryan High"
-          : (stored.voiceName || "Ryan High");
-        const migratedVoiceSource = requiresVoiceIdentityMigration
-          ? (migratedVoiceName === "Ryan High" ? "linux-piper" : "")
+        const requiresHfcDefaultMigration = storedSettingsVersion < 5;
+
+        const legacyVoiceName = requiresRyanDefaultMigration
+          ? LEGACY_LINUX_PIPER_DEFAULT_VOICE_NAME
+          : String(stored.voiceName || "");
+        const legacyVoiceSource = requiresVoiceIdentityMigration
+          ? (
+              legacyVoiceName === LEGACY_LINUX_PIPER_DEFAULT_VOICE_NAME
+                ? "linux-piper"
+                : ""
+            )
           : String(stored.voiceSource || "");
-        const migratedVoiceId = requiresVoiceIdentityMigration
-          ? (migratedVoiceSource === "linux-piper"
-              ? DEFAULT_LINUX_PIPER_VOICE_ID
-              : "")
+        const legacyVoiceId = requiresVoiceIdentityMigration
+          ? (
+              legacyVoiceSource === "linux-piper"
+                ? LEGACY_LINUX_PIPER_DEFAULT_VOICE_ID
+                : ""
+            )
           : String(stored.voiceId || "");
+
+        const migrateOldDefaultToHfc =
+          requiresHfcDefaultMigration &&
+          (
+            !legacyVoiceName ||
+            (
+              legacyVoiceSource === "linux-piper" &&
+              (
+                !legacyVoiceId ||
+                legacyVoiceId === LEGACY_LINUX_PIPER_DEFAULT_VOICE_ID
+              )
+            )
+          );
+
+        const migratedVoiceName = migrateOldDefaultToHfc
+          ? DEFAULT_LINUX_PIPER_VOICE_NAME
+          : (legacyVoiceName || DEFAULT_LINUX_PIPER_VOICE_NAME);
+        const migratedVoiceSource = migrateOldDefaultToHfc
+          ? "linux-piper"
+          : legacyVoiceSource;
+        const migratedVoiceId = migrateOldDefaultToHfc
+          ? DEFAULT_LINUX_PIPER_VOICE_ID
+          : legacyVoiceId;
         this.settings = {
           settingsVersion: DEFAULT_SETTINGS.settingsVersion,
           rate: Number(stored.rate) || DEFAULT_SETTINGS.rate,
@@ -1810,7 +1856,8 @@
         if (
           requiresSafetyMigration ||
           requiresRyanDefaultMigration ||
-          requiresVoiceIdentityMigration
+          requiresVoiceIdentityMigration ||
+          requiresHfcDefaultMigration
         ) {
           await chrome.storage.local.set({
             settingsVersion: DEFAULT_SETTINGS.settingsVersion,
