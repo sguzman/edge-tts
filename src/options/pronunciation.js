@@ -156,11 +156,11 @@
     revokeTestAudio();
     testAudioKey = "";
     const serial = ++testSynthesisSerial;
-    setTestStatus("Synthesizing Ryan test audio…");
+    setTestStatus("Synthesizing HFC test audio…");
 
     const response = await chrome.runtime.sendMessage({
       type: "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE",
-      voiceId: "en_US-ryan-high",
+      voiceId: "en_US-hfc_female-medium",
       text: normalizedText
     });
 
@@ -191,7 +191,7 @@
     applyTestSpeed();
 
     testAudio.addEventListener("ended", () => {
-      setTestStatus("Finished · Ryan High");
+      setTestStatus("Finished · Hfc Female Medium");
       $("#test-play").disabled = false;
       $("#test-stop").disabled = false;
     });
@@ -210,7 +210,7 @@
     applyTestSpeed();
     await audio.play();
     setTestStatus(
-      `${statusPrefix ? `${statusPrefix} · ` : ""}Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
+      `${statusPrefix ? `${statusPrefix} · ` : ""}Playing Hfc Female Medium · ${currentTestSpeed().toFixed(2)}x`
     );
     return audio;
   }
@@ -240,7 +240,7 @@
         testAudio.currentTime = 0;
       } catch (_error) {}
     }
-    setTestStatus("Stopped · Ryan High");
+    setTestStatus("Stopped · Hfc Female Medium");
     $("#test-play").disabled = false;
   }
 
@@ -880,7 +880,7 @@
     applyTestSpeed();
     if (testAudio && !testAudio.paused) {
       setTestStatus(
-        `Playing Ryan High · ${currentTestSpeed().toFixed(2)}x`
+        `Playing Hfc Female Medium · ${currentTestSpeed().toFixed(2)}x`
       );
     }
   });
