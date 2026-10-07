@@ -13,7 +13,7 @@ This directory contains the Linux-local Piper backend for Edge Natural TTS.
   `~/.local/share/edge-natural-tts/voices/` and are never deleted by the
   uninstaller.
 - The helper is persistent for the lifetime of the Edge Native Messaging port.
-  HFC Female Medium is warmed opportunistically as soon as the helper starts, and the
+  Amy Low is warmed opportunistically as soon as the helper starts, and the
   browser pipelines future sentence synthesis ahead of current playback to
   reduce startup and transition latency.
 - The helper calls `PiperVoice.load(..., use_cuda=False)` and the launcher
@@ -60,8 +60,8 @@ The host exposes every valid model/config pair in that directory. The current
 default is:
 
 ```text
-en_US-hfc_female-medium.onnx
-en_US-hfc_female-medium.onnx.json
+en_US-amy-low.onnx
+en_US-amy-low.onnx.json
 ```
 
 Additional pairs, such as `en_US-ryan-high.onnx` plus its matching
