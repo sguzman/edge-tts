@@ -156,11 +156,11 @@
     revokeTestAudio();
     testAudioKey = "";
     const serial = ++testSynthesisSerial;
-    setTestStatus("Synthesizing HFC test audio…");
+    setTestStatus("Synthesizing Amy Low test audio…");
 
     const response = await chrome.runtime.sendMessage({
       type: "EDGE_TTS_PRONUNCIATION_TEST_SYNTHESIZE",
-      voiceId: "en_US-hfc_female-medium",
+      voiceId: "en_US-amy-low",
       text: normalizedText
     });
 
@@ -191,7 +191,7 @@
     applyTestSpeed();
 
     testAudio.addEventListener("ended", () => {
-      setTestStatus("Finished · Hfc Female Medium");
+      setTestStatus("Finished · Amy Low");
       $("#test-play").disabled = false;
       $("#test-stop").disabled = false;
     });
@@ -210,7 +210,7 @@
     applyTestSpeed();
     await audio.play();
     setTestStatus(
-      `${statusPrefix ? `${statusPrefix} · ` : ""}Playing Hfc Female Medium · ${currentTestSpeed().toFixed(2)}x`
+      `${statusPrefix ? `${statusPrefix} · ` : ""}Playing Amy Low · ${currentTestSpeed().toFixed(2)}x`
     );
     return audio;
   }
@@ -240,7 +240,7 @@
         testAudio.currentTime = 0;
       } catch (_error) {}
     }
-    setTestStatus("Stopped · Hfc Female Medium");
+    setTestStatus("Stopped · Amy Low");
     $("#test-play").disabled = false;
   }
 
@@ -880,7 +880,7 @@
     applyTestSpeed();
     if (testAudio && !testAudio.paused) {
       setTestStatus(
-        `Playing Hfc Female Medium · ${currentTestSpeed().toFixed(2)}x`
+        `Playing Amy Low · ${currentTestSpeed().toFixed(2)}x`
       );
     }
   });
