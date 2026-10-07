@@ -220,12 +220,14 @@ test("screen-reader-only one-pixel content is not considered readable prose", ()
 });
 
 
-test("ChatGPT assistant rich documents are readable but outside editables are not", () => {
+test("ChatGPT assistant rich documents are readable inside messages or sibling turn-shell artifacts", () => {
   const PreviousElement = global.Element;
 
   class MockElement {
     constructor() {
       this.messageRoot = null;
+      this.turnRoot = null;
+      this.turnRole = "";
       this.documentRoot = null;
       this.containsTargets = new Set();
     }
@@ -237,6 +239,9 @@ test("ChatGPT assistant rich documents are readable but outside editables are no
       ) {
         return this.messageRoot;
       }
+      if (selector.includes("conversation-turn-") && this.turnRoot) {
+        return this.turnRoot;
+      }
       if (selector.includes("contenteditable") && this.documentRoot) {
         return this.documentRoot;
       }
@@ -245,6 +250,10 @@ test("ChatGPT assistant rich documents are readable but outside editables are no
 
     contains(target) {
       return this.containsTargets.has(target);
+    }
+
+    getAttribute(name) {
+      return name === "data-turn" ? this.turnRole : null;
     }
   }
 
@@ -262,6 +271,32 @@ test("ChatGPT assistant rich documents are readable but outside editables are no
     assert.equal(
       isChatGptAssistantRichDocumentContent(paragraph),
       true
+    );
+
+    const assistantTurn = new MockElement();
+    assistantTurn.turnRole = "assistant";
+    assistantTurn.containsTargets.add(documentRoot);
+
+    const siblingArtifactParagraph = new MockElement();
+    siblingArtifactParagraph.turnRoot = assistantTurn;
+    siblingArtifactParagraph.documentRoot = documentRoot;
+
+    assert.equal(
+      isChatGptAssistantRichDocumentContent(siblingArtifactParagraph),
+      true
+    );
+
+    const userTurn = new MockElement();
+    userTurn.turnRole = "user";
+    userTurn.containsTargets.add(documentRoot);
+
+    const userArtifactParagraph = new MockElement();
+    userArtifactParagraph.turnRoot = userTurn;
+    userArtifactParagraph.documentRoot = documentRoot;
+
+    assert.equal(
+      isChatGptAssistantRichDocumentContent(userArtifactParagraph),
+      false
     );
 
     const composerParagraph = new MockElement();
@@ -288,7 +323,9 @@ test("ChatGPT writing-block extraction keeps code editors hard-excluded", () => 
   assert.match(source, /HARD_EDITABLE_CONTROL_SELECTOR/);
   assert.match(source, /\.monaco-editor/);
   assert.match(source, /\.CodeMirror/);
+  assert.match(source, /CHATGPT_TURN_SELECTOR/);
   assert.match(source, /function collectChatGptEmbeddedDocumentRoots/);
+  assert.match(source, /turnRoots\.length > 0/);
   assert.match(source, /documentRoot\.contains\?\.\(element\)/);
   assert.match(source, /candidates\.push\(documentRoot\)/);
 });
