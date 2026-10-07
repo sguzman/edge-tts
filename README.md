@@ -40,7 +40,7 @@ The toolbar's **Voice class** filter can show all voices or any one backend clas
 
 A local voice already exposed by `speechSynthesis` keeps the existing Web Speech playback path. A local voice found only through `chrome.tts` is spoken by the extension-level Windows TTS backend; its start/word/end events are bridged back into the tab so the existing reader cursor and highlighter continue to work.
 
-Linux Piper models are not committed to this repository. The helper discovers every valid model/config pair from the managed user-data directory and exposes it as a selectable `[PIPER]` voice. HFC Female Medium (`en_US-hfc_female-medium`) is the default and is warmed opportunistically as soon as the native host starts, while sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency. If Chromium rejects the first asynchronously-created WAV because the original extension-click activation has expired, the reader now preserves the prepared audio and enters a recoverable **Ready — press Resume** state instead of reporting a false TTS crash.
+Linux Piper models are not committed to this repository. The helper discovers every valid model/config pair from the managed user-data directory and exposes it as a selectable `[PIPER]` voice. Amy Low (`en_US-amy-low`) is the default and is warmed opportunistically as soon as the native host starts, while sentence synthesis is pipelined ahead of playback to reduce cold-start and transition latency. If Chromium rejects the first asynchronously-created WAV because the original extension-click activation has expired, the reader now preserves the prepared audio and enters a recoverable **Ready — press Resume** state instead of reporting a false TTS crash.
 
 On the experimental `development/linux-piper-pronunciation` branch, Piper text also passes through a provenance-preserving spoken projection ported from Lantern Leaf. The toolbar exposes **Edit pronunciation**, which opens a full options tab for abbreviations, regex rules, acronyms, brands, custom pronunciations, technical-path rules, preview, and JSON import/export. `development/linux-piper-v1` remains the fallback branch without this experimental rule layer.
 
@@ -204,8 +204,8 @@ Every installed voice is discovered automatically when both files for the same
 voice ID are present. The current default is:
 
 ```text
-en_US-hfc_female-medium.onnx
-en_US-hfc_female-medium.onnx.json
+en_US-amy-low.onnx
+en_US-amy-low.onnx.json
 ```
 
 Other valid pairs in the same directory, including Ryan High, remain selectable
