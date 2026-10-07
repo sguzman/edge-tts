@@ -83,6 +83,6 @@ test("reader reinjection starts from a clean namespace and generation token", ()
   assert.match(namespace, /root\.EdgeTtsExtension = \{\}/);
   assert.match(content, /data-edge-tts-session-token/);
   assert.match(content, /readerSessionToken = sessionToken/);
-  assert.match(content, /const SESSION_REVISION = 16/);
-  assert.match(background, /const READER_SESSION_REVISION = 16/);
+  assert.match(content, /const SESSION_REVISION = 18/);
+  assert.match(background, /const READER_SESSION_REVISION = 18/);
 });
