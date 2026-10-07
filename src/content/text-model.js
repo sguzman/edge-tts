@@ -81,6 +81,9 @@
     "[data-message-author-role='assistant']"
   ].join(",");
 
+  const CHATGPT_TURN_SELECTOR =
+    "section[data-testid^='conversation-turn-'][data-turn]";
+
   // X/Twitter renders tweet prose in div-based application widgets rather than
   // semantic <p> blocks, so the generic block selector misses the actual post
   // text even when <main> is selected correctly.
@@ -273,16 +276,32 @@
     const messageRoot = element.closest?.(
       "[data-message-author-role='assistant']"
     );
+    const turnRoot = element.closest?.(CHATGPT_TURN_SELECTOR);
     const documentRoot = element.closest?.(
       CHATGPT_RICH_DOCUMENT_SELECTOR
     );
+    const assistantTurn =
+      turnRoot?.getAttribute?.("data-turn") === "assistant"
+        ? turnRoot
+        : null;
 
     return Boolean(
-      messageRoot &&
       documentRoot &&
       (
-        messageRoot === documentRoot ||
-        messageRoot.contains?.(documentRoot)
+        (
+          messageRoot &&
+          (
+            messageRoot === documentRoot ||
+            messageRoot.contains?.(documentRoot)
+          )
+        ) ||
+        (
+          assistantTurn &&
+          (
+            assistantTurn === documentRoot ||
+            assistantTurn.contains?.(documentRoot)
+          )
+        )
       )
     );
   }
@@ -369,13 +388,17 @@
     }
 
     const messageRoot = element.closest?.(CHATGPT_MESSAGE_SELECTOR);
+    const turnRoot = element.closest?.(CHATGPT_TURN_SELECTOR);
+    const turnRole = String(turnRoot?.getAttribute?.("data-turn") || "");
     const block = {
       index: blockIndex,
       element,
       text: output,
       segments,
       sentences: [],
-      authorRole: messageRoot?.getAttribute("data-message-author-role") || ""
+      authorRole:
+        messageRoot?.getAttribute("data-message-author-role") ||
+        (turnRole === "user" || turnRole === "assistant" ? turnRole : "")
     };
     block.sentences = annotateSentences(block, language);
     return block;
@@ -433,11 +456,27 @@
   }
 
   function collectChatGptCandidates(doc, visibilityCache) {
-    const roots = Array.from(doc.querySelectorAll(CHATGPT_MESSAGE_SELECTOR)).filter(
-      (element) =>
-        !element.parentElement?.closest(CHATGPT_MESSAGE_SELECTOR) &&
+    const turnRoots = Array.from(
+      doc.querySelectorAll(CHATGPT_TURN_SELECTOR)
+    ).filter((element) => {
+      const role = String(element.getAttribute?.("data-turn") || "");
+      return (
+        (role === "user" || role === "assistant") &&
         isElementReadable(element, visibilityCache)
-    );
+      );
+    });
+
+    // Current ChatGPT can render Writing Blocks as siblings of the normal
+    // data-message-author-role node inside the persistent conversation turn
+    // shell. Prefer the shell so those sibling artifacts are part of the same
+    // readable turn. Older layouts fall back to the message nodes directly.
+    const roots = turnRoots.length > 0
+      ? turnRoots
+      : Array.from(doc.querySelectorAll(CHATGPT_MESSAGE_SELECTOR)).filter(
+          (element) =>
+            !element.parentElement?.closest(CHATGPT_MESSAGE_SELECTOR) &&
+            isElementReadable(element, visibilityCache)
+        );
 
     if (roots.length === 0) {
       return [];
@@ -871,6 +910,7 @@
     siteProfileForHostname,
     collectXCandidates,
     isChatGptAssistantRichDocumentContent,
+    collectChatGptCandidates,
     isVisuallyHiddenElement,
     tokenizeText
   };
