@@ -12,12 +12,12 @@ const host = fs.readFileSync(
   "utf8"
 );
 
-test("HFC Female Medium is the Linux Piper default by stable voice id", () => {
-  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-hfc_female-medium"/);
-  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_NAME = "Hfc Female Medium"/);
+test("Amy Low is the Linux Piper default by stable voice id", () => {
+  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-amy-low"/);
+  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_NAME = "Amy Low"/);
   assert.match(reader, /voice\.voiceId === DEFAULT_LINUX_PIPER_VOICE_ID/);
   assert.match(reader, /defaultPiperVoice/);
-  assert.match(host, /voice_id = "en_US-hfc_female-medium"/);
+  assert.match(host, /voice_id = "en_US-amy-low"/);
 });
 
 test("passive voice refresh does not overwrite the saved preference", () => {
@@ -30,13 +30,13 @@ test("passive voice refresh does not overwrite the saved preference", () => {
 });
 
 
-test("settings v4 migrate the old Ryan default to HFC without overwriting other explicit voices", () => {
-  assert.match(reader, /settingsVersion: 5/);
-  assert.match(reader, /requiresHfcDefaultMigration = storedSettingsVersion < 5/);
-  assert.match(reader, /legacyVoiceId === LEGACY_LINUX_PIPER_DEFAULT_VOICE_ID/);
-  assert.match(reader, /migrateOldDefaultToHfc/);
-  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_NAME/);
-  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_ID/);
+test("settings v5 migrate the previous HFC default to Amy Low without overwriting other explicit voices", () => {
+  assert.match(reader, /settingsVersion: 6/);
+  assert.match(reader, /requiresAmyDefaultMigration = storedSettingsVersion < 6/);
+  assert.match(reader, /PREVIOUS_LINUX_PIPER_DEFAULT_VOICE_ID = "en_US-hfc_female-medium"/);
+  assert.match(reader, /migratePreviousDefaultToAmy/);
+  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_NAME = "Amy Low"/);
+  assert.match(reader, /DEFAULT_LINUX_PIPER_VOICE_ID = "en_US-amy-low"/);
 });
 
 test("Piper catalog is discovered from installed model/config pairs", () => {
