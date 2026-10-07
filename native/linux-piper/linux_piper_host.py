@@ -198,7 +198,7 @@ def get_voice(voice_id: str) -> Any:
 
 
 def warm_default_voice() -> None:
-    voice_id = "en_US-hfc_female-medium"
+    voice_id = "en_US-amy-low"
     try:
         voice_model_path(voice_id)
     except Exception:
