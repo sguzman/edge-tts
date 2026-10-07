@@ -13,7 +13,7 @@ const fastPath = fs.readFileSync(
 );
 
 test("reader persists voice backend identity, not name alone", () => {
-  assert.match(reader, /settingsVersion: 5/);
+  assert.match(reader, /settingsVersion: 6/);
   assert.match(reader, /voiceSource: "linux-piper"/);
   assert.match(reader, /voiceId: DEFAULT_LINUX_PIPER_VOICE_ID/);
   assert.match(reader, /function voiceSourceKey/);
