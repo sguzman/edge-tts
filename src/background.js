@@ -319,7 +319,7 @@ function forgetSupersededOffscreenSessions(nextPlaybackId) {
 
 async function synthesizePronunciationTest(text, voiceId) {
   const normalizedText = String(text || "").trim();
-  const normalizedVoiceId = String(voiceId || "en_US-hfc_female-medium").trim();
+  const normalizedVoiceId = String(voiceId || "en_US-amy-low").trim();
 
   if (!normalizedText) {
     throw new Error("Pronunciation test text is empty.");
